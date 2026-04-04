@@ -7,3 +7,9 @@ dist/
 !.env.example
 coverage/
 *.log
+vitest.config.*.js
+vitest.config.*.mjs
+vitest.config.*.d.ts
+vitest.config.*.d.mts
+vitest.config.*.js.map
+vitest.config.*.mjs.map
