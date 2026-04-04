@@ -25,8 +25,8 @@
 	},
 	"references": [
 		{ "path": "packages/app-config" },
-		{ "path": "packages/app-runtime" },
 		{ "path": "packages/app-tools" },
+		{ "path": "packages/app-runtime" },
 		{ "path": "packages/app-ui" },
 		{ "path": "packages/app-extensions" },
 		{ "path": "packages/app-evaluation" },

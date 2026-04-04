@@ -9,6 +9,7 @@
  *   - After completion, the next waiting mutation can proceed
  */
 
+import { normalize as nodeNormalize } from "node:path";
 import type { EnqueueResult, MutationTarget } from "../types/mutation.js";
 
 // ---------------------------------------------------------------------------
@@ -103,7 +104,5 @@ export function createMutationQueue(): MutationQueue {
 // ---------------------------------------------------------------------------
 
 function normalizePath(filePath: string): string {
-	// Simple normalization: collapse repeated slashes and trailing slash.
-	// A full path.normalize would require Node's path module.
-	return filePath.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
+	return nodeNormalize(filePath) || "/";
 }

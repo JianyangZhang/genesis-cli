@@ -114,11 +114,12 @@ describe("PermissionEngine", () => {
 			expect(decision.riskLevel).toBe("L4");
 		});
 
-		it("allows L4 tools when session-approved", () => {
+		it("allows L4 tools when exact session-approved", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
 				toolName: "test_tool",
-				targetPattern: "*",
+				riskLevel: "L4",
+				targetPattern: "/project/target",
 				verdict: "allow_for_session",
 				grantedAt: Date.now(),
 			});
@@ -126,6 +127,7 @@ describe("PermissionEngine", () => {
 			const decision = engine.evaluate(
 				createContext({
 					toolPolicy: createPolicy({ riskLevel: "L4" }),
+					targetPath: "/project/target",
 				}),
 			);
 
@@ -150,6 +152,7 @@ describe("PermissionEngine", () => {
 			// Simulate session approval
 			engine.recordApproval({
 				toolName: "test_tool",
+				riskLevel: "L2",
 				targetPattern: "/project/src/main.ts",
 				verdict: "allow_for_session",
 				grantedAt: Date.now(),
@@ -165,10 +168,11 @@ describe("PermissionEngine", () => {
 			expect(second.verdict).toBe("allow");
 		});
 
-		it("wildcard approval covers any target", () => {
+		it("wildcard approval does NOT cover a specific target at L3", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
 				toolName: "test_tool",
+				riskLevel: "L3",
 				targetPattern: "*",
 				verdict: "allow_for_session",
 				grantedAt: Date.now(),
@@ -181,13 +185,15 @@ describe("PermissionEngine", () => {
 				}),
 			);
 
-			expect(decision.verdict).toBe("allow");
+			// Wildcard should NOT match a specific target at L3
+			expect(decision.verdict).toBe("ask_user");
 		});
 
 		it("clearApprovals resets the cache", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
 				toolName: "test_tool",
+				riskLevel: "L2",
 				targetPattern: "*",
 				verdict: "allow_for_session",
 				grantedAt: Date.now(),
@@ -201,6 +207,112 @@ describe("PermissionEngine", () => {
 				}),
 			);
 			expect(decision.verdict).toBe("ask_user");
+		});
+	});
+
+	describe("cache key granularity", () => {
+		it("L2 approval does not satisfy L3 for the same tool", () => {
+			const engine = createPermissionEngine();
+			engine.recordApproval({
+				toolName: "test_tool",
+				riskLevel: "L2",
+				targetPattern: "/project/src/main.ts",
+				verdict: "allow_for_session",
+				grantedAt: Date.now(),
+			});
+
+			const decision = engine.evaluate(
+				createContext({
+					toolPolicy: createPolicy({ riskLevel: "L3" }),
+					targetPath: "/project/src/main.ts",
+				}),
+			);
+
+			expect(decision.verdict).toBe("ask_user");
+		});
+
+		it("L3 approval for target A does not auto-allow target B", () => {
+			const engine = createPermissionEngine();
+			engine.recordApproval({
+				toolName: "test_tool",
+				riskLevel: "L3",
+				targetPattern: "/project/a.ts",
+				verdict: "allow_for_session",
+				grantedAt: Date.now(),
+			});
+
+			const decision = engine.evaluate(
+				createContext({
+					toolPolicy: createPolicy({ riskLevel: "L3" }),
+					targetPath: "/project/b.ts",
+				}),
+			);
+
+			expect(decision.verdict).toBe("ask_user");
+		});
+
+		it("commandDigest match grants approval", () => {
+			const engine = createPermissionEngine();
+			engine.recordApproval({
+				toolName: "bash",
+				riskLevel: "L3",
+				targetPattern: "*",
+				commandDigest: "sha256:abc123",
+				verdict: "allow_for_session",
+				grantedAt: Date.now(),
+			});
+
+			const decision = engine.evaluate(
+				createContext({
+					toolIdentity: { name: "bash", category: "command-execution" },
+					toolPolicy: createPolicy({ riskLevel: "L3" }),
+					commandDigest: "sha256:abc123",
+				}),
+			);
+
+			expect(decision.verdict).toBe("allow");
+		});
+
+		it("commandDigest mismatch does not grant approval", () => {
+			const engine = createPermissionEngine();
+			engine.recordApproval({
+				toolName: "bash",
+				riskLevel: "L3",
+				targetPattern: "*",
+				commandDigest: "sha256:abc123",
+				verdict: "allow_for_session",
+				grantedAt: Date.now(),
+			});
+
+			const decision = engine.evaluate(
+				createContext({
+					toolIdentity: { name: "bash", category: "command-execution" },
+					toolPolicy: createPolicy({ riskLevel: "L3" }),
+					commandDigest: "sha256:different",
+				}),
+			);
+
+			expect(decision.verdict).toBe("ask_user");
+		});
+
+		it("path normalization in cache key resolves '..' segments", () => {
+			const engine = createPermissionEngine();
+			engine.recordApproval({
+				toolName: "test_tool",
+				riskLevel: "L2",
+				targetPattern: "/project/main.ts",
+				verdict: "allow_for_session",
+				grantedAt: Date.now(),
+			});
+
+			const decision = engine.evaluate(
+				createContext({
+					toolPolicy: createPolicy({ riskLevel: "L2" }),
+					targetPath: "/project/src/../main.ts",
+				}),
+			);
+
+			expect(decision.verdict).toBe("allow");
 		});
 	});
 

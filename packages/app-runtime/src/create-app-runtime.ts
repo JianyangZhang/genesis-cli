@@ -9,6 +9,8 @@
 import type { KernelSessionAdapter } from "./adapters/kernel-session-adapter.js";
 import type { EventBus } from "./events/event-bus.js";
 import { createEventBus } from "./events/event-bus.js";
+import { createToolGovernor } from "./governance/tool-governor.js";
+import type { ToolGovernor } from "./governance/tool-governor.js";
 import { createRuntimeContext } from "./runtime-context.js";
 import { sessionCreated, sessionResumed } from "./session/session-events.js";
 import type { SessionFacade } from "./session/session-facade.js";
@@ -57,6 +59,9 @@ export interface AppRuntime {
 	/** Global event bus — receives events from all sessions. */
 	readonly events: EventBus;
 
+	/** Tool governance — catalog, permissions, mutations, audit. */
+	readonly governor: ToolGovernor;
+
 	/** Shut down the runtime and release resources. */
 	shutdown(): Promise<void>;
 }
@@ -67,6 +72,7 @@ export interface AppRuntime {
 
 export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 	const globalBus = createEventBus();
+	const governor = createToolGovernor();
 	const toolSet = new Set(config.toolSet ?? []);
 	const sessions = new Set<SessionFacade>();
 	let shutdown = false;
@@ -103,6 +109,10 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			return globalBus;
 		},
 
+		get governor(): ToolGovernor {
+			return governor;
+		},
+
 		createSession(): SessionFacade {
 			assertNotShutdown();
 
@@ -116,7 +126,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 				toolSet,
 			});
 
-			const facade = new SessionFacadeImpl(getAdapter(), state, context, globalBus);
+			const facade = new SessionFacadeImpl(getAdapter(), state, context, globalBus, governor);
 
 			// Emit session_created on the global bus
 			const event = sessionCreated(sessionId, config.model, [...toolSet]);
@@ -143,7 +153,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			// Tell the adapter about the recovery so it can restore its own state.
 			adapter.resume(data);
 
-			const facade = new SessionFacadeImpl(adapter, state, context, globalBus);
+			const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
 
 			// Emit session_resumed on the global bus
 			const event = sessionResumed(data.sessionId, data);

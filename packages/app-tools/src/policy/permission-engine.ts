@@ -10,8 +10,13 @@
  *
  * The engine does NOT interact with the user — it returns "ask_user"
  * when user input is needed. The runtime layer handles the actual prompt.
+ *
+ * Cache key is a 4-tuple: toolName:riskLevel:normalizedTargetPath:commandDigest.
+ * For L2+, only an exact match on all four components grants auto-allow.
+ * This prevents cross-risk-level escalation and cross-command wildcard approval.
  */
 
+import { normalize as nodeNormalize } from "node:path";
 import type { ApprovalCacheEntry, PermissionContext, PermissionDecision, RiskLevel } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -34,20 +39,23 @@ export interface PermissionEngine {
 // ---------------------------------------------------------------------------
 
 export function createPermissionEngine(): PermissionEngine {
-	/**
-	 * Session-scoped approval cache keyed by "toolName:targetPattern".
-	 * Once a user approves a pattern for the session, subsequent matches
-	 * are auto-allowed.
-	 */
 	const approvals = new Map<string, ApprovalCacheEntry>();
 
-	function cacheKey(toolName: string, targetPattern: string): string {
-		return `${toolName}:${targetPattern}`;
+	function cacheKey(
+		toolName: string,
+		riskLevel: RiskLevel,
+		targetPath: string | undefined,
+		commandDigest: string | undefined,
+	): string {
+		const normalizedTarget = targetPath ? nodeNormalize(targetPath) : "*";
+		const digest = commandDigest ?? "*";
+		return `${toolName}:${riskLevel}:${normalizedTarget}:${digest}`;
 	}
 
 	return {
 		evaluate(context: PermissionContext): PermissionDecision {
-			const { toolPolicy, toolIdentity, isSubAgent, targetPath, workingDirectory } = context;
+			const { toolPolicy, toolIdentity, isSubAgent, targetPath, commandDigest, workingDirectory } =
+				context;
 			const riskLevel = toolPolicy.riskLevel;
 
 			// --- Sub-agent restriction ---
@@ -69,17 +77,11 @@ export function createPermissionEngine(): PermissionEngine {
 				return { verdict: "allow", riskLevel, reason: "Low-risk, logged" };
 			}
 
-			// --- Check session approval cache ---
-			const pattern = targetPath ?? "*";
-			const cached = approvals.get(cacheKey(toolIdentity.name, pattern));
+			// --- Check session approval cache (exact match only for L2+) ---
+			const key = cacheKey(toolIdentity.name, riskLevel, targetPath, commandDigest);
+			const cached = approvals.get(key);
 			if (cached) {
 				return { verdict: "allow", riskLevel, reason: "Session-approved" };
-			}
-
-			// Also check wildcard approvals for this tool
-			const wildcard = approvals.get(cacheKey(toolIdentity.name, "*"));
-			if (wildcard) {
-				return { verdict: "allow", riskLevel, reason: "Session-approved (wildcard)" };
 			}
 
 			// --- L4: default deny ---
@@ -92,9 +94,8 @@ export function createPermissionEngine(): PermissionEngine {
 			}
 
 			// --- L2/L3: ask user ---
-			// Target path outside cwd escalates to explicit mention in reason.
 			const outsideCwd =
-				targetPath && workingDirectory && !targetPath.startsWith(workingDirectory);
+				targetPath && workingDirectory && !nodeNormalize(targetPath).startsWith(workingDirectory);
 
 			return {
 				verdict: "ask_user",
@@ -106,7 +107,8 @@ export function createPermissionEngine(): PermissionEngine {
 		},
 
 		recordApproval(entry: ApprovalCacheEntry): void {
-			approvals.set(cacheKey(entry.toolName, entry.targetPattern), entry);
+			const key = cacheKey(entry.toolName, entry.riskLevel, entry.targetPattern, entry.commandDigest);
+			approvals.set(key, entry);
 		},
 
 		clearApprovals(): void {

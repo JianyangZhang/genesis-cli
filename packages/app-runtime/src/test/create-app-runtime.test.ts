@@ -204,6 +204,22 @@ describe("createAppRuntime", () => {
 		expect(adapters.every((adapter) => adapter.closed)).toBe(true);
 	});
 
+	it("exposes governor with governance components", () => {
+		const adapter = new StubKernelSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			adapter,
+		});
+
+		expect(runtime.governor).toBeDefined();
+		expect(runtime.governor.catalog).toBeDefined();
+		expect(runtime.governor.permissions).toBeDefined();
+		expect(runtime.governor.mutations).toBeDefined();
+		expect(runtime.governor.audit).toBeDefined();
+	});
+
 	it("same runtime can drive multiple modes (print + json)", () => {
 		const adapter = new StubKernelSessionAdapter();
 

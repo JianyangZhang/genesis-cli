@@ -133,4 +133,62 @@ describe("MutationQueue", () => {
 			expect(queue.length).toBe(1);
 		});
 	});
+
+	describe("path normalization", () => {
+		it("detects conflict when same file is referenced via '..' segment", () => {
+			const queue = createMutationQueue();
+			queue.enqueue({ filePath: "/project/main.ts", toolCallId: "call_1" });
+
+			const result = queue.enqueue({ filePath: "/project/src/../main.ts", toolCallId: "call_2" });
+
+			expect(result.type).toBe("conflict");
+			if (result.type === "conflict") {
+				expect(result.conflictingCallId).toBe("call_1");
+			}
+		});
+
+		it("detects conflict when same file is referenced via '.' segment", () => {
+			const queue = createMutationQueue();
+			queue.enqueue({ filePath: "/project/src/main.ts", toolCallId: "call_1" });
+
+			const result = queue.enqueue({ filePath: "/project/./src/./main.ts", toolCallId: "call_2" });
+
+			expect(result.type).toBe("conflict");
+		});
+
+		it("detects conflict when same file has repeated slashes", () => {
+			const queue = createMutationQueue();
+			queue.enqueue({ filePath: "/project/src/main.ts", toolCallId: "call_1" });
+
+			const result = queue.enqueue({ filePath: "//project//src//main.ts", toolCallId: "call_2" });
+
+			expect(result.type).toBe("conflict");
+		});
+
+		it("isPending resolves '..' paths to the correct file", () => {
+			const queue = createMutationQueue();
+			queue.enqueue({ filePath: "/project/src/main.ts", toolCallId: "call_1" });
+
+			expect(queue.isPending("/project/src/../src/main.ts")).toBe(true);
+		});
+
+		it("getActive resolves '..' paths to the correct entry", () => {
+			const queue = createMutationQueue();
+			const target = { filePath: "/project/src/main.ts", toolCallId: "call_1" };
+			queue.enqueue(target);
+
+			expect(queue.getActive("/project/src/../src/main.ts")).toEqual(target);
+		});
+
+		it("complete by toolCallId releases the file regardless of path variant", () => {
+			const queue = createMutationQueue();
+			queue.enqueue({ filePath: "/project/src/main.ts", toolCallId: "call_1" });
+
+			queue.complete("call_1");
+
+			// Should be able to enqueue via a different path representation
+			const result = queue.enqueue({ filePath: "/project/src/../src/main.ts", toolCallId: "call_2" });
+			expect(result.type).toBe("accepted");
+		});
+	});
 });

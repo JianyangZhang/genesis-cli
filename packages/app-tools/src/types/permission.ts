@@ -48,6 +48,9 @@ export interface PermissionContext {
 	/** Target path the tool operates on (file path, URL, etc.). */
 	readonly targetPath?: string;
 
+	/** Fingerprint of the command/parameters for cache differentiation. */
+	readonly commandDigest?: string;
+
 	/** Current working directory. */
 	readonly workingDirectory: string;
 
@@ -67,7 +70,9 @@ export interface PermissionContext {
 
 export interface ApprovalCacheEntry {
 	readonly toolName: string;
+	readonly riskLevel: RiskLevel;
 	readonly targetPattern: string;
+	readonly commandDigest?: string;
 	readonly verdict: "allow_for_session";
 	readonly grantedAt: number;
 }

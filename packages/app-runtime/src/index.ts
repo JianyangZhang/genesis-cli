@@ -8,6 +8,9 @@ export { createAppRuntime } from "./create-app-runtime.js";
 export type { EventBus, EventListener, Unsubscribe } from "./events/event-bus.js";
 // Events
 export { createEventBus } from "./events/event-bus.js";
+// Governance
+export { createToolGovernor } from "./governance/tool-governor.js";
+export type { ToolGovernor, ToolExecutionContext, ToolExecutionResult, GovernorDecision } from "./governance/tool-governor.js";
 // Event types — re-export all
 export type {
 	BaseEvent,
