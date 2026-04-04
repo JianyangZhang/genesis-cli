@@ -11,10 +11,17 @@ const hasLiveOpenAiConfig =
 	Boolean(process.env.GENESIS_LIVE_OPENAI_BASE_URL) &&
 	Boolean(process.env.GENESIS_MODEL_PROVIDER) &&
 	Boolean(process.env.GENESIS_MODEL_ID);
+const hasLiveAnthropicConfig =
+	Boolean(process.env.GENESIS_API_KEY) &&
+	Boolean(process.env.GENESIS_LIVE_ANTHROPIC_BASE_URL) &&
+	Boolean(process.env.GENESIS_MODEL_PROVIDER) &&
+	Boolean(process.env.GENESIS_MODEL_ID);
 
 const liveDescribe = hasLiveOpenAiConfig ? describe : describe.skip;
+const anthropicDescribe = hasLiveAnthropicConfig ? describe : describe.skip;
 let resolvedModelIdPromise: Promise<string> | null = null;
 let piMonoSessionAvailabilityPromise: Promise<{ available: boolean; reason?: string }> | null = null;
+let anthropicAvailabilityPromise: Promise<{ available: boolean; modelId?: string; reason?: string }> | null = null;
 
 liveDescribe("PiMono live adapter", () => {
 	it(
@@ -38,7 +45,7 @@ liveDescribe("PiMono live adapter", () => {
 			if (!(await ensurePiMonoSessionAvailable())) {
 				return;
 			}
-			const adapter = await createLiveAdapter("off");
+			const adapter = await createLiveAdapter({ thinkingLevel: "off" });
 			try {
 				const firstTurn = await collectEvents(adapter.sendPrompt("Remember the codeword BANANA and reply exactly ACK."));
 				const secondTurn = await collectEvents(
@@ -62,7 +69,7 @@ liveDescribe("PiMono live adapter", () => {
 			if (!(await ensurePiMonoSessionAvailable())) {
 				return;
 			}
-			const adapter = await createLiveAdapter("minimal");
+			const adapter = await createLiveAdapter({ thinkingLevel: "minimal" });
 			try {
 				const events = await collectEvents(adapter.sendPrompt("Reply exactly THINKING_ON_OK."));
 				expect(extractAssistantText(events)).toContain("THINKING_ON_OK");
@@ -74,11 +81,81 @@ liveDescribe("PiMono live adapter", () => {
 	);
 });
 
-async function createLiveAdapter(thinkingLevel: "off" | "minimal"): Promise<PiMonoSessionAdapter> {
-	const modelId = await resolveLiveModelId();
+anthropicDescribe("Anthropic live adapter", () => {
+	it(
+		"sends a non-streaming Anthropic-compatible request",
+		async () => {
+			const availability = await ensureAnthropicAvailable();
+			if (!availability.available || !availability.modelId) {
+				console.warn(`Skipping Anthropic direct request checks: ${availability.reason}`);
+				return;
+			}
+
+			const response = await requestAnthropicCompletion(availability.modelId, "Reply exactly LIVE_ANTHROPIC_OK", false, false);
+			expect(response.status).toBe(200);
+			const payload = (await response.json()) as {
+				content?: Array<{ type?: string; text?: string }>;
+			};
+			const text = (payload.content ?? [])
+				.filter((item) => item.type === "text")
+				.map((item) => item.text ?? "")
+				.join("");
+			expect(text).toContain("LIVE_ANTHROPIC_OK");
+		},
+		30_000,
+	);
+
+	it(
+		"streams a real Anthropic-compatible conversation with thinking enabled",
+		async () => {
+			const availability = await ensureAnthropicAvailable();
+			if (!availability.available || !availability.modelId) {
+				console.warn(`Skipping Anthropic session checks: ${availability.reason}`);
+				return;
+			}
+
+			const adapter = await createLiveAdapter({
+				thinkingLevel: "minimal",
+				baseUrl: process.env.GENESIS_LIVE_ANTHROPIC_BASE_URL!,
+				api: "anthropic-messages",
+				authHeader: false,
+				modelId: availability.modelId,
+			});
+			try {
+				const events = await collectEvents(adapter.sendPrompt("Reply exactly ANTHROPIC_SESSION_OK."));
+				expect(extractAssistantText(events)).toContain("ANTHROPIC_SESSION_OK");
+			} finally {
+				await adapter.close();
+			}
+		},
+		90_000,
+	);
+});
+
+async function createLiveAdapter(options: {
+	thinkingLevel: "off" | "minimal";
+	baseUrl?: string;
+	api?: "openai-completions" | "anthropic-messages";
+	authHeader?: boolean;
+	modelId?: string;
+}): Promise<PiMonoSessionAdapter> {
+	const modelId = options.modelId ?? (await resolveLiveModelId());
 	const agentDir = await mkdtemp(join(tmpdir(), "genesis-pi-live-"));
 	await mkdir(agentDir, { recursive: true });
-	await writeFile(join(agentDir, "models.json"), `${JSON.stringify(createModelsJson(modelId), null, 2)}\n`, "utf8");
+	await writeFile(
+		join(agentDir, "models.json"),
+		`${JSON.stringify(
+			createModelsJson({
+				modelId,
+				baseUrl: options.baseUrl ?? process.env.GENESIS_LIVE_OPENAI_BASE_URL!,
+				api: options.api ?? "openai-completions",
+				authHeader: options.authHeader ?? true,
+			}),
+			null,
+			2,
+		)}\n`,
+		"utf8",
+	);
 
 	return new PiMonoSessionAdapter({
 		workingDirectory: process.cwd(),
@@ -89,22 +166,27 @@ async function createLiveAdapter(thinkingLevel: "off" | "minimal"): Promise<PiMo
 			displayName: process.env.GENESIS_MODEL_DISPLAY_NAME ?? modelId,
 		},
 		toolSet: ["read", "bash", "edit", "write"],
-		thinkingLevel,
+		thinkingLevel: options.thinkingLevel,
 	});
 }
 
-function createModelsJson(modelId: string): Record<string, unknown> {
+function createModelsJson(options: {
+	modelId: string;
+	baseUrl: string;
+	api: "openai-completions" | "anthropic-messages";
+	authHeader: boolean;
+}): Record<string, unknown> {
 	return {
 		providers: {
 			[process.env.GENESIS_MODEL_PROVIDER!]: {
-				baseUrl: process.env.GENESIS_LIVE_OPENAI_BASE_URL,
-				api: "openai-completions",
+				baseUrl: options.baseUrl,
+				api: options.api,
 				apiKey: "GENESIS_API_KEY",
-				authHeader: true,
+				authHeader: options.authHeader,
 				models: [
 					{
-						id: modelId,
-						name: process.env.GENESIS_MODEL_DISPLAY_NAME ?? modelId,
+						id: options.modelId,
+						name: process.env.GENESIS_MODEL_DISPLAY_NAME ?? options.modelId,
 						reasoning: true,
 						input: ["text"],
 						contextWindow: 128000,
@@ -148,7 +230,20 @@ async function ensurePiMonoSessionAvailable(): Promise<boolean> {
 			const modelId = await resolveLiveModelId();
 			const agentDir = await mkdtemp(join(tmpdir(), "genesis-pi-probe-"));
 			await mkdir(agentDir, { recursive: true });
-			await writeFile(join(agentDir, "models.json"), `${JSON.stringify(createModelsJson(modelId), null, 2)}\n`, "utf8");
+			await writeFile(
+				join(agentDir, "models.json"),
+				`${JSON.stringify(
+					createModelsJson({
+						modelId,
+						baseUrl: process.env.GENESIS_LIVE_OPENAI_BASE_URL!,
+						api: "openai-completions",
+						authHeader: true,
+					}),
+					null,
+					2,
+				)}\n`,
+				"utf8",
+			);
 
 			const kernelModulePath = pathToFileURL(resolve(process.cwd(), "packages/kernel/src/index.ts")).href;
 			const sdk = (await import(kernelModulePath)) as {
@@ -212,6 +307,31 @@ async function ensurePiMonoSessionAvailable(): Promise<boolean> {
 	return availability.available;
 }
 
+async function ensureAnthropicAvailable(): Promise<{ available: boolean; modelId?: string; reason?: string }> {
+	if (!anthropicAvailabilityPromise) {
+		anthropicAvailabilityPromise = (async () => {
+			let lastError = "No model candidates tried";
+			for (const modelId of getModelCandidates()) {
+				const response = await requestAnthropicCompletion(modelId, "Reply exactly ANTHROPIC_READY", false, false);
+				if (response.status === 200) {
+					return { available: true, modelId };
+				}
+
+				const text = await response.text();
+				lastError = `${response.status}: ${text}`;
+				if (response.status === 403 && text.includes("No permission")) {
+					continue;
+				}
+				return { available: false, reason: `Anthropic probe failed for ${modelId}: ${lastError}` };
+			}
+
+			return { available: false, reason: `No Anthropic-compatible model is accessible. Last error: ${lastError}` };
+		})();
+	}
+
+	return await anthropicAvailabilityPromise;
+}
+
 function getModelCandidates(): readonly string[] {
 	const candidates = [process.env.GENESIS_MODEL_ID, "glm-5", "glm-4.7"].filter(
 		(value): value is string => typeof value === "string" && value.length > 0,
@@ -230,6 +350,29 @@ async function requestOpenAiCompletion(modelId: string, prompt: string): Promise
 			model: modelId,
 			messages: [{ role: "user", content: prompt }],
 			stream: false,
+		}),
+	});
+}
+
+async function requestAnthropicCompletion(
+	modelId: string,
+	prompt: string,
+	thinkingEnabled: boolean,
+	stream: boolean,
+): Promise<Response> {
+	return await fetch(new URL("v1/messages", process.env.GENESIS_LIVE_ANTHROPIC_BASE_URL!).toString(), {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			"x-api-key": process.env.GENESIS_API_KEY!,
+			"anthropic-version": "2023-06-01",
+		},
+		body: JSON.stringify({
+			model: modelId,
+			max_tokens: 1024,
+			stream,
+			messages: [{ role: "user", content: prompt }],
+			thinking: thinkingEnabled ? { type: "enabled", budget_tokens: 1024 } : { type: "disabled" },
 		}),
 	});
 }

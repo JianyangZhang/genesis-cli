@@ -3,6 +3,7 @@ import { Agent, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { streamSimple, type Model } from "@mariozechner/pi-ai";
 import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
+import { streamAnthropicMessages } from "./providers/anthropic.js";
 import { streamOpenAiCompletions } from "./providers/openai.js";
 import { SessionManager } from "./session-manager.js";
 import {
@@ -121,6 +122,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions): Pr
 			if (activeModel.api === "openai-completions") {
 				return streamOpenAiCompletions(
 					activeModel as Model<"openai-completions">,
+					context,
+					mergedOptions,
+				) as unknown as ReturnType<typeof streamSimple>;
+			}
+
+			if (activeModel.api === "anthropic-messages") {
+				return streamAnthropicMessages(
+					activeModel as Model<"anthropic-messages">,
 					context,
 					mergedOptions,
 				) as unknown as ReturnType<typeof streamSimple>;

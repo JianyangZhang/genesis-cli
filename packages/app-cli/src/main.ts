@@ -109,6 +109,7 @@ function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): C
 		| ThinkingLevel
 		| undefined;
 	const bootstrapBaseUrl = readOptionalStringFlag(flags, "bootstrap-base-url", process.env.GENESIS_BOOTSTRAP_BASE_URL);
+	const bootstrapApi = readStringFlag(flags, "bootstrap-api", process.env.GENESIS_BOOTSTRAP_API ?? "openai-completions");
 
 	return {
 		mode,
@@ -128,7 +129,7 @@ function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): C
 						modelId,
 						displayName,
 						baseUrl: bootstrapBaseUrl,
-						api: readStringFlag(flags, "bootstrap-api", process.env.GENESIS_BOOTSTRAP_API ?? "openai-completions"),
+						api: bootstrapApi,
 						apiKeyEnv: readStringFlag(
 							flags,
 							"bootstrap-api-key-env",
@@ -138,7 +139,7 @@ function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): C
 							flags,
 							"bootstrap-auth-header",
 							process.env.GENESIS_BOOTSTRAP_AUTH_HEADER,
-							true,
+							defaultBootstrapAuthHeader(bootstrapApi),
 						),
 						reasoning: readBooleanFlag(
 							flags,
@@ -274,6 +275,10 @@ function splitCsv(value: string): readonly string[] {
 		.split(",")
 		.map((entry) => entry.trim())
 		.filter((entry) => entry.length > 0);
+}
+
+function defaultBootstrapAuthHeader(api: string): boolean {
+	return api !== "anthropic-messages";
 }
 
 function printHelp(): void {
