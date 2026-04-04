@@ -1,5 +1,5 @@
 {
-	"name": "@anthropic-ai/claude-code-pi-config",
+	"name": "@genesis-cli/config",
 	"version": "0.0.0",
 	"private": true,
 	"description": "Configuration layering, resource loading, and skill/template management",

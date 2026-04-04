@@ -1,5 +1,5 @@
 {
-	"name": "@anthropic-ai/claude-code-pi-tools",
+	"name": "@genesis-cli/tools",
 	"version": "0.0.0",
 	"private": true,
 	"description": "Tool catalog, risk classification, permission labels, and execution wrappers",
@@ -9,6 +9,6 @@
 		"build": "tsc -p tsconfig.build.json"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-code-pi-runtime": "*"
+		"@genesis-cli/runtime": "*"
 	}
 }

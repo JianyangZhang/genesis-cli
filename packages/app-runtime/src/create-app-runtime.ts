@@ -6,7 +6,7 @@
  * print, json, rpc) use the same factory and the same AppRuntime interface.
  */
 
-import type { PiSessionAdapter } from "./adapters/pi-session-adapter.js";
+import type { KernelSessionAdapter } from "./adapters/kernel-session-adapter.js";
 import type { EventBus } from "./events/event-bus.js";
 import { createEventBus } from "./events/event-bus.js";
 import { createRuntimeContext } from "./runtime-context.js";
@@ -37,10 +37,10 @@ export interface AppRuntimeConfig {
 	 * Legacy single-session adapter override.
 	 * Prefer `createAdapter` for runtimes that may host multiple sessions.
 	 */
-	readonly adapter?: PiSessionAdapter;
+	readonly adapter?: KernelSessionAdapter;
 
 	/** Factory for creating one fresh adapter per session. */
-	readonly createAdapter?: () => PiSessionAdapter;
+	readonly createAdapter?: () => KernelSessionAdapter;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 		}
 	}
 
-	function getAdapter(): PiSessionAdapter {
+	function getAdapter(): KernelSessionAdapter {
 		if (config.createAdapter) {
 			return config.createAdapter();
 		}
@@ -94,7 +94,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 		}
 
 		throw new Error(
-			"No PiSessionAdapter provided. Pass adapter for a single session or createAdapter for multi-session runtimes.",
+			"No KernelSessionAdapter provided. Pass adapter for a single session or createAdapter for multi-session runtimes.",
 		);
 	}
 

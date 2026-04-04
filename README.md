@@ -1,4 +1,4 @@
-# claude-code-pi
+# Genesis CLI
 
 **A coding CLI project built on `pi-mono`, with a product layer centered on plan execution, tool governance, and agent collaboration.**
 
@@ -8,7 +8,7 @@
 
 ## Overview
 
-`claude-code-pi` is an open-source project for a coding CLI that:
+`Genesis CLI` is an open-source project for a coding CLI that:
 
 - uses [`pi-mono`](https://github.com/badlogic/pi-mono) as its sole runtime kernel
 - draws product direction from the workflow quality demonstrated by `Claude Code`
@@ -26,7 +26,7 @@ The project is based on three working goals:
 - design product-layer capabilities such as planning, permissions, and subagent coordination as explicit systems
 - support multiple interfaces on top of one runtime backbone
 
-The general motivation is straightforward: runtime stability and product workflow quality are both important, but they do not need to be implemented in the same layer. `claude-code-pi` uses `pi-mono` for runtime infrastructure and reserves this repository for product behavior and integration design.
+The general motivation is straightforward: runtime stability and product workflow quality are both important, but they do not need to be implemented in the same layer. `Genesis CLI` uses `pi-mono` for runtime infrastructure and reserves this repository for product behavior and integration design.
 
 ---
 

@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { createAppRuntime } from "../create-app-runtime.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
 import type { ModelDescriptor } from "../types/index.js";
-import { StubPiSessionAdapter } from "./stubs/stub-pi-session-adapter.js";
+import { StubKernelSessionAdapter } from "./stubs/stub-kernel-session-adapter.js";
 
 const stubModel: ModelDescriptor = { id: "test-model", provider: "test" };
 
 describe("createAppRuntime", () => {
 	it("creates a runtime with an event bus", () => {
-		const adapter = new StubPiSessionAdapter();
+		const adapter = new StubKernelSessionAdapter();
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "print",
@@ -20,7 +20,7 @@ describe("createAppRuntime", () => {
 	});
 
 	it("createSession returns an active SessionFacade", () => {
-		const adapter = new StubPiSessionAdapter();
+		const adapter = new StubKernelSessionAdapter();
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "print",
@@ -38,7 +38,7 @@ describe("createAppRuntime", () => {
 	});
 
 	it("createSession emits session_created on global bus", () => {
-		const adapter = new StubPiSessionAdapter();
+		const adapter = new StubKernelSessionAdapter();
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "json",
@@ -59,7 +59,7 @@ describe("createAppRuntime", () => {
 	});
 
 	it("recoverSession restores state and emits session_resumed", () => {
-		const adapter = new StubPiSessionAdapter();
+		const adapter = new StubKernelSessionAdapter();
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "rpc",
@@ -79,7 +79,7 @@ describe("createAppRuntime", () => {
 		};
 
 		// Create a fresh runtime for recovery
-		const adapter2 = new StubPiSessionAdapter();
+		const adapter2 = new StubKernelSessionAdapter();
 		const runtime2 = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "rpc",
@@ -103,7 +103,7 @@ describe("createAppRuntime", () => {
 	// --- Fix 1: adapter.resume() is called during recovery ---
 
 	it("recoverSession calls adapter.resume with recovery data", () => {
-		const adapter = new StubPiSessionAdapter();
+		const adapter = new StubKernelSessionAdapter();
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "rpc",
@@ -127,13 +127,13 @@ describe("createAppRuntime", () => {
 	});
 
 	it("createAdapter provisions a fresh adapter per session", async () => {
-		const adapters: StubPiSessionAdapter[] = [];
+		const adapters: StubKernelSessionAdapter[] = [];
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "print",
 			model: stubModel,
 			createAdapter: () => {
-				const adapter = new StubPiSessionAdapter();
+				const adapter = new StubKernelSessionAdapter();
 				adapters.push(adapter);
 				return adapter;
 			},
@@ -162,7 +162,7 @@ describe("createAppRuntime", () => {
 			workingDirectory: "/tmp",
 			mode: "print",
 			model: stubModel,
-			adapter: new StubPiSessionAdapter(),
+			adapter: new StubKernelSessionAdapter(),
 		});
 
 		runtime.createSession();
@@ -177,17 +177,17 @@ describe("createAppRuntime", () => {
 			model: stubModel,
 		});
 
-		expect(() => runtime.createSession()).toThrow("No PiSessionAdapter provided");
+		expect(() => runtime.createSession()).toThrow("No KernelSessionAdapter provided");
 	});
 
 	it("shutdown closes all sessions", async () => {
-		const adapters: StubPiSessionAdapter[] = [];
+		const adapters: StubKernelSessionAdapter[] = [];
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "print",
 			model: stubModel,
 			createAdapter: () => {
-				const adapter = new StubPiSessionAdapter();
+				const adapter = new StubKernelSessionAdapter();
 				adapters.push(adapter);
 				return adapter;
 			},
@@ -205,7 +205,7 @@ describe("createAppRuntime", () => {
 	});
 
 	it("same runtime can drive multiple modes (print + json)", () => {
-		const adapter = new StubPiSessionAdapter();
+		const adapter = new StubKernelSessionAdapter();
 
 		const printRuntime = createAppRuntime({
 			workingDirectory: "/tmp",

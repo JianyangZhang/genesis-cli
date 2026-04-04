@@ -1,5 +1,5 @@
 {
-	"name": "@anthropic-ai/claude-code-pi-evaluation",
+	"name": "@genesis-cli/evaluation",
 	"version": "0.0.0",
 	"private": true,
 	"description": "Smoke scenarios, protocol verification, regression baselines, and subagent acceptance tests",
@@ -10,7 +10,7 @@
 		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-code-pi-runtime": "*",
-		"@anthropic-ai/claude-code-pi-tools": "*"
+		"@genesis-cli/runtime": "*",
+		"@genesis-cli/tools": "*"
 	}
 }

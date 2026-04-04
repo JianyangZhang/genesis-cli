@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
-import type { PiSessionAdapter, RawUpstreamEvent } from "../adapters/pi-session-adapter.js";
+import type { KernelSessionAdapter, RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
 import { createRuntimeContext } from "../runtime-context.js";
 import { SessionFacadeImpl } from "../session/session-facade.js";
 import { createInitialSessionState } from "../session/session-state.js";
 import type { ModelDescriptor, SessionId } from "../types/index.js";
-import { StubPiSessionAdapter } from "./stubs/stub-pi-session-adapter.js";
+import { StubKernelSessionAdapter } from "./stubs/stub-kernel-session-adapter.js";
 
 const stubId: SessionId = { value: "facade-test" };
 const stubModel: ModelDescriptor = { id: "test-model", provider: "test" };
 
 describe("SessionFacade", () => {
 	function createFacade() {
-		const adapter = new StubPiSessionAdapter();
+		const adapter = new StubKernelSessionAdapter();
 		const globalBus = createEventBus();
 		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
 		const context = createRuntimeContext({
@@ -141,7 +141,7 @@ describe("SessionFacade", () => {
 		});
 		let abortCalled = false;
 
-		const slowAdapter: PiSessionAdapter = {
+		const slowAdapter: KernelSessionAdapter = {
 			async *sendPrompt(_input: string) {
 				await streamBlocked;
 				if (!abortCalled) {
@@ -237,7 +237,7 @@ describe("SessionFacade", () => {
 			releaseStream = r;
 		});
 
-		const slowAdapter: PiSessionAdapter = {
+		const slowAdapter: KernelSessionAdapter = {
 			async *sendPrompt(_input: string) {
 				await streamBlocked;
 				yield { type: "message_update", timestamp: 1000, payload: { content: "hi" } } as RawUpstreamEvent;
@@ -291,7 +291,7 @@ describe("SessionFacade", () => {
 		});
 		let aborted = false;
 
-		const slowAdapter: PiSessionAdapter = {
+		const slowAdapter: KernelSessionAdapter = {
 			async *sendPrompt(_input: string) {
 				await streamBlocked;
 				if (!aborted) {

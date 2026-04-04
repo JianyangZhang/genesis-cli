@@ -1,7 +1,7 @@
 // Runtime — the shared product-layer runtime.
 
 // Adapters
-export type { PiSessionAdapter, RawUpstreamEvent } from "./adapters/pi-session-adapter.js";
+export type { KernelSessionAdapter, RawUpstreamEvent } from "./adapters/kernel-session-adapter.js";
 export type { AppRuntime, AppRuntimeConfig } from "./create-app-runtime.js";
 // Entry point
 export { createAppRuntime } from "./create-app-runtime.js";

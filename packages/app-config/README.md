@@ -1,4 +1,4 @@
-# @anthropic-ai/claude-code-pi-config
+# @genesis-cli/config
 
 ## 职责
 

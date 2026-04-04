@@ -1,15 +1,15 @@
 /**
- * Stub implementation of PiSessionAdapter for testing.
+ * Stub implementation of KernelSessionAdapter for testing.
  *
  * Provides synchronous control over event yielding so tests can
  * verify session lifecycle, event normalization, and state transitions
  * without depending on pi-mono.
  */
 
-import type { PiSessionAdapter, RawUpstreamEvent } from "../../adapters/pi-session-adapter.js";
+import type { KernelSessionAdapter, RawUpstreamEvent } from "../../adapters/kernel-session-adapter.js";
 import type { SessionRecoveryData } from "../../types/index.js";
 
-export class StubPiSessionAdapter implements PiSessionAdapter {
+export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	private readonly eventsByPrompt = new Map<string, RawUpstreamEvent[]>();
 	private defaultEvents: RawUpstreamEvent[] = [];
 	private _abortCalled = false;
@@ -57,7 +57,7 @@ export class StubPiSessionAdapter implements PiSessionAdapter {
 	}
 
 	// -----------------------------------------------------------------------
-	// PiSessionAdapter implementation
+	// KernelSessionAdapter implementation
 	// -----------------------------------------------------------------------
 
 	async *sendPrompt(input: string): AsyncIterable<RawUpstreamEvent> {

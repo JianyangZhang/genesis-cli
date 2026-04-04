@@ -1,4 +1,4 @@
-# claude-code-pi
+# Genesis CLI
 
 **一个基于 `pi-mono` 的 coding CLI 项目，产品层重点放在计划执行、工具治理和 agent 协作上。**
 
@@ -8,7 +8,7 @@
 
 ## 项目概述
 
-`claude-code-pi` 是一个开源 coding CLI 项目，当前定位是：
+`Genesis CLI` 是一个开源 coding CLI 项目，当前定位是：
 
 - 以 [`pi-mono`](https://github.com/badlogic/pi-mono) 作为唯一运行时内核
 - 参考 `Claude Code` 所体现出的高质量 coding workflow
@@ -26,7 +26,7 @@
 - 把计划、权限、subagent 协作等产品层能力设计成显式系统
 - 在同一条 runtime 主干上支持多种交互接口
 
-整体判断并不复杂：运行时稳定性和工作流质量都重要，但它们不必落在同一层中实现。`claude-code-pi` 选择由 `pi-mono` 提供运行时基础设施，而把产品行为和集成设计留在本仓库中完成。
+整体判断并不复杂：运行时稳定性和工作流质量都重要，但它们不必落在同一层中实现。`Genesis CLI` 选择由 `pi-mono` 提供运行时基础设施，而把产品行为和集成设计留在本仓库中完成。
 
 ---
 

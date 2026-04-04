@@ -1,8 +1,8 @@
 {
-	"name": "claude-code-pi",
+	"name": "genesis-cli",
 	"private": true,
 	"version": "0.0.0",
-	"description": "A next-generation coding CLI built on pi-mono",
+	"description": "Genesis CLI, a next-generation coding CLI built on pi-mono",
 	"workspaces": ["packages/*"],
 	"scripts": {
 		"build": "npm run build --workspaces",

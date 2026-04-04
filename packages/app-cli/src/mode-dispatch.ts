@@ -6,7 +6,7 @@
  * Real implementations are P5 scope; this is a wiring skeleton.
  */
 
-import type { AppRuntime, CliMode } from "@anthropic-ai/claude-code-pi-runtime";
+import type { AppRuntime, CliMode } from "@genesis-cli/runtime";
 
 // ---------------------------------------------------------------------------
 // Mode handler interface
@@ -31,6 +31,8 @@ export function createModeHandler(mode: CliMode): ModeHandler {
 		case "rpc":
 			return new RpcModeHandler();
 	}
+
+	throw new Error(`Unsupported mode: ${mode}`);
 }
 
 // ---------------------------------------------------------------------------

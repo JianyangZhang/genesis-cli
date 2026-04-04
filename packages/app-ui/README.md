@@ -1,4 +1,4 @@
-# @anthropic-ai/claude-code-pi-ui
+# @genesis-cli/ui
 
 ## 职责
 

@@ -1,4 +1,4 @@
-# @anthropic-ai/claude-code-pi-evaluation
+# @genesis-cli/evaluation
 
 ## 职责
 

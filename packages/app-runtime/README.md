@@ -1,4 +1,4 @@
-# @anthropic-ai/claude-code-pi-runtime
+# @genesis-cli/runtime
 
 ## 职责
 
@@ -36,7 +36,7 @@
 
 ### 适配层
 
-- `PiSessionAdapter` — 上游 pi-mono 会话桥接接口
+- `KernelSessionAdapter` — 上游 pi-mono 会话桥接接口
 - `RawUpstreamEvent` — 上游原始事件信封
 - `EventNormalizer` — raw event → RuntimeEvent 标准化翻译器
 
@@ -77,7 +77,7 @@ src/
 │   └── plan-types.ts           # 计划类型
 ├── adapters/
 │   ├── index.ts                # barrel
-│   └── pi-session-adapter.ts   # 上游适配器接口
+│   └── kernel-session-adapter.ts # 上游适配器接口
 ├── services/
 │   ├── index.ts                # barrel
 │   └── event-normalizer.ts     # 事件标准化翻译器
@@ -89,11 +89,11 @@ src/
     ├── event-bus.test.ts
     ├── event-normalizer.test.ts
     └── stubs/
-        └── stub-pi-session-adapter.ts
+        └── stub-kernel-session-adapter.ts
 ```
 
 ## 验证
 
 - `npx tsc --noEmit` 类型检查通过
-- `vitest run` 全部测试通过（44 tests, 6 files）
+- `vitest run` 全部测试通过（51 tests, 6 files）
 - `npm run check` lint + format + types 全部通过

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RawUpstreamEvent } from "../adapters/pi-session-adapter.js";
+import type { RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
 import { EventNormalizer } from "../services/event-normalizer.js";
 import type { SessionId } from "../types/index.js";
 
@@ -13,7 +13,7 @@ describe("EventNormalizer", () => {
 			type: "agent_start",
 			timestamp: 1000,
 			payload: {
-				model: { id: "claude-3", provider: "anthropic" },
+				model: { id: "reference-model", provider: "reference" },
 				toolSet: ["read", "edit"],
 			},
 		};

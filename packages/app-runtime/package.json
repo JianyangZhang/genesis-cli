@@ -1,10 +1,16 @@
 {
-	"name": "@anthropic-ai/claude-code-pi-runtime",
+	"name": "@genesis-cli/runtime",
 	"version": "0.0.0",
 	"private": true,
 	"description": "Product-layer runtime: session facade, plan execution, event normalization",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
 		"test": "vitest run"

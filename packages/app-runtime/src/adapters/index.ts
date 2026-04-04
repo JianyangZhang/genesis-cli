@@ -1,3 +1,3 @@
-// adapters/ — Bridges to upstream pi-coding-agent.
+// adapters/ — Bridges to the upstream kernel session implementation.
 
-export type { PiSessionAdapter, RawUpstreamEvent } from "./pi-session-adapter.js";
+export type { KernelSessionAdapter, RawUpstreamEvent } from "./kernel-session-adapter.js";

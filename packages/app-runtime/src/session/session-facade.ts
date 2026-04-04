@@ -1,14 +1,14 @@
 /**
  * SessionFacade — the primary interface for interacting with a session.
  *
- * Wraps a PiSessionAdapter, normalizes all upstream events through
+ * Wraps a KernelSessionAdapter, normalizes all upstream events through
  * EventNormalizer, and exposes only product-layer RuntimeEvents.
  * State transitions are tracked and broadcast to listeners.
  *
  * Core principle: raw upstream events are NEVER exposed.
  */
 
-import type { PiSessionAdapter } from "../adapters/pi-session-adapter.js";
+import type { KernelSessionAdapter } from "../adapters/kernel-session-adapter.js";
 import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
 import { updateTaskState as updateContextTaskState } from "../runtime-context.js";
@@ -58,14 +58,19 @@ export class SessionFacadeImpl implements SessionFacade {
 	private _state: SessionState;
 	private _context: RuntimeContext;
 	private readonly _events: EventBus;
-	private readonly _adapter: PiSessionAdapter;
+	private readonly _adapter: KernelSessionAdapter;
 	private readonly _globalBus: EventBus;
 	private readonly _normalizer: EventNormalizer;
 	private readonly _stateListeners = new Set<(state: SessionState) => void>();
 	private _closed = false;
 	private _running = false;
 
-	constructor(adapter: PiSessionAdapter, initialState: SessionState, context: RuntimeContext, globalBus: EventBus) {
+	constructor(
+		adapter: KernelSessionAdapter,
+		initialState: SessionState,
+		context: RuntimeContext,
+		globalBus: EventBus,
+	) {
 		this._adapter = adapter;
 		this._state = initialState;
 		this._context = context;

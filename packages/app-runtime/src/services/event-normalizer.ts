@@ -8,7 +8,7 @@
  * integrated and the actual upstream event types are known.
  */
 
-import type { RawUpstreamEvent } from "../adapters/pi-session-adapter.js";
+import type { RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
 import { generateEventId } from "../session/session-events.js";
 import type { SessionId } from "../types/index.js";
