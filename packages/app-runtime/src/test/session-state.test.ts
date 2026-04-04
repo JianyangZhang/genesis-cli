@@ -4,10 +4,11 @@ import {
 	recoverSessionState,
 	serializeForRecovery,
 	updateCompactionSummary,
+	updatePlanSummary,
 	updateSessionStatus,
 	updateTaskState,
 } from "../session/session-state.js";
-import type { CompactionSummary, ModelDescriptor, SessionId, TaskState } from "../types/index.js";
+import type { CompactionSummary, ModelDescriptor, PlanSummary, SessionId, TaskState } from "../types/index.js";
 
 const stubId: SessionId = { value: "state-test" };
 const stubModel: ModelDescriptor = { id: "test-model", provider: "test" };
@@ -104,6 +105,40 @@ describe("SessionState", () => {
 			const recovered = recoverSessionState(data);
 
 			expect(recovered.toolSet).toEqual(new Set(["a", "b", "c"]));
+		});
+	});
+
+	describe("updatePlanSummary", () => {
+		it("returns new state with plan summary set", () => {
+			const original = createInitialSessionState(stubId, stubModel, new Set());
+			const summary: PlanSummary = {
+				planId: "p1",
+				goal: "Implement X",
+				status: "active",
+				stepCount: 3,
+				completedSteps: 1,
+			};
+			const updated = updatePlanSummary(original, summary);
+
+			expect(updated.planSummary).toEqual(summary);
+			expect(original.planSummary).toBeNull(); // original unchanged
+			expect(updated.updatedAt).toBeGreaterThanOrEqual(original.updatedAt);
+		});
+
+		it("clears plan summary when set to null", () => {
+			const original = createInitialSessionState(stubId, stubModel, new Set());
+			const summary: PlanSummary = {
+				planId: "p1",
+				goal: "Goal",
+				status: "completed",
+				stepCount: 1,
+				completedSteps: 1,
+			};
+			const withPlan = updatePlanSummary(original, summary);
+			expect(withPlan.planSummary).toEqual(summary);
+
+			const cleared = updatePlanSummary(withPlan, null);
+			expect(cleared.planSummary).toBeNull();
 		});
 	});
 });

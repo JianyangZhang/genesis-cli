@@ -6,6 +6,7 @@
  * or abandoned.
  */
 
+import { wouldViolateBoundary } from "./path-scope.js";
 import type { AggregationResult, ReworkDecision, SubagentResult, TaskRisk } from "./result-types.js";
 import type { SubagentTask } from "./task-types.js";
 import { evaluateVerifications } from "./verification.js";
@@ -15,13 +16,15 @@ import { evaluateVerifications } from "./verification.js";
 // ---------------------------------------------------------------------------
 
 /** Aggregate results from multiple completed subagent tasks. */
-export function aggregateResults(planId: string, results: readonly SubagentResult[]): AggregationResult {
+export function aggregateResults(
+	planId: string,
+	results: readonly SubagentResult[],
+	reworkDecisionsInput?: ReadonlyMap<string, ReworkDecision>,
+): AggregationResult {
 	const allModifiedPaths: string[] = [];
 	const allRisks: TaskRisk[] = [];
 	let completedTasks = 0;
 	let failedTasks = 0;
-	const tasksRequiringRework = 0;
-	const reworkDecisions = new Map<string, ReworkDecision>();
 
 	for (const result of results) {
 		// Merge paths
@@ -37,6 +40,9 @@ export function aggregateResults(planId: string, results: readonly SubagentResul
 			failedTasks++;
 		}
 	}
+
+	const reworkDecisions = reworkDecisionsInput ?? new Map<string, ReworkDecision>();
+	const tasksRequiringRework = [...reworkDecisions.values()].filter((d) => d.type === "rework").length;
 
 	return {
 		planId,
@@ -78,6 +84,22 @@ export function decideRework(
 
 	switch (result.status) {
 		case "completed": {
+			// Boundary check: verify all modified paths are within scope
+			const boundaryViolations = result.modifiedPaths.filter((p) => wouldViolateBoundary(task.scope, p));
+			if (boundaryViolations.length > 0) {
+				if (canRework) {
+					return {
+						type: "rework",
+						reason: `Modified paths outside scope: ${boundaryViolations.join(", ")}`,
+						focusAreas: ["scope_compliance"],
+					};
+				}
+				return {
+					type: "abandon",
+					reason: `Boundary violation in modified paths (rework limit exceeded): ${boundaryViolations.join(", ")}`,
+				};
+			}
+
 			const evaluation = evaluateVerifications(task.verification, result.verifications);
 			if (evaluation.allPassed) {
 				return { type: "accept" };

@@ -170,6 +170,12 @@ export function createPlanEngine(maxReworkAttempts = 2): PlanEngine {
 			assertIndex(plan, stepIndex);
 			assertStepStatus(plan.steps[stepIndex], stepIndex, "in_progress");
 
+			if (result.status !== "completed") {
+				throw new Error(
+					`completeStep requires result.status "completed", got "${result.status}". Use failStep for non-completed results.`,
+				);
+			}
+
 			const updated = updateSteps(plan, stepIndex, (s) => ({
 				...s,
 				status: "completed" as const,

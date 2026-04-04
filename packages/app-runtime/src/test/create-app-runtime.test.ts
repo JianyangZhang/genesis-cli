@@ -220,6 +220,35 @@ describe("createAppRuntime", () => {
 		expect(runtime.governor.audit).toBeDefined();
 	});
 
+	it("exposes planEngine that can create plans", () => {
+		const adapter = new StubKernelSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			adapter,
+		});
+
+		expect(runtime.planEngine).toBeDefined();
+		const draft = runtime.planEngine.createDraft("p1", "Goal", ["Step A"]);
+		expect(draft.status).toBe("draft");
+		expect(draft.steps).toHaveLength(1);
+	});
+
+	it("session facade exposes plan orchestrator when planEngine available", () => {
+		const adapter = new StubKernelSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			adapter,
+		});
+
+		const session = runtime.createSession();
+		expect(session.plan).toBeDefined();
+		expect(session.plan).not.toBeNull();
+	});
+
 	it("same runtime can drive multiple modes (print + json)", () => {
 		const adapter = new StubKernelSessionAdapter();
 

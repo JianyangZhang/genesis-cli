@@ -59,6 +59,8 @@ export {
 	planStepFailed,
 	planStepStarted,
 } from "./planning/plan-events.js";
+export type { PlanOrchestrator } from "./planning/plan-orchestrator.js";
+export { createPlanOrchestrator } from "./planning/plan-orchestrator.js";
 // Planning types
 export type {
 	PlanOutcomeReason,

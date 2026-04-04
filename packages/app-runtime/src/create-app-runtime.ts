@@ -11,6 +11,8 @@ import type { EventBus } from "./events/event-bus.js";
 import { createEventBus } from "./events/event-bus.js";
 import type { ToolGovernor } from "./governance/tool-governor.js";
 import { createToolGovernor } from "./governance/tool-governor.js";
+import type { PlanEngine } from "./planning/plan-engine.js";
+import { createPlanEngine } from "./planning/plan-engine.js";
 import { createRuntimeContext } from "./runtime-context.js";
 import { sessionCreated, sessionResumed } from "./session/session-events.js";
 import type { SessionFacade } from "./session/session-facade.js";
@@ -62,6 +64,9 @@ export interface AppRuntime {
 	/** Tool governance — catalog, permissions, mutations, audit. */
 	readonly governor: ToolGovernor;
 
+	/** Plan engine — shared immutable state machine for plan management. */
+	readonly planEngine: PlanEngine;
+
 	/** Shut down the runtime and release resources. */
 	shutdown(): Promise<void>;
 }
@@ -73,6 +78,7 @@ export interface AppRuntime {
 export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 	const globalBus = createEventBus();
 	const governor = createToolGovernor();
+	const planEngine = createPlanEngine();
 	const toolSet = new Set(config.toolSet ?? []);
 	const sessions = new Set<SessionFacade>();
 	let shutdown = false;
@@ -113,6 +119,10 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			return governor;
 		},
 
+		get planEngine(): PlanEngine {
+			return planEngine;
+		},
+
 		createSession(): SessionFacade {
 			assertNotShutdown();
 
@@ -126,7 +136,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 				toolSet,
 			});
 
-			const facade = new SessionFacadeImpl(getAdapter(), state, context, globalBus, governor);
+			const facade = new SessionFacadeImpl(getAdapter(), state, context, globalBus, governor, planEngine);
 
 			// Emit session_created on the global bus
 			const event = sessionCreated(sessionId, config.model, [...toolSet]);
@@ -153,7 +163,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			// Tell the adapter about the recovery so it can restore its own state.
 			adapter.resume(data);
 
-			const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+			const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor, planEngine);
 
 			// Emit session_resumed on the global bus
 			const event = sessionResumed(data.sessionId, data);

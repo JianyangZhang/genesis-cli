@@ -13,11 +13,14 @@ import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
 import type { ToolGovernor } from "../governance/tool-governor.js";
+import type { PlanEngine } from "../planning/plan-engine.js";
+import type { PlanOrchestrator } from "../planning/plan-orchestrator.js";
+import { createPlanOrchestrator } from "../planning/plan-orchestrator.js";
 import { updateTaskState as updateContextTaskState } from "../runtime-context.js";
 import { EventNormalizer } from "../services/event-normalizer.js";
 import type { RuntimeContext, SessionId, SessionState, TaskState } from "../types/index.js";
 import { sessionClosed } from "./session-events.js";
-import { updateSessionStatus, updateTaskState } from "./session-state.js";
+import { updatePlanSummary, updateSessionStatus, updateTaskState } from "./session-state.js";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -50,6 +53,9 @@ export interface SessionFacade {
 
 	/** Subscribe to state changes. */
 	onStateChange(listener: (state: SessionState) => void): Unsubscribe;
+
+	/** Plan orchestrator — manage plans, enforce safety checks. Null if no plan engine provided. */
+	readonly plan: PlanOrchestrator | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +70,7 @@ export class SessionFacadeImpl implements SessionFacade {
 	private readonly _globalBus: EventBus;
 	private readonly _normalizer: EventNormalizer;
 	private readonly _governor: ToolGovernor | null;
+	private readonly _plan: PlanOrchestrator | null;
 	private readonly _usesAdapterGovernanceHook: boolean;
 	private readonly _stateListeners = new Set<(state: SessionState) => void>();
 	private _closed = false;
@@ -75,6 +82,7 @@ export class SessionFacadeImpl implements SessionFacade {
 		context: RuntimeContext,
 		globalBus: EventBus,
 		governor?: ToolGovernor,
+		planEngine?: PlanEngine,
 	) {
 		this._adapter = adapter;
 		this._state = initialState;
@@ -84,6 +92,20 @@ export class SessionFacadeImpl implements SessionFacade {
 		this._normalizer = new EventNormalizer(initialState.id);
 		this._governor = governor ?? null;
 		this._usesAdapterGovernanceHook = this.installAdapterGovernanceHook();
+
+		// Plan orchestration
+		if (planEngine) {
+			this._plan = createPlanOrchestrator(planEngine, this._events, this._globalBus, initialState.id);
+			this._events.onCategory("plan", () => {
+				const summary = this._plan!.summarize();
+				if (summary) {
+					this._state = updatePlanSummary(this._state, summary);
+					this.notifyStateChange();
+				}
+			});
+		} else {
+			this._plan = null;
+		}
 
 		// Transition from creating/recovering → active
 		this._state = updateSessionStatus(this._state, "active");
@@ -103,6 +125,10 @@ export class SessionFacadeImpl implements SessionFacade {
 
 	get events(): EventBus {
 		return this._events;
+	}
+
+	get plan(): PlanOrchestrator | null {
+		return this._plan;
 	}
 
 	async prompt(input: string): Promise<void> {

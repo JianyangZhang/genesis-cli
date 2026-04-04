@@ -164,5 +164,44 @@ describe("Aggregation", () => {
 			const decision = decideRework(task, result, 2, 2);
 			expect(decision.type).toBe("abandon");
 		});
+
+		// --- Boundary violation detection via modifiedPaths in completed results ---
+
+		it("reworks completed result with modifiedPaths outside scope", () => {
+			const task = makeTask();
+			const result = makeResult({
+				modifiedPaths: ["packages/other-lib/src/main.ts"],
+				verifications: [{ name: "build", status: "passed", output: "ok" }],
+			});
+			const decision = decideRework(task, result, 2, 0);
+			expect(decision.type).toBe("rework");
+			if (decision.type === "rework") {
+				expect(decision.reason).toContain("outside scope");
+				expect(decision.focusAreas).toContain("scope_compliance");
+			}
+		});
+
+		it("abandons completed result with out-of-scope modifiedPaths when rework exhausted", () => {
+			const task = makeTask();
+			const result = makeResult({
+				modifiedPaths: ["packages/other-lib/src/main.ts"],
+				verifications: [{ name: "build", status: "passed", output: "ok" }],
+			});
+			const decision = decideRework(task, result, 2, 2);
+			expect(decision.type).toBe("abandon");
+			if (decision.type === "abandon") {
+				expect(decision.reason).toContain("Boundary violation");
+			}
+		});
+
+		it("accepts completed result with in-scope modifiedPaths", () => {
+			const task = makeTask();
+			const result = makeResult({
+				modifiedPaths: ["packages/app-runtime/src/foo.ts"],
+				verifications: [{ name: "build", status: "passed", output: "ok" }],
+			});
+			const decision = decideRework(task, result, 2, 0);
+			expect(decision.type).toBe("accept");
+		});
 	});
 });

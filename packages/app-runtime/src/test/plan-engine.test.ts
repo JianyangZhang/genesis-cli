@@ -147,6 +147,28 @@ describe("PlanEngine", () => {
 			const plan = engine.activate(engine.createDraft("p1", "Goal", ["Step A"]));
 			expect(() => engine.completeStep(plan, 0, makeResult())).toThrow("expected in_progress");
 		});
+
+		it("throws if result.status is failed", () => {
+			const plan = engine.activate(engine.createDraft("p1", "Goal", ["Step A"]));
+			const started = engine.startStep(plan, 0, "task-1");
+			expect(() => engine.completeStep(started, 0, makeResult({ status: "failed" }))).toThrow("result.status");
+		});
+
+		it("throws if result.status is boundary_violation", () => {
+			const plan = engine.activate(engine.createDraft("p1", "Goal", ["Step A"]));
+			const started = engine.startStep(plan, 0, "task-1");
+			expect(() => engine.completeStep(started, 0, makeResult({ status: "boundary_violation" }))).toThrow(
+				"result.status",
+			);
+		});
+
+		it("throws if result.status is stop_condition_triggered", () => {
+			const plan = engine.activate(engine.createDraft("p1", "Goal", ["Step A"]));
+			const started = engine.startStep(plan, 0, "task-1");
+			expect(() => engine.completeStep(started, 0, makeResult({ status: "stop_condition_triggered" }))).toThrow(
+				"result.status",
+			);
+		});
 	});
 
 	describe("failStep", () => {

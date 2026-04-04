@@ -3,10 +3,11 @@ import type { KernelSessionAdapter, RawUpstreamEvent } from "../adapters/kernel-
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
 import { createToolGovernor } from "../governance/tool-governor.js";
+import { createPlanEngine } from "../planning/plan-engine.js";
 import { createRuntimeContext } from "../runtime-context.js";
 import { SessionFacadeImpl } from "../session/session-facade.js";
 import { createInitialSessionState } from "../session/session-state.js";
-import type { ModelDescriptor, SessionId } from "../types/index.js";
+import type { ModelDescriptor, SessionId, SessionState } from "../types/index.js";
 import { StubKernelSessionAdapter } from "./stubs/stub-kernel-session-adapter.js";
 
 const stubId: SessionId = { value: "facade-test" };
@@ -398,5 +399,101 @@ describe("SessionFacade", () => {
 		expect(received).toHaveLength(1);
 		expect(received[0]!.type).toBe("permission_requested");
 		expect(governor.audit.size).toBe(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Plan integration tests
+// ---------------------------------------------------------------------------
+
+describe("SessionFacade — plan integration", () => {
+	function createFacadeWithPlan() {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+
+		const planEngine = createPlanEngine();
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, undefined, planEngine);
+		return { facade, adapter, globalBus, planEngine };
+	}
+
+	it("exposes plan orchestrator when planEngine is provided", () => {
+		const { facade } = createFacadeWithPlan();
+		expect(facade.plan).not.toBeNull();
+		expect(facade.plan!.engine).toBeDefined();
+	});
+
+	it("plan is null when no planEngine is provided", () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus);
+		expect(facade.plan).toBeNull();
+	});
+
+	it("plan events update sessionState.planSummary", () => {
+		const { facade } = createFacadeWithPlan();
+		expect(facade.state.planSummary).toBeNull();
+
+		facade.plan!.createAndActivate("p1", "Test goal", ["Step A"]);
+
+		// After plan creation, planSummary should be updated via event listener
+		expect(facade.state.planSummary).not.toBeNull();
+		expect(facade.state.planSummary!.planId).toBe("p1");
+		expect(facade.state.planSummary!.stepCount).toBe(1);
+	});
+
+	it("plan state changes trigger onStateChange", () => {
+		const { facade } = createFacadeWithPlan();
+		const states: SessionState[] = [];
+		facade.onStateChange((s) => states.push(s));
+
+		facade.plan!.createAndActivate("p1", "Goal", ["Step A"]);
+
+		expect(states.length).toBeGreaterThan(0);
+		const last = states[states.length - 1]!;
+		expect(last.planSummary).not.toBeNull();
+	});
+
+	it("plan boundary violation prevents step completion", () => {
+		const { facade } = createFacadeWithPlan();
+		facade.plan!.createAndActivate("p1", "Goal", ["Step A"]);
+		facade.plan!.assignTask(0, {
+			taskId: "task-1",
+			goal: "Do something",
+			scope: { allowedPaths: ["packages/app-runtime/**"], forbiddenPaths: [] },
+			inputs: { docs: [], files: [], assumptions: [] },
+			deliverables: ["code"],
+			verification: [{ name: "build", type: "command", command: "npm run build", description: "Build" }],
+			stopConditions: [{ type: "max_file_count", value: 100, description: "Safety limit" }],
+		});
+
+		const result = {
+			taskId: "task-1",
+			status: "completed" as const,
+			modifiedPaths: ["packages/OUTSIDE/src/hack.ts"],
+			verifications: [],
+			risks: [],
+			handoffNotes: [],
+			completedAt: Date.now(),
+		};
+		const plan = facade.plan!.submitResult(0, result);
+
+		// Step should be failed, not completed
+		expect(plan.steps[0].status).toBe("failed");
 	});
 });
