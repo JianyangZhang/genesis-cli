@@ -8,8 +8,9 @@
 import type { AppRuntime, CliMode, RuntimeEvent, SessionFacade } from "@genesis-cli/runtime";
 import type { InteractionState, OutputSink, TuiScreenLayout } from "@genesis-cli/ui";
 import {
-	ansiClearLine,
+	ansiClearBelow,
 	ansiHideCursor,
+	ansiMoveUp,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createLayoutAccumulator,
@@ -18,7 +19,7 @@ import {
 	formatEventAsText,
 	initialInteractionState,
 	reduceInteractionState,
-	renderStatusLine,
+	renderScreen,
 } from "@genesis-cli/ui";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
@@ -75,6 +76,9 @@ function createStdoutSink(): OutputSink {
 // ---------------------------------------------------------------------------
 
 class InteractiveModeHandler implements ModeHandler {
+	private _lastRenderedLines = 0;
+	private _pendingPermissionCallId: string | null = null;
+
 	async start(runtime: AppRuntime): Promise<void> {
 		const session = runtime.createSession();
 		const sink = createStdoutSink();
@@ -94,9 +98,16 @@ class InteractiveModeHandler implements ModeHandler {
 			accumulator.push(event);
 			interactionState = reduceInteractionState(interactionState, event);
 
-			// Re-render status line on each event
+			// Track pending permission requests
+			if (interactionState.phase === "waiting_permission" && interactionState.activeToolCallId) {
+				this._pendingPermissionCallId = interactionState.activeToolCallId;
+			} else if (interactionState.phase !== "waiting_permission") {
+				this._pendingPermissionCallId = null;
+			}
+
+			// Re-render full screen on each event
 			const snapshot = accumulator.snapshot();
-			this.renderStatusUpdate(snapshot, interactionState);
+			this.renderScreenUpdate(snapshot);
 		});
 
 		// Input loop
@@ -112,6 +123,19 @@ class InteractiveModeHandler implements ModeHandler {
 			while (line !== null) {
 				const trimmed = line.trim();
 				if (trimmed.length === 0) {
+					line = await inputLoop.nextLine();
+					continue;
+				}
+
+				// Permission response
+				if (this._pendingPermissionCallId !== null) {
+					const response = trimmed.toLowerCase();
+					if (response === "y" || response === "yes") {
+						session.resolvePermission(this._pendingPermissionCallId, "allow_once");
+					} else {
+						session.resolvePermission(this._pendingPermissionCallId, "deny");
+					}
+					this._pendingPermissionCallId = null;
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -156,11 +180,15 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("Type /help for commands, or start chatting.\n\n");
 	}
 
-	private renderStatusUpdate(snapshot: TuiScreenLayout, _state: InteractionState): void {
-		// Minimal status update: clear line, re-render status line
+	private renderScreenUpdate(snapshot: TuiScreenLayout): void {
 		const width = process.stdout.columns ?? 80;
-		const statusLine = renderStatusLine(snapshot.statusLine, width);
-		process.stdout.write(`\r${ansiClearLine()}${statusLine}\n`);
+		if (this._lastRenderedLines > 0) {
+			process.stdout.write(ansiMoveUp(this._lastRenderedLines));
+		}
+		process.stdout.write(ansiClearBelow());
+		const rendered = renderScreen(snapshot, width);
+		process.stdout.write(`${rendered}\n`);
+		this._lastRenderedLines = rendered.split("\n").length;
 	}
 }
 

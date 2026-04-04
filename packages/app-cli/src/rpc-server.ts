@@ -106,6 +106,60 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 				break;
 			}
 
+			case RPC_METHODS.PLAN_STATUS: {
+				if (!session?.plan) {
+					send(createRpcResponse(id ?? 0, { active: false, plan: null }));
+					break;
+				}
+				const summary = session.plan.summarize();
+				if (summary) {
+					send(
+						createRpcResponse(id ?? 0, {
+							active: true,
+							plan: {
+								planId: summary.planId,
+								goal: summary.goal,
+								status: summary.status,
+								stepCount: summary.stepCount,
+								completedSteps: summary.completedSteps,
+							},
+						}),
+					);
+				} else {
+					send(createRpcResponse(id ?? 0, { active: false, plan: null }));
+				}
+				break;
+			}
+
+			case RPC_METHODS.TOOLS_LIST: {
+				const tools = runtime.governor.catalog.listAll();
+				const toolList = tools.map((t) => ({
+					name: t.identity.name,
+					category: t.identity.category,
+					riskLevel: t.policy.riskLevel,
+					readOnly: t.policy.readOnly,
+				}));
+				send(createRpcResponse(id ?? 0, { tools: toolList, count: toolList.length }));
+				break;
+			}
+
+			case RPC_METHODS.PERMISSION_RESOLVE: {
+				if (!session) {
+					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, "No active session"));
+					break;
+				}
+				const permParams = req.params as Record<string, unknown> | undefined;
+				const callId = permParams?.callId;
+				const decision = permParams?.decision;
+				if (typeof callId !== "string" || typeof decision !== "string") {
+					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'callId' or 'decision'"));
+					break;
+				}
+				session.resolvePermission(callId, decision as "allow" | "allow_for_session" | "allow_once" | "deny");
+				send(createRpcResponse(id ?? 0, { status: "resolved" }));
+				break;
+			}
+
 			default: {
 				send(createRpcError(id, RPC_ERRORS.METHOD_NOT_FOUND, `Unknown method: ${req.method}`));
 				break;

@@ -19,7 +19,7 @@ import { createPlanOrchestrator } from "../planning/plan-orchestrator.js";
 import { updateTaskState as updateContextTaskState } from "../runtime-context.js";
 import { EventNormalizer } from "../services/event-normalizer.js";
 import type { RuntimeContext, SessionId, SessionState, TaskState } from "../types/index.js";
-import { sessionClosed } from "./session-events.js";
+import { generateEventId, sessionClosed } from "./session-events.js";
 import { updatePlanSummary, updateSessionStatus, updateTaskState } from "./session-state.js";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +51,9 @@ export interface SessionFacade {
 	/** Gracefully close the session, persisting state. */
 	close(): Promise<void>;
 
+	/** Resolve a pending permission request. */
+	resolvePermission(callId: string, decision: "allow" | "allow_for_session" | "allow_once" | "deny"): void;
+
 	/** Subscribe to state changes. */
 	onStateChange(listener: (state: SessionState) => void): Unsubscribe;
 
@@ -73,6 +76,7 @@ export class SessionFacadeImpl implements SessionFacade {
 	private readonly _plan: PlanOrchestrator | null;
 	private readonly _usesAdapterGovernanceHook: boolean;
 	private readonly _stateListeners = new Set<(state: SessionState) => void>();
+	private readonly _pendingPermissions = new Map<string, { toolName: string; riskLevel: string }>();
 	private _closed = false;
 	private _running = false;
 
@@ -202,6 +206,41 @@ export class SessionFacadeImpl implements SessionFacade {
 		};
 	}
 
+	resolvePermission(callId: string, decision: "allow" | "allow_for_session" | "allow_once" | "deny"): void {
+		this.assertOpen();
+		const pending = this._pendingPermissions.get(callId);
+		if (!pending) {
+			throw new Error(`No pending permission request for tool call: ${callId}`);
+		}
+
+		const resolvedEvent: RuntimeEvent = {
+			id: generateEventId(),
+			timestamp: Date.now(),
+			sessionId: this._state.id,
+			category: "permission",
+			type: "permission_resolved",
+			toolName: pending.toolName,
+			toolCallId: callId,
+			decision,
+		};
+
+		this._events.emit(resolvedEvent);
+		this._globalBus.emit(resolvedEvent);
+
+		if (decision === "allow_for_session" && this._governor) {
+			this._governor.recordSessionApproval({
+				sessionId: this._state.id.value,
+				toolName: pending.toolName,
+				riskLevel: pending.riskLevel as "L0" | "L1" | "L2" | "L3" | "L4",
+				targetPattern: "*",
+				verdict: "allow_for_session",
+				grantedAt: Date.now(),
+			});
+		}
+
+		this._pendingPermissions.delete(callId);
+	}
+
 	// -----------------------------------------------------------------------
 	// Internal helpers
 	// -----------------------------------------------------------------------
@@ -260,6 +299,13 @@ export class SessionFacadeImpl implements SessionFacade {
 					return decision;
 				}
 
+				if (decision.type === "ask_user") {
+					this._pendingPermissions.set(toolCallId, {
+						toolName,
+						riskLevel: decision.riskLevel,
+					});
+				}
+
 				return {
 					type: decision.type,
 					reason: decision.reason,
@@ -310,6 +356,10 @@ export class SessionFacadeImpl implements SessionFacade {
 			}
 
 			if (decision.type === "ask_user") {
+				this._pendingPermissions.set(normalized.toolCallId, {
+					toolName: normalized.toolName,
+					riskLevel: decision.riskLevel,
+				});
 				return {
 					id: normalized.id,
 					timestamp: normalized.timestamp,

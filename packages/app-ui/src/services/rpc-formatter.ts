@@ -79,6 +79,7 @@ export const RPC_METHODS = {
 	SESSION_LIST: "session/list",
 	PLAN_STATUS: "plan/status",
 	TOOLS_LIST: "tools/list",
+	PERMISSION_RESOLVE: "permission/resolve",
 } as const;
 
 /** Standard RPC error codes. */
