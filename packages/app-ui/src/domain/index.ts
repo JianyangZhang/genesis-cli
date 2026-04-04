@@ -1,2 +1,13 @@
-// domain/ — Output models, interaction state.
-export type { OutputMode, RenderContext } from "../types/index.js";
+// domain/ — Output models, interaction state, slash commands.
+export type {
+	OutputMode,
+	OutputSink,
+	RenderContext,
+	SlashCommand,
+	SlashCommandContext,
+	SlashCommandResult,
+	SlashCommandType,
+} from "../types/index.js";
+export { createBuiltinCommands } from "./builtin-commands.js";
+export type { SlashCommandRegistry, SlashCommandResolution } from "./slash-command-registry.js";
+export { createSlashCommandRegistry } from "./slash-command-registry.js";

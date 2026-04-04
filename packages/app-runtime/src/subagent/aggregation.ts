@@ -36,9 +36,7 @@ export function aggregateResults(
 
 		// Count by final decision when available; otherwise fall back to raw status.
 		const finalDecision = reworkDecisions.get(result.taskId);
-		const accepted = finalDecision
-			? finalDecision.type === "accept"
-			: result.status === "completed";
+		const accepted = finalDecision ? finalDecision.type === "accept" : result.status === "completed";
 
 		if (accepted) {
 			completedTasks++;

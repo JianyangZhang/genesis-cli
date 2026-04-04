@@ -1,2 +1,13 @@
-// services/ — Formatting, event-to-output mapping.
-export type { OutputMode } from "../types/index.js";
+// services/ — Formatting, event-to-output mapping, interaction state.
+export type { InteractionPhase, InteractionState, JsonEnvelope, OutputMode, RpcEnvelope } from "../types/index.js";
+export { formatEventAsText, formatPermissionPrompt, formatPlanSummaryText, formatToolStep } from "./event-formatter.js";
+export { initialInteractionState, reduceInteractionState } from "./interaction-state.js";
+export { eventToJsonEnvelope, sanitizeForJson } from "./json-formatter.js";
+export {
+	createRpcError,
+	createRpcResponse,
+	eventToRpcNotification,
+	parseRpcRequest,
+	RPC_ERRORS,
+	RPC_METHODS,
+} from "./rpc-formatter.js";

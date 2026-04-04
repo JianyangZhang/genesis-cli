@@ -14,8 +14,8 @@ export type {
 	AggregationResult,
 	ReworkDecision,
 	SubagentResult,
-	SubagentRuntimeSnapshot,
 	SubagentResultStatus,
+	SubagentRuntimeSnapshot,
 	TaskRisk,
 	VerificationResult,
 } from "./result-types.js";
