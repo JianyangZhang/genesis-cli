@@ -1,7 +1,8 @@
 /**
  * CLI mode identifiers.
  *
- * All modes share the same runtime; this type only controls
- * how input is received and output is formatted.
+ * The canonical definition lives in @anthropic-ai/claude-code-pi-runtime
+ * to avoid circular dependencies (app-cli depends on app-runtime).
+ * This file re-exports for convenience.
  */
-export type CliMode = "interactive" | "print" | "json" | "rpc";
+export type { CliMode } from "@anthropic-ai/claude-code-pi-runtime";
