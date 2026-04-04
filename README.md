@@ -1,6 +1,6 @@
 # Genesis CLI
 
-**A coding CLI project built on `pi-mono`, with a product layer centered on plan execution, tool governance, and agent collaboration.**
+**An open-source coding CLI for real repository work, with explicit planning, tool governance, and agent collaboration.**
 
 [中文版](README.zh.md)
 
@@ -8,148 +8,118 @@
 
 ## Overview
 
-`Genesis CLI` is an open-source project for a coding CLI that:
+`Genesis CLI` is an open-source coding CLI project built around a simple idea:
 
-- uses [`pi-mono`](https://github.com/badlogic/pi-mono) as its sole runtime kernel
-- draws product direction from the workflow quality demonstrated by `Claude Code`
-- keeps runtime concerns and product concerns explicitly separated
+> a strong coding workflow needs both a reliable runtime backbone and a clear product layer.
 
-The repository is currently in the design and setup phase. The main implementation is not available here yet, so this README documents the intended direction, scope, and architectural choices.
+The project focuses on:
 
----
+- turning plan -> modify -> verify into a first-class product experience
+- making tool use, permissions, and execution behavior explicit and reviewable
+- supporting multiple interfaces on top of one shared runtime backbone
 
-## Goals
-
-The project is based on three working goals:
-
-- reuse a mature runtime foundation instead of building a second agent loop
-- design product-layer capabilities such as planning, permissions, and subagent coordination as explicit systems
-- support multiple interfaces on top of one runtime backbone
-
-The general motivation is straightforward: runtime stability and product workflow quality are both important, but they do not need to be implemented in the same layer. `Genesis CLI` uses `pi-mono` for runtime infrastructure and reserves this repository for product behavior and integration design.
+Rather than treating coding as a loose prompt loop, `Genesis CLI` aims to make real repository work more structured, inspectable, and repeatable.
 
 ---
 
-## Scope
+## Design Direction
 
-The planned scope of this repository includes:
+The project is guided by a few core principles:
 
-- plan-driven task execution
-- explicit permission and tool-governance policy
-- structured subagent task contracts
-- shared runtime support for Interactive, Print, JSON, and RPC modes
-
-The project does not aim to clone any upstream tool feature-for-feature. The focus is on clear boundaries, reviewable behavior, and long-term maintainability.
+- **One runtime backbone**: interactive, print, structured, and embedded experiences should share the same core execution model
+- **Clear product boundaries**: planning, permissions, orchestration, and presentation should not collapse into one layer
+- **Operational transparency**: users should be able to understand what was attempted, what was approved, and what actually happened
+- **Long-term maintainability**: architecture should stay reviewable as the project grows
 
 ---
 
-## Architecture
+## What Genesis CLI Tries To Be
 
-### `pi-mono` is the only kernel
+`Genesis CLI` is intended to be:
 
-This project does not build a second agent loop. Core runtime concerns stay with `pi-mono`, including the agent runtime, model integration, session mechanics, and terminal primitives.
+- a serious local coding companion for real repositories
+- a foundation for plan-driven execution and controlled tool use
+- a runtime that can power more than one interface
+- a codebase where advanced workflows remain understandable instead of hidden in prompts
 
-### Product logic lives above the kernel
+It is not trying to be a feature-for-feature clone of any single upstream tool.
 
-Planning, permission policy, tool catalog design, subagent contracts, and mode-specific presentation belong to the product layer. This keeps upstream upgrades possible and reduces pressure to fork runtime internals.
+---
 
-### Plans and verification are first-class
+## Current Status
 
-For meaningful coding work, "understand -> plan -> modify -> verify -> report" should be a product feature, not an informal prompt habit.
+The project is active and already has a runnable implementation.
 
-### Permission policy is explicit
+Today, the repository includes:
 
-Tool execution should be governed by declared policy rather than hidden model behavior. The user should be able to understand what was requested, what was allowed, and what happened.
+- a working CLI entry for real conversations
+- a shared runtime used across multiple modes
+- live validation on the primary model integration path
+- product-layer foundations for planning, permissions, and structured execution
+- technical documents that describe both the current architecture and the next stage of evolution
 
-### One runtime can support multiple interfaces
+The current focus is not a rewrite. It is steady functional progress on a working system, while keeping architectural boundaries sharp.
 
-Interactive TUI, plain-text output, structured JSON, and RPC embedding should reuse the same runtime backbone instead of reimplementing the same logic in parallel.
+---
 
-The current design uses three major layers:
+## Modes
 
-```text
-User / IDE / External Process
-        |
-CLI Modes: Interactive / Print / JSON / RPC
-        |
-Experience Layer: TUI / Formatter / RPC Adapter
-        |
-Product Layer: Plan Engine / Permission Policy / Tool Catalog / Subagent Orchestrator
-        |
-Facade Layer over pi-mono
-        |
-pi-agent-core / pi-ai / pi-coding-agent / pi-tui
-        |
-Filesystem / Shell / Git / MCP / LSP
+The long-term goal is one runtime serving multiple interfaces:
+
+- `Interactive` for day-to-day use
+- `Print` for simple terminal output and scripting
+- `JSON` for automation and CI
+- `RPC` for IDEs and host processes
+
+These modes are expected to differ in presentation, not in core execution semantics.
+
+---
+
+## Project Structure
+
+At a high level, the repository separates:
+
+- runtime foundations
+- product orchestration
+- tool governance
+- interface and presentation layers
+- evaluation and future extension boundaries
+
+The exact package layout is intentionally documented in the technical plan rather than overloaded into the project homepage.
+
+---
+
+## Local Development
+
+Useful commands:
+
+```bash
+npm run build --workspaces
+npm test
+npm run chat:live -- --mode print
+npm run test:live:pi-mono
 ```
 
-The main rule is simple: each capability should have a clear layer boundary. Runtime infrastructure, product orchestration, and user-facing shells should not collapse into one another.
+Local secrets are intentionally kept out of version control. Use `.env.local` for local API keys and endpoint configuration.
 
 ---
 
-## Planned capabilities
+## Documentation
 
-### Plan-driven execution
+Detailed design and implementation notes live in `technical-plan/genesis-cli/`.
 
-Tasks are expected to move through a visible loop: understand, plan, modify, verify, and report. The intent is to make intermediate reasoning operationally useful rather than purely conversational.
+Those documents are meant to do two things:
 
-### Tool governance
-
-Each tool is expected to have four explicit parts:
-
-| Dimension | Purpose |
-|-----------|---------|
-| `identity` | What the tool is |
-| `contract` | How it is called and what it returns |
-| `policy` | Risk level, confirmation rules, concurrency rules |
-| `executor` | How it actually runs |
-
-This makes permission and auditing behavior explicit instead of implicit.
-
-### Subagent protocol
-
-Complex work should be decomposable into structured tasks with fields such as:
-
-- `goal`
-- `allowed_paths`
-- `verification`
-- `stop_conditions`
-
-The purpose is to make delegation reviewable and bounded, especially when multiple agents operate on the same repository.
-
-### Multiple modes on one runtime
-
-The planned interfaces are:
-
-- `Interactive` for daily use
-- `Print` for simple CLI output
-- `JSON` for automation and CI
-- `RPC` for IDEs or other host processes
-
-These are intended to share one runtime and one event model.
+- explain the architecture that is actually being built
+- record the next steps for configuration, hardening, and agent evolution
 
 ---
 
-## Relationship to upstream
+## Near-Term Focus
 
-[`pi-mono`](https://github.com/badlogic/pi-mono) is treated as an upstream dependency and runtime foundation.
+The next stage is focused on:
 
-The working assumptions are:
-
-- runtime-level capability should stay upstream where possible
-- product-specific behavior should live in this repository
-- local integration should prefer facades and adapters over direct dependence on upstream internals
-
-This approach aims to preserve upgradeability while still allowing product-specific iteration.
-
----
-
-## Status
-
-The repository is in an early stage of development.
-
-- public implementation is not committed yet
-- package layout and code skeleton are still being prepared
-- current work is focused on repository setup and architecture consolidation
-
-This README should be read as a project overview and architecture note, not as a feature-complete usage guide.
+- continuing delivery on the working runtime path
+- strengthening configuration and hardening
+- expanding verification and regression coverage
+- evolving subagent orchestration without blurring system boundaries
