@@ -6,12 +6,17 @@
  * without depending on pi-mono.
  */
 
-import type { KernelSessionAdapter, RawUpstreamEvent } from "../../adapters/kernel-session-adapter.js";
+import type {
+	KernelSessionAdapter,
+	RawUpstreamEvent,
+	ToolExecutionGate,
+} from "../../adapters/kernel-session-adapter.js";
 import type { SessionRecoveryData } from "../../types/index.js";
 
 export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	private readonly eventsByPrompt = new Map<string, RawUpstreamEvent[]>();
 	private defaultEvents: RawUpstreamEvent[] = [];
+	private toolExecutionGate: ToolExecutionGate | null = null;
 	private _abortCalled = false;
 	private _closed = false;
 	private _lastInput: string | null = null;
@@ -56,6 +61,10 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 		return this._resumeData;
 	}
 
+	setToolExecutionGate(gate: ToolExecutionGate): void {
+		this.toolExecutionGate = gate;
+	}
+
 	// -----------------------------------------------------------------------
 	// KernelSessionAdapter implementation
 	// -----------------------------------------------------------------------
@@ -63,17 +72,60 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	async *sendPrompt(input: string): AsyncIterable<RawUpstreamEvent> {
 		this._lastInput = input;
 		const events = this.eventsByPrompt.get(input) ?? this.defaultEvents;
-		for (const event of events) {
-			if (this._abortCalled) return;
-			yield event;
-		}
+		yield* this.processEvents(events);
 	}
 
 	async *sendContinue(input: string): AsyncIterable<RawUpstreamEvent> {
 		this._lastInput = input;
 		const events = this.eventsByPrompt.get(input) ?? this.defaultEvents;
+		yield* this.processEvents(events);
+	}
+
+	private async *processEvents(events: RawUpstreamEvent[]): AsyncIterable<RawUpstreamEvent> {
+		const suppressedToolCalls = new Set<string>();
+
 		for (const event of events) {
 			if (this._abortCalled) return;
+
+			if (event.type === "tool_execution_start" && this.toolExecutionGate) {
+				const toolName = typeof event.payload?.toolName === "string" ? event.payload.toolName : "unknown";
+				const toolCallId =
+					typeof event.payload?.toolCallId === "string" ? event.payload.toolCallId : "";
+				const parameters =
+					(event.payload?.parameters as Readonly<Record<string, unknown>> | undefined) ?? {};
+				const decision = this.toolExecutionGate.beforeToolExecution({
+					toolName,
+					toolCallId,
+					parameters,
+				});
+
+				if (decision.type === "allow") {
+					yield event;
+					continue;
+				}
+
+				suppressedToolCalls.add(toolCallId);
+				yield {
+					type: decision.type === "deny" ? "tool_execution_denied" : "permission_request",
+					timestamp: event.timestamp,
+					payload:
+						decision.type === "deny"
+							? { toolName, toolCallId, reason: decision.reason }
+							: { toolName, toolCallId, riskLevel: decision.riskLevel },
+				};
+				continue;
+			}
+
+			const toolCallId =
+				typeof event.payload?.toolCallId === "string" ? event.payload.toolCallId : undefined;
+			if (
+				toolCallId &&
+				suppressedToolCalls.has(toolCallId) &&
+				(event.type === "tool_execution_update" || event.type === "tool_execution_end")
+			) {
+				continue;
+			}
+
 			yield event;
 		}
 	}

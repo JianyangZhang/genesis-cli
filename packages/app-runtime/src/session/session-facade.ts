@@ -8,15 +8,17 @@
  * Core principle: raw upstream events are NEVER exposed.
  */
 
-import type { KernelSessionAdapter } from "../adapters/kernel-session-adapter.js";
+import type {
+	KernelSessionAdapter,
+	ToolExecutionGateDecision,
+} from "../adapters/kernel-session-adapter.js";
 import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
-import type { ToolExecutionContext, ToolExecutionResult, ToolGovernor } from "../governance/tool-governor.js";
+import type { ToolGovernor } from "../governance/tool-governor.js";
 import { updateTaskState as updateContextTaskState } from "../runtime-context.js";
 import { EventNormalizer } from "../services/event-normalizer.js";
 import type { RuntimeContext, SessionId, SessionState, TaskState } from "../types/index.js";
-import { generateEventId } from "./session-events.js";
 import { sessionClosed } from "./session-events.js";
 import { updateSessionStatus, updateTaskState } from "./session-state.js";
 
@@ -65,6 +67,7 @@ export class SessionFacadeImpl implements SessionFacade {
 	private readonly _globalBus: EventBus;
 	private readonly _normalizer: EventNormalizer;
 	private readonly _governor: ToolGovernor | null;
+	private readonly _usesAdapterGovernanceHook: boolean;
 	private readonly _stateListeners = new Set<(state: SessionState) => void>();
 	private _closed = false;
 	private _running = false;
@@ -83,6 +86,7 @@ export class SessionFacadeImpl implements SessionFacade {
 		this._globalBus = globalBus;
 		this._normalizer = new EventNormalizer(initialState.id);
 		this._governor = governor ?? null;
+		this._usesAdapterGovernanceHook = this.installAdapterGovernanceHook();
 
 		// Transition from creating/recovering → active
 		this._state = updateSessionStatus(this._state, "active");
@@ -187,8 +191,8 @@ export class SessionFacadeImpl implements SessionFacade {
 		const normalized = this._normalizer.normalize(raw);
 		if (normalized === null) return; // Drop unrecognized events
 
-		// Governance interception for tool events
-		if (this._governor && normalized.category === "tool") {
+		// Fallback governance interception for adapters that cannot pre-gate tools.
+		if (this._governor && !this._usesAdapterGovernanceHook && normalized.category === "tool") {
 			const governed = this.applyGovernance(normalized);
 			if (governed !== null) {
 				this._events.emit(governed);
@@ -200,7 +204,48 @@ export class SessionFacadeImpl implements SessionFacade {
 
 		this._events.emit(normalized);
 		this._globalBus.emit(normalized);
+		if (this._governor && normalized.type === "tool_completed") {
+			this._governor.afterExecution({
+				toolName: normalized.toolName,
+				toolCallId: normalized.toolCallId,
+				status: normalized.status,
+				durationMs: normalized.durationMs,
+			});
+		}
 		this.handleStateUpdate(normalized);
+	}
+
+	private installAdapterGovernanceHook(): boolean {
+		if (!this._governor || typeof this._adapter.setToolExecutionGate !== "function") {
+			return false;
+		}
+
+		this._adapter.setToolExecutionGate({
+			beforeToolExecution: ({ toolName, toolCallId, parameters }): ToolExecutionGateDecision => {
+				const decision = this._governor!.beforeExecution({
+					sessionId: this._state.id.value,
+					toolName,
+					toolCallId,
+					workingDirectory: this._context.workingDirectory,
+					sessionMode: this._context.mode,
+					isSubAgent: false,
+					targetPath: extractTargetPath(parameters),
+					parameters,
+				});
+
+				if (decision.type === "allow") {
+					return decision;
+				}
+
+				return {
+					type: decision.type,
+					reason: decision.reason,
+					riskLevel: decision.riskLevel,
+				};
+			},
+		});
+
+		return true;
 	}
 
 	/**
@@ -217,8 +262,12 @@ export class SessionFacadeImpl implements SessionFacade {
 					: undefined;
 
 			const decision = this._governor.beforeExecution({
+				sessionId: this._state.id.value,
 				toolName: normalized.toolName,
 				toolCallId: normalized.toolCallId,
+				workingDirectory: this._context.workingDirectory,
+				sessionMode: this._context.mode,
+				isSubAgent: false,
 				targetPath,
 				parameters: normalized.parameters,
 			});
@@ -300,4 +349,22 @@ export class SessionFacadeImpl implements SessionFacade {
 			throw new Error("Session is already running a prompt or continue operation");
 		}
 	}
+}
+
+function extractTargetPath(
+	parameters: Readonly<Record<string, unknown>> | undefined,
+): string | undefined {
+	if (!parameters) {
+		return undefined;
+	}
+
+	if (typeof parameters.file_path === "string") {
+		return parameters.file_path;
+	}
+
+	if (typeof parameters.path === "string") {
+		return parameters.path;
+	}
+
+	return undefined;
 }

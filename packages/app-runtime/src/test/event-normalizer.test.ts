@@ -81,6 +81,27 @@ describe("EventNormalizer", () => {
 		}
 	});
 
+	it("maps tool_execution_denied to tool_denied", () => {
+		const raw: RawUpstreamEvent = {
+			type: "tool_execution_denied",
+			timestamp: 4500,
+			payload: {
+				toolName: "bash",
+				toolCallId: "call-3",
+				reason: "Permission denied",
+			},
+		};
+
+		const result = normalizer.normalize(raw);
+
+		expect(result).not.toBeNull();
+		expect(result!.type).toBe("tool_denied");
+		if (result!.type === "tool_denied") {
+			expect(result!.toolName).toBe("bash");
+			expect(result!.reason).toBe("Permission denied");
+		}
+	});
+
 	it("maps compaction_start/end to compaction events", () => {
 		const startRaw: RawUpstreamEvent = { type: "compaction_start", timestamp: 5000 };
 		const startResult = normalizer.normalize(startRaw);

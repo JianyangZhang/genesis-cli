@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KernelSessionAdapter, RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
+import { createToolGovernor } from "../governance/tool-governor.js";
 import { createRuntimeContext } from "../runtime-context.js";
 import { SessionFacadeImpl } from "../session/session-facade.js";
 import { createInitialSessionState } from "../session/session-state.js";
@@ -338,5 +339,64 @@ describe("SessionFacade", () => {
 		await facade.prompt("first");
 		await facade.prompt("second");
 		// No error thrown
+	});
+
+	it("gates tool execution before emitting tool_started when adapter supports governance hooks", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["bash"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["bash"]),
+		});
+		const governor = createToolGovernor();
+		governor.catalog.register({
+			identity: { name: "bash", category: "command-execution" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L3",
+				readOnly: false,
+				concurrency: "unlimited",
+				confirmation: "always",
+				subAgentAllowed: true,
+				timeoutMs: 60_000,
+			},
+			executorTag: "bash",
+		});
+
+		adapter.enqueueDefaultEvents([
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "bash",
+					toolCallId: "bash_1",
+					parameters: { command: "echo hello" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: { toolName: "bash", toolCallId: "bash_1", status: "success", durationMs: 20 },
+			},
+		]);
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+		const received: RuntimeEvent[] = [];
+		globalBus.onCategory("permission", (event) => received.push(event));
+		globalBus.onCategory("tool", (event) => received.push(event));
+
+		await facade.prompt("run bash");
+
+		expect(received).toHaveLength(1);
+		expect(received[0]!.type).toBe("permission_requested");
+		expect(governor.audit.size).toBe(0);
 	});
 });

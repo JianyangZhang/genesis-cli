@@ -24,11 +24,14 @@ import type {
 	ToolDefinition,
 } from "@genesis-cli/tools";
 import {
+	classifyRisk,
 	createAuditLog,
 	createMutationQueue,
 	createPermissionEngine,
 	createToolCatalog,
+	isDestructiveCommand,
 } from "@genesis-cli/tools";
+import { createHash } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,8 +39,12 @@ import {
 
 /** Input for a pre-execution governance check. */
 export interface ToolExecutionContext {
+	readonly sessionId: string;
 	readonly toolName: string;
 	readonly toolCallId: string;
+	readonly workingDirectory: string;
+	readonly sessionMode: string;
+	readonly isSubAgent: boolean;
 	readonly targetPath?: string;
 	readonly commandDigest?: string;
 	readonly parameters?: Readonly<Record<string, unknown>>;
@@ -94,14 +101,75 @@ export function createToolGovernor(): ToolGovernor {
 	const permissions = createPermissionEngine();
 	const mutations = createMutationQueue();
 	const audit = createAuditLog();
+	const activeExecutions = new Map<
+		string,
+		{ toolName: string; targetPath?: string; riskLevel: RiskLevel }
+	>();
+
+	function deriveCommandDigest(
+		parameters: Readonly<Record<string, unknown>> | undefined,
+		explicitDigest: string | undefined,
+	): string | undefined {
+		if (explicitDigest) return explicitDigest;
+
+		const command = parameters?.command;
+		if (typeof command !== "string" || command.length === 0) {
+			return undefined;
+		}
+
+		return `sha256:${createHash("sha256").update(command).digest("hex")}`;
+	}
+
+	function recordDeniedAudit(
+		toolName: string,
+		toolCallId: string,
+		riskLevel: RiskLevel,
+		reason: string,
+		targetPath?: string,
+	): void {
+		const toolDef = catalog.get(toolName);
+		const now = Date.now();
+		const entry: AuditEntry = {
+			id: `audit_${toolCallId}`,
+			toolCallId,
+			toolName,
+			category: toolDef?.identity.category ?? "unknown",
+			status: "denied",
+			riskLevel,
+			startedAt: now,
+			completedAt: now,
+			durationMs: 0,
+			targetPath,
+			error: reason,
+			permissionDecision: "deny",
+		};
+		audit.record(entry);
+	}
 
 	return {
 		beforeExecution(context: ToolExecutionContext): GovernorDecision {
-			const { toolName, toolCallId, targetPath, commandDigest } = context;
+			const {
+				sessionId,
+				toolName,
+				toolCallId,
+				workingDirectory,
+				sessionMode,
+				isSubAgent,
+				targetPath,
+				commandDigest,
+				parameters,
+			} = context;
 
 			// 1. Look up tool in catalog
 			const toolDef: ToolDefinition | undefined = catalog.get(toolName);
 			if (!toolDef) {
+				recordDeniedAudit(
+					toolName,
+					toolCallId,
+					"L4",
+					`Tool "${toolName}" is not registered in the catalog`,
+					targetPath,
+				);
 				return {
 					type: "deny",
 					reason: `Tool "${toolName}" is not registered in the catalog`,
@@ -110,20 +178,28 @@ export function createToolGovernor(): ToolGovernor {
 			}
 
 			// 2. Build PermissionContext from tool definition + execution context
+			const command = parameters?.command;
+			const effectiveRiskLevel =
+				typeof command === "string" && isDestructiveCommand(command)
+					? "L4"
+					: classifyRisk(toolDef, parameters);
+			const effectiveCommandDigest = deriveCommandDigest(parameters, commandDigest);
 			const permContext: PermissionContext = {
+				sessionId,
 				toolIdentity: toolDef.identity,
-				toolPolicy: toolDef.policy,
+				toolPolicy: { ...toolDef.policy, riskLevel: effectiveRiskLevel },
 				targetPath,
-				commandDigest,
-				workingDirectory: "",  // Set by the session facade
-				sessionMode: "",       // Set by the session facade
-				isSubAgent: false,     // Set by the session facade
+				commandDigest: effectiveCommandDigest,
+				workingDirectory,
+				sessionMode,
+				isSubAgent,
 				toolCallId,
 			};
 
 			// 3. Evaluate permission
 			const decision = permissions.evaluate(permContext);
 			if (decision.verdict === "deny") {
+				recordDeniedAudit(toolName, toolCallId, decision.riskLevel, decision.reason ?? "Permission denied", targetPath);
 				return {
 					type: "deny",
 					reason: decision.reason ?? `Permission denied for "${toolName}"`,
@@ -145,22 +221,25 @@ export function createToolGovernor(): ToolGovernor {
 					toolCallId,
 				});
 				if (enqueueResult.type === "conflict") {
+					recordDeniedAudit(toolName, toolCallId, effectiveRiskLevel, enqueueResult.message, targetPath);
 					return {
 						type: "deny",
 						reason: enqueueResult.message,
-						riskLevel: toolDef.policy.riskLevel,
+						riskLevel: effectiveRiskLevel,
 					};
 				}
 			}
 
+			activeExecutions.set(toolCallId, { toolName, targetPath, riskLevel: effectiveRiskLevel });
 			return { type: "allow" };
 		},
 
 		afterExecution(result: ToolExecutionResult): void {
 			const { toolCallId, toolName, status, targetPath, durationMs } = result;
+			const active = activeExecutions.get(toolCallId);
 
 			// 1. Release mutation queue entry if applicable
-			const toolDef = catalog.get(toolName);
+			const toolDef = catalog.get(active?.toolName ?? toolName);
 			if (toolDef?.policy.concurrency === "per_target") {
 				mutations.complete(toolCallId);
 			}
@@ -173,13 +252,14 @@ export function createToolGovernor(): ToolGovernor {
 				toolName,
 				category: toolDef?.identity.category ?? "unknown",
 				status,
-				riskLevel: toolDef?.policy.riskLevel ?? "L4",
+				riskLevel: active?.riskLevel ?? toolDef?.policy.riskLevel ?? "L4",
 				startedAt: durationMs ? now - durationMs : now,
 				completedAt: now,
 				durationMs: durationMs ?? 0,
-				targetPath,
+				targetPath: targetPath ?? active?.targetPath,
 			};
 			audit.record(entry);
+			activeExecutions.delete(toolCallId);
 		},
 
 		recordSessionApproval(entry: ApprovalCacheEntry): void {

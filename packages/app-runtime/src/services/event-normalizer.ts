@@ -84,6 +84,16 @@ export class EventNormalizer {
 				};
 			}
 
+			case "tool_execution_denied":
+				return {
+					...base,
+					category: "tool",
+					type: "tool_denied",
+					toolName: (raw.payload?.toolName as string) ?? "unknown",
+					toolCallId: (raw.payload?.toolCallId as string) ?? "",
+					reason: (raw.payload?.reason as string) ?? "Tool execution denied",
+				};
+
 			// -- Compaction --
 			case "compaction_start":
 				return {

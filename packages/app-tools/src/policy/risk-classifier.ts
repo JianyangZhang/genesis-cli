@@ -24,6 +24,14 @@ const CATEGORY_DEFAULTS: Readonly<Record<ToolCategory, RiskLevel>> = {
 	"sub-agent": "L3",
 };
 
+const RISK_RANK: Readonly<Record<RiskLevel, number>> = {
+	L0: 0,
+	L1: 1,
+	L2: 2,
+	L3: 3,
+	L4: 4,
+};
+
 // ---------------------------------------------------------------------------
 // Destructive command patterns (L4 escalation)
 // ---------------------------------------------------------------------------
@@ -53,15 +61,9 @@ export function classifyRisk(
 	toolDef: ToolDefinition,
 	parameters?: Readonly<Record<string, unknown>>,
 ): RiskLevel {
-	// If the tool policy already specifies a non-default risk, honour it.
 	const policyLevel = toolDef.policy.riskLevel;
-	if (policyLevel !== "L0") {
-		return policyLevel;
-	}
-
-	// Category-based default.
 	const category = toolDef.identity.category as ToolCategory;
-	let level = CATEGORY_DEFAULTS[category] ?? "L3";
+	let level = higherRisk(policyLevel, CATEGORY_DEFAULTS[category] ?? "L3");
 
 	// Escalate command-execution tools with destructive patterns.
 	if (category === "command-execution" && parameters) {
@@ -79,4 +81,8 @@ export function classifyRisk(
  */
 export function isDestructiveCommand(command: string): boolean {
 	return DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
+}
+
+function higherRisk(a: RiskLevel, b: RiskLevel): RiskLevel {
+	return RISK_RANK[a] >= RISK_RANK[b] ? a : b;
 }

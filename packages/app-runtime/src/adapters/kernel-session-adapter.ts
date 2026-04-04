@@ -24,6 +24,21 @@ export interface RawUpstreamEvent {
 	readonly payload?: Readonly<Record<string, unknown>>;
 }
 
+export interface ToolExecutionGateContext {
+	readonly toolName: string;
+	readonly toolCallId: string;
+	readonly parameters: Readonly<Record<string, unknown>>;
+}
+
+export type ToolExecutionGateDecision =
+	| { readonly type: "allow" }
+	| { readonly type: "deny"; readonly reason: string; readonly riskLevel: string }
+	| { readonly type: "ask_user"; readonly reason: string; readonly riskLevel: string };
+
+export interface ToolExecutionGate {
+	beforeToolExecution(context: ToolExecutionGateContext): ToolExecutionGateDecision;
+}
+
 // ---------------------------------------------------------------------------
 // Adapter interface
 // ---------------------------------------------------------------------------
@@ -36,6 +51,14 @@ export interface RawUpstreamEvent {
  * need updating — nothing else in app-runtime changes.
  */
 export interface KernelSessionAdapter {
+	/**
+	 * Optional pre-execution governance hook.
+	 *
+	 * Adapters that support real tool interception should call this before
+	 * dispatching a tool to the upstream executor.
+	 */
+	setToolExecutionGate?(gate: ToolExecutionGate): void;
+
 	/** Send a user prompt and receive raw upstream events as a stream. */
 	sendPrompt(input: string): AsyncIterable<RawUpstreamEvent>;
 

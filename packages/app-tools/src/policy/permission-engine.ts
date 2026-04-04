@@ -42,6 +42,7 @@ export function createPermissionEngine(): PermissionEngine {
 	const approvals = new Map<string, ApprovalCacheEntry>();
 
 	function cacheKey(
+		sessionId: string,
 		toolName: string,
 		riskLevel: RiskLevel,
 		targetPath: string | undefined,
@@ -49,12 +50,12 @@ export function createPermissionEngine(): PermissionEngine {
 	): string {
 		const normalizedTarget = targetPath ? nodeNormalize(targetPath) : "*";
 		const digest = commandDigest ?? "*";
-		return `${toolName}:${riskLevel}:${normalizedTarget}:${digest}`;
+		return `${sessionId}:${toolName}:${riskLevel}:${normalizedTarget}:${digest}`;
 	}
 
 	return {
 		evaluate(context: PermissionContext): PermissionDecision {
-			const { toolPolicy, toolIdentity, isSubAgent, targetPath, commandDigest, workingDirectory } =
+			const { sessionId, toolPolicy, toolIdentity, isSubAgent, targetPath, commandDigest, workingDirectory } =
 				context;
 			const riskLevel = toolPolicy.riskLevel;
 
@@ -78,7 +79,7 @@ export function createPermissionEngine(): PermissionEngine {
 			}
 
 			// --- Check session approval cache (exact match only for L2+) ---
-			const key = cacheKey(toolIdentity.name, riskLevel, targetPath, commandDigest);
+			const key = cacheKey(sessionId, toolIdentity.name, riskLevel, targetPath, commandDigest);
 			const cached = approvals.get(key);
 			if (cached) {
 				return { verdict: "allow", riskLevel, reason: "Session-approved" };
@@ -107,7 +108,13 @@ export function createPermissionEngine(): PermissionEngine {
 		},
 
 		recordApproval(entry: ApprovalCacheEntry): void {
-			const key = cacheKey(entry.toolName, entry.riskLevel, entry.targetPattern, entry.commandDigest);
+			const key = cacheKey(
+				entry.sessionId,
+				entry.toolName,
+				entry.riskLevel,
+				entry.targetPattern,
+				entry.commandDigest,
+			);
 			approvals.set(key, entry);
 		},
 

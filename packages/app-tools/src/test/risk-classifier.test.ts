@@ -84,6 +84,11 @@ describe("classifyRisk", () => {
 			expect(classifyRisk(tool, { command: "git push origin main --force" })).toBe("L4");
 		});
 
+		it("escalates destructive commands even when tool policy defaults to L3", () => {
+			const tool = createTestTool("command-execution", "L3");
+			expect(classifyRisk(tool, { command: "rm -rf /tmp/data" })).toBe("L4");
+		});
+
 		it("does not escalate non-destructive commands", () => {
 			const tool = createTestTool("command-execution");
 			expect(classifyRisk(tool, { command: "ls -la" })).toBe("L3");

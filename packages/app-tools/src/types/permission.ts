@@ -39,6 +39,9 @@ export interface PermissionDecision {
 // ---------------------------------------------------------------------------
 
 export interface PermissionContext {
+	/** Session identifier for session-scoped approval caching. */
+	readonly sessionId: string;
+
 	/** The tool being invoked. */
 	readonly toolIdentity: ToolIdentity;
 
@@ -69,6 +72,7 @@ export interface PermissionContext {
 // ---------------------------------------------------------------------------
 
 export interface ApprovalCacheEntry {
+	readonly sessionId: string;
 	readonly toolName: string;
 	readonly riskLevel: RiskLevel;
 	readonly targetPattern: string;

@@ -22,6 +22,7 @@ function createPolicy(overrides: Partial<ToolPolicy> = {}): ToolPolicy {
 
 function createContext(overrides: Partial<PermissionContext> = {}): PermissionContext {
 	return {
+		sessionId: "session-1",
 		toolIdentity: { name: "test_tool", category: "file-read" },
 		toolPolicy: createPolicy(),
 		workingDirectory: "/project",
@@ -117,6 +118,7 @@ describe("PermissionEngine", () => {
 		it("allows L4 tools when exact session-approved", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "test_tool",
 				riskLevel: "L4",
 				targetPattern: "/project/target",
@@ -151,6 +153,7 @@ describe("PermissionEngine", () => {
 
 			// Simulate session approval
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "test_tool",
 				riskLevel: "L2",
 				targetPattern: "/project/src/main.ts",
@@ -171,6 +174,7 @@ describe("PermissionEngine", () => {
 		it("wildcard approval does NOT cover a specific target at L3", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "test_tool",
 				riskLevel: "L3",
 				targetPattern: "*",
@@ -192,6 +196,7 @@ describe("PermissionEngine", () => {
 		it("clearApprovals resets the cache", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "test_tool",
 				riskLevel: "L2",
 				targetPattern: "*",
@@ -214,6 +219,7 @@ describe("PermissionEngine", () => {
 		it("L2 approval does not satisfy L3 for the same tool", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "test_tool",
 				riskLevel: "L2",
 				targetPattern: "/project/src/main.ts",
@@ -234,6 +240,7 @@ describe("PermissionEngine", () => {
 		it("L3 approval for target A does not auto-allow target B", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "test_tool",
 				riskLevel: "L3",
 				targetPattern: "/project/a.ts",
@@ -254,6 +261,7 @@ describe("PermissionEngine", () => {
 		it("commandDigest match grants approval", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "bash",
 				riskLevel: "L3",
 				targetPattern: "*",
@@ -276,6 +284,7 @@ describe("PermissionEngine", () => {
 		it("commandDigest mismatch does not grant approval", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "bash",
 				riskLevel: "L3",
 				targetPattern: "*",
@@ -298,6 +307,7 @@ describe("PermissionEngine", () => {
 		it("path normalization in cache key resolves '..' segments", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
+				sessionId: "session-1",
 				toolName: "test_tool",
 				riskLevel: "L2",
 				targetPattern: "/project/main.ts",
@@ -313,6 +323,28 @@ describe("PermissionEngine", () => {
 			);
 
 			expect(decision.verdict).toBe("allow");
+		});
+
+		it("session-scoped approval does not leak across sessions", () => {
+			const engine = createPermissionEngine();
+			engine.recordApproval({
+				sessionId: "session-1",
+				toolName: "test_tool",
+				riskLevel: "L2",
+				targetPattern: "/project/src/main.ts",
+				verdict: "allow_for_session",
+				grantedAt: Date.now(),
+			});
+
+			const decision = engine.evaluate(
+				createContext({
+					sessionId: "session-2",
+					toolPolicy: createPolicy({ riskLevel: "L2" }),
+					targetPath: "/project/src/main.ts",
+				}),
+			);
+
+			expect(decision.verdict).toBe("ask_user");
 		});
 	});
 

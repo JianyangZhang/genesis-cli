@@ -12,13 +12,11 @@ function makeToolDef(overrides: Partial<ToolDefinition> = {}): ToolDefinition {
 		identity: {
 			name: "test_tool",
 			category: "file-read",
-			version: 1,
-			description: "A test tool",
 		},
 		contract: {
-			parameters: { type: "object", properties: {}, required: [] },
+			parameterSchema: { type: "object", properties: {} },
 			output: { type: "text" },
-			errors: [],
+			errorTypes: [],
 		},
 		policy: {
 			riskLevel: "L0",
@@ -35,7 +33,7 @@ function makeToolDef(overrides: Partial<ToolDefinition> = {}): ToolDefinition {
 
 const L0_READ = makeToolDef();
 const L2_EDIT = makeToolDef({
-	identity: { name: "edit", category: "file-mutation", version: 1, description: "Edit a file" },
+	identity: { name: "edit", category: "file-mutation" },
 	policy: {
 		riskLevel: "L2",
 		readOnly: false,
@@ -47,7 +45,7 @@ const L2_EDIT = makeToolDef({
 	executorTag: "edit",
 });
 const L3_BASH = makeToolDef({
-	identity: { name: "bash", category: "command-execution", version: 1, description: "Run a command" },
+	identity: { name: "bash", category: "command-execution" },
 	policy: {
 		riskLevel: "L3",
 		readOnly: false,
@@ -64,15 +62,24 @@ const L3_BASH = makeToolDef({
 // ---------------------------------------------------------------------------
 
 describe("ToolGovernor", () => {
+	function executionContext(overrides: Partial<ToolExecutionContext> = {}): ToolExecutionContext {
+		return {
+			sessionId: "session-1",
+			toolName: "test_tool",
+			toolCallId: "call_1",
+			workingDirectory: "/project",
+			sessionMode: "interactive",
+			isSubAgent: false,
+			...overrides,
+		};
+	}
+
 	describe("beforeExecution", () => {
 		it("allows a registered L0 tool", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L0_READ);
 
-			const decision = governor.beforeExecution({
-				toolName: "test_tool",
-				toolCallId: "call_1",
-			});
+			const decision = governor.beforeExecution(executionContext());
 
 			expect(decision.type).toBe("allow");
 		});
@@ -80,10 +87,7 @@ describe("ToolGovernor", () => {
 		it("denies an unregistered tool", () => {
 			const governor = createToolGovernor();
 
-			const decision = governor.beforeExecution({
-				toolName: "unknown_tool",
-				toolCallId: "call_1",
-			});
+			const decision = governor.beforeExecution(executionContext({ toolName: "unknown_tool" }));
 
 			expect(decision.type).toBe("deny");
 			if (decision.type === "deny") {
@@ -95,11 +99,10 @@ describe("ToolGovernor", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L2_EDIT);
 
-			const decision = governor.beforeExecution({
+			const decision = governor.beforeExecution(executionContext({
 				toolName: "edit",
-				toolCallId: "call_1",
 				targetPath: "/project/src/main.ts",
-			});
+			}));
 
 			expect(decision.type).toBe("ask_user");
 			if (decision.type === "ask_user") {
@@ -113,6 +116,7 @@ describe("ToolGovernor", () => {
 
 			// First call: approve via session approval
 			governor.recordSessionApproval({
+				sessionId: "session-1",
 				toolName: "edit",
 				riskLevel: "L2",
 				targetPattern: "/project/src/main.ts",
@@ -121,19 +125,19 @@ describe("ToolGovernor", () => {
 			});
 
 			// First execution: accepted
-			const first = governor.beforeExecution({
+			const first = governor.beforeExecution(executionContext({
 				toolName: "edit",
 				toolCallId: "call_1",
 				targetPath: "/project/src/main.ts",
-			});
+			}));
 			expect(first.type).toBe("allow");
 
 			// Second execution to same file: conflict
-			const second = governor.beforeExecution({
+			const second = governor.beforeExecution(executionContext({
 				toolName: "edit",
 				toolCallId: "call_2",
 				targetPath: "/project/src/main.ts",
-			});
+			}));
 			expect(second.type).toBe("deny");
 			if (second.type === "deny") {
 				expect(second.reason).toContain("already being mutated");
@@ -144,18 +148,46 @@ describe("ToolGovernor", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L3_BASH);
 
-			// L3_BASH has subAgentAllowed: false. The governor builds a PermissionContext
-			// with isSubAgent: false by default, so this should actually pass the sub-agent check.
-			// To test the sub-agent deny path, we'd need to set isSubAgent in the context,
-			// but ToolExecutionContext doesn't have isSubAgent. That's okay — the governor
-			// defaults to isSubAgent: false, which means the deny path is tested at the
-			// permission-engine level. Here we just verify L3 asks for approval.
-			const decision = governor.beforeExecution({
+			const decision = governor.beforeExecution(executionContext({
 				toolName: "bash",
-				toolCallId: "call_1",
-			});
+				isSubAgent: true,
+			}));
+
+			expect(decision.type).toBe("deny");
+		});
+
+		it("mentions outside-cwd paths using the real working directory", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L2_EDIT);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "edit",
+					targetPath: "/etc/passwd",
+				}),
+			);
 
 			expect(decision.type).toBe("ask_user");
+			if (decision.type === "ask_user") {
+				expect(decision.reason).toContain("outside working directory");
+			}
+		});
+
+		it("escalates destructive commands to L4 before permission evaluation", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					parameters: { command: "rm -rf /tmp/danger" },
+				}),
+			);
+
+			expect(decision.type).toBe("deny");
+			if (decision.type === "deny") {
+				expect(decision.riskLevel).toBe("L4");
+			}
 		});
 	});
 
@@ -164,10 +196,7 @@ describe("ToolGovernor", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L0_READ);
 
-			governor.beforeExecution({
-				toolName: "test_tool",
-				toolCallId: "call_1",
-			});
+			governor.beforeExecution(executionContext());
 
 			governor.afterExecution({
 				toolName: "test_tool",
@@ -188,6 +217,7 @@ describe("ToolGovernor", () => {
 			governor.catalog.register(L2_EDIT);
 
 			governor.recordSessionApproval({
+				sessionId: "session-1",
 				toolName: "edit",
 				riskLevel: "L2",
 				targetPattern: "/project/src/main.ts",
@@ -196,11 +226,11 @@ describe("ToolGovernor", () => {
 			});
 
 			// First execution
-			governor.beforeExecution({
+			governor.beforeExecution(executionContext({
 				toolName: "edit",
 				toolCallId: "call_1",
 				targetPath: "/project/src/main.ts",
-			});
+			}));
 
 			expect(governor.mutations.isPending("/project/src/main.ts")).toBe(true);
 
@@ -215,11 +245,11 @@ describe("ToolGovernor", () => {
 			expect(governor.mutations.isPending("/project/src/main.ts")).toBe(false);
 
 			// Second execution should now succeed
-			const second = governor.beforeExecution({
+			const second = governor.beforeExecution(executionContext({
 				toolName: "edit",
 				toolCallId: "call_2",
 				targetPath: "/project/src/main.ts",
-			});
+			}));
 			expect(second.type).toBe("allow");
 		});
 	});
@@ -230,15 +260,15 @@ describe("ToolGovernor", () => {
 			governor.catalog.register(L2_EDIT);
 
 			// Without approval: ask_user
-			const first = governor.beforeExecution({
+			const first = governor.beforeExecution(executionContext({
 				toolName: "edit",
-				toolCallId: "call_1",
 				targetPath: "/project/src/main.ts",
-			});
+			}));
 			expect(first.type).toBe("ask_user");
 
 			// Record approval
 			governor.recordSessionApproval({
+				sessionId: "session-1",
 				toolName: "edit",
 				riskLevel: "L2",
 				targetPattern: "/project/src/main.ts",
@@ -247,11 +277,11 @@ describe("ToolGovernor", () => {
 			});
 
 			// With approval: allow
-			const second = governor.beforeExecution({
+			const second = governor.beforeExecution(executionContext({
 				toolName: "edit",
 				toolCallId: "call_2",
 				targetPath: "/project/src/main.ts",
-			});
+			}));
 			expect(second.type).toBe("allow");
 		});
 	});
