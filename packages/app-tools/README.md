@@ -2,14 +2,13 @@
 
 ## 职责
 
-工具治理。定义工具 catalog（identity / contract / policy / executor 四段式模型）、风险分级（L0-L4）、权限策略和执行包装器。
+工具治理。定义工具 catalog（identity / contract / policy / executor 四段式模型）、风险分级（L0-L4）、权限策略、命令分类、文件变更队列和审计日志。
 
 ## 导出
 
-- 工具 catalog 类型与注册接口
-- 风险分级枚举（L0-L4）
-- 权限策略类型
-- 工具调用结果类型（成功/失败/拒绝）
+- **类型**: `ToolDefinition`, `ToolContract`, `ToolPolicy`, `ToolIdentity`, `ToolCategory`, `RiskLevel`, `ToolResultStatus`, `PermissionContext`, `PermissionDecision`, `CommandClass`, `CommandPolicy`, `AuditEntry`, `MutationTarget`, `McpServerDescriptor`, `McpToolEntry` 等
+- **工厂**: `createToolCatalog()`, `createPermissionEngine()`, `createMutationQueue()`, `createAuditLog()`
+- **工具函数**: `classifyRisk()`, `isDestructiveCommand()`, `classifyCommand()`, `createCommandPolicy()`
 
 ## 依赖方向
 
@@ -24,10 +23,15 @@
 
 ## 内部结构
 
-- `domain/` — 工具模型、风险分级、权限标签
-- `services/` — catalog 查询、策略判定
-- `types/` — 包级公共类型定义
+- `types/` — 包级公共类型定义（四段式模型、权限、命令、审计、变更、MCP）
+- `catalog/` — 工具注册表（ToolCatalog）
+- `policy/` — 权限引擎（PermissionEngine）、风险分级（classifyRisk）、命令分类（classifyCommand）
+- `mutation-queue/` — 文件变更队列（MutationQueue）
+- `audit/` — 审计日志（AuditLog）
+- `domain/` — 领域类型 barrel
+- `services/` — 服务工厂 barrel
 
 ## 验证
 
 - `npx tsc --noEmit` 类型检查通过
+- `npx vitest run` 全部测试通过

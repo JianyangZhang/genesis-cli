@@ -1,2 +1,29 @@
-// domain/ — Tool models, risk classification, permission labels.
+// domain/ — Tool models, risk classification, permission labels, and all type definitions.
 export type { RiskLevel, ToolIdentity, ToolResultStatus } from "../types/index.js";
+export type {
+	ToolCategory,
+	ParameterSchema,
+	ParameterProperty,
+	OutputDescriptor,
+	ToolErrorKind,
+	ToolError,
+	ToolContract,
+	ConfirmationMode,
+	ConcurrencyModel,
+	ToolPolicy,
+	ToolDefinition,
+	PermissionVerdict,
+	PermissionDecision,
+	PermissionContext,
+	ApprovalCacheEntry,
+	CommandClass,
+	CommandPolicy,
+	AuditEntry,
+	AuditLog,
+	MutationTarget,
+	QueueConflict,
+	EnqueueResult,
+	McpTransportType,
+	McpServerDescriptor,
+	McpToolEntry,
+} from "../types/index.js";

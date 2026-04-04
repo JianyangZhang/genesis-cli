@@ -21,3 +21,29 @@ export interface ToolIdentity {
 	readonly name: string;
 	readonly category: string;
 }
+
+// ---------------------------------------------------------------------------
+// Re-exports from sub-modules
+// ---------------------------------------------------------------------------
+
+export type { ToolCategory } from "./tool-category.js";
+export type {
+	ParameterSchema,
+	ParameterProperty,
+	OutputDescriptor,
+	ToolErrorKind,
+	ToolError,
+	ToolContract,
+} from "./tool-contract.js";
+export type { ConfirmationMode, ConcurrencyModel, ToolPolicy } from "./tool-policy.js";
+export type { ToolDefinition } from "./tool-definition.js";
+export type {
+	PermissionVerdict,
+	PermissionDecision,
+	PermissionContext,
+	ApprovalCacheEntry,
+} from "./permission.js";
+export type { CommandClass, CommandPolicy } from "./command-policy.js";
+export type { AuditEntry, AuditLog } from "./audit.js";
+export type { MutationTarget, QueueConflict, EnqueueResult } from "./mutation.js";
+export type { McpTransportType, McpServerDescriptor, McpToolEntry } from "./mcp.js";
