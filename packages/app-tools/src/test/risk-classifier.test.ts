@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyRisk, isDestructiveCommand } from "../policy/risk-classifier.js";
-import type { ToolDefinition } from "../types/tool-definition.js";
 import type { RiskLevel } from "../types/index.js";
+import type { ToolDefinition } from "../types/tool-definition.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers

@@ -57,17 +57,14 @@ const DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
  *   2. Category default → use mapping
  *   3. Parameter inspection → escalate if destructive
  */
-export function classifyRisk(
-	toolDef: ToolDefinition,
-	parameters?: Readonly<Record<string, unknown>>,
-): RiskLevel {
+export function classifyRisk(toolDef: ToolDefinition, parameters?: Readonly<Record<string, unknown>>): RiskLevel {
 	const policyLevel = toolDef.policy.riskLevel;
 	const category = toolDef.identity.category as ToolCategory;
 	let level = higherRisk(policyLevel, CATEGORY_DEFAULTS[category] ?? "L3");
 
 	// Escalate command-execution tools with destructive patterns.
 	if (category === "command-execution" && parameters) {
-		const command = parameters["command"];
+		const command = parameters.command;
 		if (typeof command === "string" && isDestructiveCommand(command)) {
 			level = "L4";
 		}

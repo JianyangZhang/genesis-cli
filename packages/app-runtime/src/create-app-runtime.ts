@@ -9,8 +9,8 @@
 import type { KernelSessionAdapter } from "./adapters/kernel-session-adapter.js";
 import type { EventBus } from "./events/event-bus.js";
 import { createEventBus } from "./events/event-bus.js";
-import { createToolGovernor } from "./governance/tool-governor.js";
 import type { ToolGovernor } from "./governance/tool-governor.js";
+import { createToolGovernor } from "./governance/tool-governor.js";
 import { createRuntimeContext } from "./runtime-context.js";
 import { sessionCreated, sessionResumed } from "./session/session-events.js";
 import type { SessionFacade } from "./session/session-facade.js";

@@ -8,6 +8,7 @@
 import type {
 	CompactionSummary,
 	ModelDescriptor,
+	PlanSummary,
 	SessionId,
 	SessionRecoveryData,
 	SessionState,
@@ -83,4 +84,8 @@ export function updateCompactionSummary(state: SessionState, summary: Compaction
 
 export function updateTaskState(state: SessionState, taskState: TaskState): SessionState {
 	return { ...state, taskState, updatedAt: Date.now() };
+}
+
+export function updatePlanSummary(state: SessionState, planSummary: PlanSummary | null): SessionState {
+	return { ...state, planSummary, updatedAt: Date.now() };
 }

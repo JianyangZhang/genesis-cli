@@ -93,10 +93,7 @@ export function classifyCommand(command: string): CommandClass {
  * Build a full CommandPolicy for a command, including classification,
  * timeout defaults, and risk level.
  */
-export function createCommandPolicy(
-	command: string,
-	cwd: string,
-): CommandPolicy {
+export function createCommandPolicy(command: string, cwd: string): CommandPolicy {
 	const commandClass = classifyCommand(command);
 
 	return {

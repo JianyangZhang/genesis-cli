@@ -18,11 +18,7 @@
  * - "web_server"         — starts a persistent HTTP/WebSocket server
  * - "background_process" — runs detached, non-blocking
  */
-export type CommandClass =
-	| "short_command"
-	| "long_task"
-	| "web_server"
-	| "background_process";
+export type CommandClass = "short_command" | "long_task" | "web_server" | "background_process";
 
 // ---------------------------------------------------------------------------
 // Command policy

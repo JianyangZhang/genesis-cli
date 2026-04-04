@@ -71,24 +71,23 @@ export interface CompactionSummary {
 }
 
 // ---------------------------------------------------------------------------
-// Plan — types only. The engine is P4.
+// Plan — canonical types live in planning/plan-types.ts. Re-exported here for
+// backward compatibility so that consumers importing from types/index.js
+// continue to resolve PlanStatus, PlanSummary, and PlanStep.
 // ---------------------------------------------------------------------------
 
-export type PlanStatus = "draft" | "active" | "completed" | "failed" | "abandoned";
+export type {
+	PlanOutcomeReason,
+	PlanStatus,
+	PlanStep,
+	PlanStepDetail,
+	PlanStepStatus,
+	PlanSummary,
+} from "../planning/plan-types.js";
 
-export interface PlanSummary {
-	readonly planId: string;
-	readonly goal: string;
-	readonly status: PlanStatus;
-	readonly stepCount: number;
-	readonly completedSteps: number;
-}
-
-export interface PlanStep {
-	readonly stepId: string;
-	readonly description: string;
-	readonly status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
-}
+// Import locally for use in SessionState and SessionRecoveryData below.
+// This avoids a circular dependency because plan-types.ts does not import from this file.
+import type { PlanSummary as _PlanSummary } from "../planning/plan-types.js";
 
 // ---------------------------------------------------------------------------
 // SessionState — full runtime snapshot
@@ -101,7 +100,7 @@ export interface SessionState {
 	readonly updatedAt: number;
 	readonly model: ModelDescriptor;
 	readonly toolSet: ToolSetDescriptor;
-	readonly planSummary: PlanSummary | null;
+	readonly planSummary: _PlanSummary | null;
 	readonly compactionSummary: CompactionSummary | null;
 	readonly taskState: TaskState;
 }
@@ -120,7 +119,7 @@ export interface SessionRecoveryData {
 	readonly sessionId: SessionId;
 	readonly model: ModelDescriptor;
 	readonly toolSet: readonly string[];
-	readonly planSummary: PlanSummary | null;
+	readonly planSummary: _PlanSummary | null;
 	readonly compactionSummary: CompactionSummary | null;
 	readonly taskState: TaskState;
 }

@@ -89,10 +89,8 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 
 			if (event.type === "tool_execution_start" && this.toolExecutionGate) {
 				const toolName = typeof event.payload?.toolName === "string" ? event.payload.toolName : "unknown";
-				const toolCallId =
-					typeof event.payload?.toolCallId === "string" ? event.payload.toolCallId : "";
-				const parameters =
-					(event.payload?.parameters as Readonly<Record<string, unknown>> | undefined) ?? {};
+				const toolCallId = typeof event.payload?.toolCallId === "string" ? event.payload.toolCallId : "";
+				const parameters = (event.payload?.parameters as Readonly<Record<string, unknown>> | undefined) ?? {};
 				const decision = this.toolExecutionGate.beforeToolExecution({
 					toolName,
 					toolCallId,
@@ -116,8 +114,7 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 				continue;
 			}
 
-			const toolCallId =
-				typeof event.payload?.toolCallId === "string" ? event.payload.toolCallId : undefined;
+			const toolCallId = typeof event.payload?.toolCallId === "string" ? event.payload.toolCallId : undefined;
 			if (
 				toolCallId &&
 				suppressedToolCalls.has(toolCallId) &&

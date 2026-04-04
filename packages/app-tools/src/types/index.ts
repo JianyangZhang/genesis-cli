@@ -26,24 +26,24 @@ export interface ToolIdentity {
 // Re-exports from sub-modules
 // ---------------------------------------------------------------------------
 
+export type { AuditEntry, AuditLog } from "./audit.js";
+export type { CommandClass, CommandPolicy } from "./command-policy.js";
+export type { McpServerDescriptor, McpToolEntry, McpTransportType } from "./mcp.js";
+export type { EnqueueResult, MutationTarget, QueueConflict } from "./mutation.js";
+export type {
+	ApprovalCacheEntry,
+	PermissionContext,
+	PermissionDecision,
+	PermissionVerdict,
+} from "./permission.js";
 export type { ToolCategory } from "./tool-category.js";
 export type {
-	ParameterSchema,
-	ParameterProperty,
 	OutputDescriptor,
-	ToolErrorKind,
-	ToolError,
+	ParameterProperty,
+	ParameterSchema,
 	ToolContract,
+	ToolError,
+	ToolErrorKind,
 } from "./tool-contract.js";
-export type { ConfirmationMode, ConcurrencyModel, ToolPolicy } from "./tool-policy.js";
 export type { ToolDefinition } from "./tool-definition.js";
-export type {
-	PermissionVerdict,
-	PermissionDecision,
-	PermissionContext,
-	ApprovalCacheEntry,
-} from "./permission.js";
-export type { CommandClass, CommandPolicy } from "./command-policy.js";
-export type { AuditEntry, AuditLog } from "./audit.js";
-export type { MutationTarget, QueueConflict, EnqueueResult } from "./mutation.js";
-export type { McpTransportType, McpServerDescriptor, McpToolEntry } from "./mcp.js";
+export type { ConcurrencyModel, ConfirmationMode, ToolPolicy } from "./tool-policy.js";

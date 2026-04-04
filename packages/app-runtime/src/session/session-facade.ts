@@ -8,10 +8,7 @@
  * Core principle: raw upstream events are NEVER exposed.
  */
 
-import type {
-	KernelSessionAdapter,
-	ToolExecutionGateDecision,
-} from "../adapters/kernel-session-adapter.js";
+import type { KernelSessionAdapter, ToolExecutionGateDecision } from "../adapters/kernel-session-adapter.js";
 import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
@@ -255,11 +252,12 @@ export class SessionFacadeImpl implements SessionFacade {
 		if (!this._governor) return normalized;
 
 		if (normalized.type === "tool_started") {
-			const targetPath = typeof normalized.parameters?.file_path === "string"
-				? normalized.parameters.file_path
-				: typeof normalized.parameters?.path === "string"
-					? normalized.parameters.path
-					: undefined;
+			const targetPath =
+				typeof normalized.parameters?.file_path === "string"
+					? normalized.parameters.file_path
+					: typeof normalized.parameters?.path === "string"
+						? normalized.parameters.path
+						: undefined;
 
 			const decision = this._governor.beforeExecution({
 				sessionId: this._state.id.value,
@@ -351,9 +349,7 @@ export class SessionFacadeImpl implements SessionFacade {
 	}
 }
 
-function extractTargetPath(
-	parameters: Readonly<Record<string, unknown>> | undefined,
-): string | undefined {
+function extractTargetPath(parameters: Readonly<Record<string, unknown>> | undefined): string | undefined {
 	if (!parameters) {
 		return undefined;
 	}

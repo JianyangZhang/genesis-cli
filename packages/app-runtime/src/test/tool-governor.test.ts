@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
 import type { ToolDefinition } from "@genesis-cli/tools";
+import { describe, expect, it } from "vitest";
+import type { ToolExecutionContext } from "../governance/tool-governor.js";
 import { createToolGovernor } from "../governance/tool-governor.js";
-import type { ToolExecutionContext, ToolExecutionResult } from "../governance/tool-governor.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -99,10 +99,12 @@ describe("ToolGovernor", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L2_EDIT);
 
-			const decision = governor.beforeExecution(executionContext({
-				toolName: "edit",
-				targetPath: "/project/src/main.ts",
-			}));
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "edit",
+					targetPath: "/project/src/main.ts",
+				}),
+			);
 
 			expect(decision.type).toBe("ask_user");
 			if (decision.type === "ask_user") {
@@ -125,19 +127,23 @@ describe("ToolGovernor", () => {
 			});
 
 			// First execution: accepted
-			const first = governor.beforeExecution(executionContext({
-				toolName: "edit",
-				toolCallId: "call_1",
-				targetPath: "/project/src/main.ts",
-			}));
+			const first = governor.beforeExecution(
+				executionContext({
+					toolName: "edit",
+					toolCallId: "call_1",
+					targetPath: "/project/src/main.ts",
+				}),
+			);
 			expect(first.type).toBe("allow");
 
 			// Second execution to same file: conflict
-			const second = governor.beforeExecution(executionContext({
-				toolName: "edit",
-				toolCallId: "call_2",
-				targetPath: "/project/src/main.ts",
-			}));
+			const second = governor.beforeExecution(
+				executionContext({
+					toolName: "edit",
+					toolCallId: "call_2",
+					targetPath: "/project/src/main.ts",
+				}),
+			);
 			expect(second.type).toBe("deny");
 			if (second.type === "deny") {
 				expect(second.reason).toContain("already being mutated");
@@ -148,10 +154,12 @@ describe("ToolGovernor", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L3_BASH);
 
-			const decision = governor.beforeExecution(executionContext({
-				toolName: "bash",
-				isSubAgent: true,
-			}));
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					isSubAgent: true,
+				}),
+			);
 
 			expect(decision.type).toBe("deny");
 		});
@@ -226,11 +234,13 @@ describe("ToolGovernor", () => {
 			});
 
 			// First execution
-			governor.beforeExecution(executionContext({
-				toolName: "edit",
-				toolCallId: "call_1",
-				targetPath: "/project/src/main.ts",
-			}));
+			governor.beforeExecution(
+				executionContext({
+					toolName: "edit",
+					toolCallId: "call_1",
+					targetPath: "/project/src/main.ts",
+				}),
+			);
 
 			expect(governor.mutations.isPending("/project/src/main.ts")).toBe(true);
 
@@ -245,11 +255,13 @@ describe("ToolGovernor", () => {
 			expect(governor.mutations.isPending("/project/src/main.ts")).toBe(false);
 
 			// Second execution should now succeed
-			const second = governor.beforeExecution(executionContext({
-				toolName: "edit",
-				toolCallId: "call_2",
-				targetPath: "/project/src/main.ts",
-			}));
+			const second = governor.beforeExecution(
+				executionContext({
+					toolName: "edit",
+					toolCallId: "call_2",
+					targetPath: "/project/src/main.ts",
+				}),
+			);
 			expect(second.type).toBe("allow");
 		});
 	});
@@ -260,10 +272,12 @@ describe("ToolGovernor", () => {
 			governor.catalog.register(L2_EDIT);
 
 			// Without approval: ask_user
-			const first = governor.beforeExecution(executionContext({
-				toolName: "edit",
-				targetPath: "/project/src/main.ts",
-			}));
+			const first = governor.beforeExecution(
+				executionContext({
+					toolName: "edit",
+					targetPath: "/project/src/main.ts",
+				}),
+			);
 			expect(first.type).toBe("ask_user");
 
 			// Record approval
@@ -277,11 +291,13 @@ describe("ToolGovernor", () => {
 			});
 
 			// With approval: allow
-			const second = governor.beforeExecution(executionContext({
-				toolName: "edit",
-				toolCallId: "call_2",
-				targetPath: "/project/src/main.ts",
-			}));
+			const second = governor.beforeExecution(
+				executionContext({
+					toolName: "edit",
+					toolCallId: "call_2",
+					targetPath: "/project/src/main.ts",
+				}),
+			);
 			expect(second.type).toBe("allow");
 		});
 	});

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createPermissionEngine } from "../policy/permission-engine.js";
 import type { PermissionContext, ToolPolicy } from "../types/index.js";
-import type { ToolDefinition } from "../types/tool-definition.js";
-import type { RiskLevel } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers

@@ -1,17 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createToolCatalog } from "../catalog/tool-catalog.js";
-import type { ToolDefinition } from "../types/tool-definition.js";
 import type { RiskLevel } from "../types/index.js";
+import type { ToolDefinition } from "../types/tool-definition.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function createTestTool(overrides?: {
-	name?: string;
-	category?: string;
-	riskLevel?: RiskLevel;
-}): ToolDefinition {
+function createTestTool(overrides?: { name?: string; category?: string; riskLevel?: RiskLevel }): ToolDefinition {
 	const name = overrides?.name ?? "test_tool";
 	return {
 		identity: { name, category: overrides?.category ?? "file-read" },
@@ -57,9 +53,7 @@ describe("ToolCatalog", () => {
 			const catalog = createToolCatalog();
 			catalog.register(createTestTool({ name: "read" }));
 
-			expect(() => catalog.register(createTestTool({ name: "read" }))).toThrow(
-				"Tool already registered: read",
-			);
+			expect(() => catalog.register(createTestTool({ name: "read" }))).toThrow("Tool already registered: read");
 		});
 	});
 

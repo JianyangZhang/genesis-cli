@@ -95,8 +95,7 @@ export function createPermissionEngine(): PermissionEngine {
 			}
 
 			// --- L2/L3: ask user ---
-			const outsideCwd =
-				targetPath && workingDirectory && !nodeNormalize(targetPath).startsWith(workingDirectory);
+			const outsideCwd = targetPath && workingDirectory && !nodeNormalize(targetPath).startsWith(workingDirectory);
 
 			return {
 				verdict: "ask_user",

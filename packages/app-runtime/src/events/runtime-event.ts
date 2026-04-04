@@ -135,6 +135,24 @@ export interface PlanStepCompletedEvent extends BaseEvent {
 	readonly success: boolean;
 }
 
+export interface PlanStepFailedEvent extends BaseEvent {
+	readonly category: "plan";
+	readonly type: "plan_step_failed";
+	readonly planId: string;
+	readonly stepId: string;
+	readonly reason: string;
+	readonly reworkScheduled: boolean;
+}
+
+export interface PlanReworkEvent extends BaseEvent {
+	readonly category: "plan";
+	readonly type: "plan_rework";
+	readonly planId: string;
+	readonly stepId: string;
+	readonly reworkAttempt: number;
+	readonly focusAreas: readonly string[];
+}
+
 export interface PlanCompletedEvent extends BaseEvent {
 	readonly category: "plan";
 	readonly type: "plan_completed";
@@ -144,7 +162,13 @@ export interface PlanCompletedEvent extends BaseEvent {
 	readonly summary: PlanSummary;
 }
 
-export type PlanProgressEvent = PlanCreatedEvent | PlanStepStartedEvent | PlanStepCompletedEvent | PlanCompletedEvent;
+export type PlanProgressEvent =
+	| PlanCreatedEvent
+	| PlanStepStartedEvent
+	| PlanStepCompletedEvent
+	| PlanStepFailedEvent
+	| PlanReworkEvent
+	| PlanCompletedEvent;
 
 // ---------------------------------------------------------------------------
 // 4. Compaction

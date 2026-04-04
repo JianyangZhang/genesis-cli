@@ -12,6 +12,7 @@
  *   3. recordSessionApproval() — called when user grants session approval
  */
 
+import { createHash } from "node:crypto";
 import type {
 	ApprovalCacheEntry,
 	AuditEntry,
@@ -31,7 +32,6 @@ import {
 	createToolCatalog,
 	isDestructiveCommand,
 } from "@genesis-cli/tools";
-import { createHash } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,10 +101,7 @@ export function createToolGovernor(): ToolGovernor {
 	const permissions = createPermissionEngine();
 	const mutations = createMutationQueue();
 	const audit = createAuditLog();
-	const activeExecutions = new Map<
-		string,
-		{ toolName: string; targetPath?: string; riskLevel: RiskLevel }
-	>();
+	const activeExecutions = new Map<string, { toolName: string; targetPath?: string; riskLevel: RiskLevel }>();
 
 	function deriveCommandDigest(
 		parameters: Readonly<Record<string, unknown>> | undefined,
@@ -180,9 +177,7 @@ export function createToolGovernor(): ToolGovernor {
 			// 2. Build PermissionContext from tool definition + execution context
 			const command = parameters?.command;
 			const effectiveRiskLevel =
-				typeof command === "string" && isDestructiveCommand(command)
-					? "L4"
-					: classifyRisk(toolDef, parameters);
+				typeof command === "string" && isDestructiveCommand(command) ? "L4" : classifyRisk(toolDef, parameters);
 			const effectiveCommandDigest = deriveCommandDigest(parameters, commandDigest);
 			const permContext: PermissionContext = {
 				sessionId,
@@ -199,7 +194,13 @@ export function createToolGovernor(): ToolGovernor {
 			// 3. Evaluate permission
 			const decision = permissions.evaluate(permContext);
 			if (decision.verdict === "deny") {
-				recordDeniedAudit(toolName, toolCallId, decision.riskLevel, decision.reason ?? "Permission denied", targetPath);
+				recordDeniedAudit(
+					toolName,
+					toolCallId,
+					decision.riskLevel,
+					decision.reason ?? "Permission denied",
+					targetPath,
+				);
 				return {
 					type: "deny",
 					reason: decision.reason ?? `Permission denied for "${toolName}"`,

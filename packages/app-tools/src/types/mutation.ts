@@ -34,6 +34,4 @@ export interface QueueConflict {
 // Enqueue result
 // ---------------------------------------------------------------------------
 
-export type EnqueueResult =
-	| { readonly type: "accepted"; readonly position: number }
-	| QueueConflict;
+export type EnqueueResult = { readonly type: "accepted"; readonly position: number } | QueueConflict;
