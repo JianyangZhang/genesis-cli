@@ -14,6 +14,7 @@ export type {
 	AggregationResult,
 	ReworkDecision,
 	SubagentResult,
+	SubagentRuntimeSnapshot,
 	SubagentResultStatus,
 	TaskRisk,
 	VerificationResult,

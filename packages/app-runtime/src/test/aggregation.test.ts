@@ -83,6 +83,22 @@ describe("Aggregation", () => {
 			expect(agg.completedTasks).toBe(0);
 			expect(agg.allModifiedPaths).toHaveLength(0);
 		});
+
+		it("counts completion using final rework decisions when provided", () => {
+			const results: SubagentResult[] = [
+				makeResult({ taskId: "t1", status: "completed" }),
+				makeResult({ taskId: "t2", status: "completed" }),
+			];
+			const decisions = new Map([
+				["t1", { type: "accept" as const }],
+				["t2", { type: "rework" as const, reason: "verification", focusAreas: ["build"] }],
+			]);
+			const agg = aggregateResults("plan-1", results, decisions);
+
+			expect(agg.completedTasks).toBe(1);
+			expect(agg.failedTasks).toBe(1);
+			expect(agg.tasksRequiringRework).toBe(1);
+		});
 	});
 
 	describe("decideRework", () => {

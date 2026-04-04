@@ -212,6 +212,24 @@ describe("PlanOrchestrator", () => {
 
 			expect(plan.steps[0].status).toBe("failed");
 		});
+
+		it("marks plan_step_failed as reworkScheduled when attempts remain", () => {
+			const { orchestrator, sessionEvents } = createFixture();
+			orchestrator.createAndActivate("p1", "Goal", ["Step A"]);
+			orchestrator.assignTask(0, makeTask());
+			orchestrator.submitResult(
+				0,
+				makeResult({
+					status: "failed",
+				}),
+			);
+
+			const failedEvent = sessionEvents.find((e) => e.type === "plan_step_failed");
+			expect(failedEvent).toBeDefined();
+			if (failedEvent?.type === "plan_step_failed") {
+				expect(failedEvent.reworkScheduled).toBe(true);
+			}
+		});
 	});
 
 	// -------------------------------------------------------------------------
@@ -241,6 +259,50 @@ describe("PlanOrchestrator", () => {
 
 			expect(plan.steps[0].status).toBe("failed");
 		});
+
+		it("fails step when runtime elapsed exceeds max_duration_ms", () => {
+			const { orchestrator } = createFixture();
+			orchestrator.createAndActivate("p1", "Goal", ["Step A"]);
+			orchestrator.assignTask(
+				0,
+				makeTask({
+					stopConditions: [{ type: "max_duration_ms", value: 1000, description: "Max duration" }],
+				}),
+			);
+
+			const plan = orchestrator.submitResult(
+				0,
+				makeResult({
+					modifiedPaths: ["packages/app-runtime/src/a.ts"],
+					runtime: { elapsedMs: 2000 },
+				}),
+			);
+
+			expect(plan.steps[0].status).toBe("failed");
+			expect(plan.steps[0].result?.status).toBe("stop_condition_triggered");
+		});
+
+		it("fails step when runtime error count exceeds error_threshold", () => {
+			const { orchestrator } = createFixture();
+			orchestrator.createAndActivate("p1", "Goal", ["Step A"]);
+			orchestrator.assignTask(
+				0,
+				makeTask({
+					stopConditions: [{ type: "error_threshold", value: 2, description: "Too many errors" }],
+				}),
+			);
+
+			const plan = orchestrator.submitResult(
+				0,
+				makeResult({
+					modifiedPaths: ["packages/app-runtime/src/a.ts"],
+					runtime: { errorCount: 2 },
+				}),
+			);
+
+			expect(plan.steps[0].status).toBe("failed");
+			expect(plan.steps[0].result?.status).toBe("stop_condition_triggered");
+		});
 	});
 
 	// -------------------------------------------------------------------------
@@ -257,6 +319,22 @@ describe("PlanOrchestrator", () => {
 			const plan = orchestrator.submitResult(0, result);
 
 			expect(plan.steps[0].status).toBe("failed");
+		});
+
+		it("rejects a result whose taskId does not match the assigned task", () => {
+			const { orchestrator } = createFixture();
+			orchestrator.createAndActivate("p1", "Goal", ["Step A"]);
+			orchestrator.assignTask(0, makeTask({ taskId: "task-expected" }));
+
+			expect(() =>
+				orchestrator.submitResult(
+					0,
+					makeResult({
+						taskId: "task-other",
+						modifiedPaths: ["packages/app-runtime/src/a.ts"],
+					}),
+				),
+			).toThrow("does not match assigned task");
 		});
 	});
 

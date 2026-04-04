@@ -106,12 +106,10 @@ export function createPlanOrchestrator(
 		task: SubagentTask,
 	): Plan {
 		const step = plan.steps[stepIndex];
+		const decision = decideRework(task, result, plan.maxReworkAttempts, step.reworkCount);
 		const failed = engine.failStep(plan, stepIndex, result);
 
-		emit(planStepFailed(sessionId, plan.planId, step.stepId, reason, false));
-
-		// Decide rework
-		const decision = decideRework(task, result, plan.maxReworkAttempts, step.reworkCount);
+		emit(planStepFailed(sessionId, plan.planId, step.stepId, reason, decision.type === "rework"));
 		if (decision.type === "rework") {
 			emit(planRework(sessionId, plan.planId, step.stepId, step.reworkCount + 1, decision.focusAreas));
 		}
@@ -185,6 +183,11 @@ export function createPlanOrchestrator(
 			if (step.status !== "in_progress") {
 				throw new Error(`Step ${stepIndex} is ${step.status}, expected in_progress`);
 			}
+			if (result.taskId !== task.taskId || result.taskId !== step.taskId) {
+				throw new Error(
+					`Result taskId "${result.taskId}" does not match assigned task "${task.taskId}" for step ${stepIndex}`,
+				);
+			}
 
 			// --- Safety Gate ---
 
@@ -205,6 +208,12 @@ export function createPlanOrchestrator(
 				for (const p of result.modifiedPaths) {
 					rtState = recordModification(rtState, p);
 				}
+				rtState = {
+					...rtState,
+					elapsedMs: Math.max(rtState.elapsedMs, result.runtime?.elapsedMs ?? 0),
+					errorCount: rtState.errorCount + Math.max(0, result.runtime?.errorCount ?? 0),
+					boundaryViolations: rtState.boundaryViolations + Math.max(0, result.runtime?.boundaryViolations ?? 0),
+				};
 				runtimeStates.set(stepIndex, rtState);
 
 				const stopEval = evaluateStopConditions(task.stopConditions, rtState);

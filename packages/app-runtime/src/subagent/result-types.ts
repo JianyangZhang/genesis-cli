@@ -20,6 +20,13 @@ export interface VerificationResult {
 	readonly durationMs?: number;
 }
 
+/** Runtime counters reported by the subagent for stop-condition enforcement. */
+export interface SubagentRuntimeSnapshot {
+	readonly elapsedMs?: number;
+	readonly errorCount?: number;
+	readonly boundaryViolations?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Risk
 // ---------------------------------------------------------------------------
@@ -43,6 +50,7 @@ export interface SubagentResult {
 	readonly verifications: readonly VerificationResult[];
 	readonly risks: readonly TaskRisk[];
 	readonly handoffNotes: readonly string[];
+	readonly runtime?: SubagentRuntimeSnapshot;
 	readonly completedAt: number;
 }
 

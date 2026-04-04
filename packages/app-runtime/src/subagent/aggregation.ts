@@ -23,6 +23,7 @@ export function aggregateResults(
 ): AggregationResult {
 	const allModifiedPaths: string[] = [];
 	const allRisks: TaskRisk[] = [];
+	const reworkDecisions = reworkDecisionsInput ?? new Map<string, ReworkDecision>();
 	let completedTasks = 0;
 	let failedTasks = 0;
 
@@ -33,15 +34,19 @@ export function aggregateResults(
 		// Merge risks
 		allRisks.push(...result.risks);
 
-		// Count by status
-		if (result.status === "completed") {
+		// Count by final decision when available; otherwise fall back to raw status.
+		const finalDecision = reworkDecisions.get(result.taskId);
+		const accepted = finalDecision
+			? finalDecision.type === "accept"
+			: result.status === "completed";
+
+		if (accepted) {
 			completedTasks++;
 		} else {
 			failedTasks++;
 		}
 	}
 
-	const reworkDecisions = reworkDecisionsInput ?? new Map<string, ReworkDecision>();
 	const tasksRequiringRework = [...reworkDecisions.values()].filter((d) => d.type === "rework").length;
 
 	return {
