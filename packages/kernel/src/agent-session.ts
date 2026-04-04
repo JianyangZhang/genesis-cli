@@ -1,10 +1,9 @@
 import { join } from "node:path";
 import { Agent, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { streamSimple, type Model } from "@mariozechner/pi-ai";
+import type { Model } from "@mariozechner/pi-ai";
 import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
-import { streamAnthropicMessages } from "./providers/anthropic.js";
-import { streamOpenAiCompletions } from "./providers/openai.js";
+import { streamWithKernelProvider } from "./provider-registry.js";
 import { SessionManager } from "./session-manager.js";
 import {
 	createBashTool,
@@ -118,24 +117,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions): Pr
 				apiKey: auth.apiKey,
 				headers: auth.headers ? { ...(auth.headers ?? {}), ...(streamOptions?.headers ?? {}) } : streamOptions?.headers,
 			};
-
-			if (activeModel.api === "openai-completions") {
-				return streamOpenAiCompletions(
-					activeModel as Model<"openai-completions">,
-					context,
-					mergedOptions,
-				) as unknown as ReturnType<typeof streamSimple>;
-			}
-
-			if (activeModel.api === "anthropic-messages") {
-				return streamAnthropicMessages(
-					activeModel as Model<"anthropic-messages">,
-					context,
-					mergedOptions,
-				) as unknown as ReturnType<typeof streamSimple>;
-			}
-
-			return streamSimple(activeModel, context, mergedOptions);
+			return streamWithKernelProvider(activeModel, context, mergedOptions);
 		},
 		sessionId: sessionManager.getSessionId(),
 		toolExecution: "parallel",

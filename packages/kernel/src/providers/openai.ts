@@ -1,7 +1,6 @@
 import type {
 	AssistantMessage,
 	Context,
-	Message,
 	Model,
 	SimpleStreamOptions,
 	TextContent,
@@ -11,6 +10,15 @@ import type {
 	ToolResultMessage,
 } from "@mariozechner/pi-ai";
 import { KernelAssistantMessageEventStream } from "../event-stream.js";
+import {
+	asNumber,
+	asString,
+	createAssistantMessage,
+	iterateSseData,
+	isRecord,
+	resolveEndpoint,
+	safeParseJson,
+} from "./shared.js";
 
 type KernelOpenAiCompat = {
 	readonly supportsDeveloperRole?: boolean;
@@ -36,16 +44,7 @@ export function streamOpenAiCompletions(
 	const stream = new KernelAssistantMessageEventStream();
 
 	void (async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			usage: emptyUsage(),
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output: AssistantMessage = createAssistantMessage(model);
 
 		try {
 			const compat = getCompat(model);
@@ -265,12 +264,12 @@ function buildRequestBody(
 		body.tool_choice = options.toolChoice;
 	}
 
-		if (model.reasoning) {
-			if (compat.thinkingFormat === "zai") {
-				if (options?.reasoning) {
-					body.enable_thinking = true;
-				}
-			} else if (compat.thinkingFormat === "openai" && options?.reasoning) {
+	if (model.reasoning) {
+		if (compat.thinkingFormat === "zai") {
+			if (options?.reasoning) {
+				body.enable_thinking = true;
+			}
+		} else if (compat.thinkingFormat === "openai" && options?.reasoning) {
 			body.reasoning_effort = options.reasoning;
 		}
 	}
@@ -411,27 +410,6 @@ function getCompat(model: Model<"openai-completions">): Required<KernelOpenAiCom
 	};
 }
 
-function resolveEndpoint(baseUrl: string, path: string): string {
-	return new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
-}
-
-function emptyUsage(): AssistantMessage["usage"] {
-	return {
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: 0,
-		cost: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			total: 0,
-		},
-	};
-}
-
 function parseUsage(usage: Record<string, unknown>): AssistantMessage["usage"] {
 	const input = asNumber(usage.prompt_tokens) ?? asNumber(usage.input_tokens) ?? 0;
 	const output = asNumber(usage.completion_tokens) ?? asNumber(usage.output_tokens) ?? 0;
@@ -464,69 +442,6 @@ function mapStopReason(reason: string): AssistantMessage["stopReason"] {
 	}
 }
 
-async function* iterateSseData(
-	body: ReadableStream<Uint8Array>,
-	signal?: AbortSignal,
-): AsyncGenerator<string, void, void> {
-	const reader = body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-
-	try {
-		while (true) {
-			if (signal?.aborted) {
-				throw new Error("Request aborted");
-			}
-			const { done, value } = await reader.read();
-			if (done) {
-				break;
-			}
-			buffer += decoder.decode(value, { stream: true });
-			while (true) {
-				const boundary = buffer.indexOf("\n\n");
-				if (boundary === -1) {
-					break;
-				}
-				const rawEvent = buffer.slice(0, boundary);
-				buffer = buffer.slice(boundary + 2);
-				const payload = rawEvent
-					.split("\n")
-					.filter((line) => line.startsWith("data:"))
-					.map((line) => line.slice(5).trimStart())
-					.join("\n");
-				if (payload.length > 0) {
-					yield payload;
-				}
-			}
-		}
-	} finally {
-		reader.releaseLock();
-	}
-}
-
 function normalizeToolCallId(id: string): string {
 	return id.length > 40 ? id.slice(0, 40) : id;
-}
-
-function safeParseJson(value: string): any {
-	if (!value || value.trim().length === 0) {
-		return {};
-	}
-	try {
-		return JSON.parse(value);
-	} catch {
-		return {};
-	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function asNumber(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

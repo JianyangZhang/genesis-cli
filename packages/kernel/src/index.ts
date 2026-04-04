@@ -1,5 +1,6 @@
 export { AuthStorage } from "./auth-storage.js";
 export { ModelRegistry, type KernelResolvedAuth } from "./model-registry.js";
+export { streamWithKernelProvider, type KernelStreamOptions } from "./provider-registry.js";
 export { SessionManager } from "./session-manager.js";
 export { streamAnthropicMessages } from "./providers/anthropic.js";
 export { streamOpenAiCompletions } from "./providers/openai.js";
