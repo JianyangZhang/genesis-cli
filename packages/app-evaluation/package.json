@@ -7,7 +7,7 @@
 	"types": "./dist/index.d.ts",
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
-		"test": "vitest run"
+		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-code-pi-runtime": "*",
