@@ -122,6 +122,9 @@ export interface SessionRecoveryData {
 	readonly planSummary: _PlanSummary | null;
 	readonly compactionSummary: CompactionSummary | null;
 	readonly taskState: TaskState;
+	readonly workingDirectory?: string;
+	readonly sessionFile?: string;
+	readonly agentDir?: string;
 }
 
 // ---------------------------------------------------------------------------

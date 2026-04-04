@@ -6,6 +6,7 @@
 	},
 	"include": ["src/**/*.ts"],
 	"references": [
-		{ "path": "../app-tools" }
+		{ "path": "../app-tools" },
+		{ "path": "../kernel" }
 	]
 }

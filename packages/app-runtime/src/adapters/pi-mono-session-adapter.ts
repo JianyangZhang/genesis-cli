@@ -1,0 +1,566 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
+import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";
+import type {
+	KernelSessionAdapter,
+	RawUpstreamEvent,
+	ToolExecutionGate,
+} from "./kernel-session-adapter.js";
+import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
+
+type PermissionDecision = "allow" | "allow_for_session" | "allow_once" | "deny";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type PiMonoModel = Record<string, unknown>;
+
+interface AgentSession {
+	readonly sessionId: string;
+	readonly sessionFile?: string;
+	readonly isStreaming: boolean;
+	subscribe(listener: (event: unknown) => void): () => void;
+	prompt(input: string): Promise<void>;
+	followUp(input: string): Promise<void>;
+	abort(): Promise<void>;
+	dispose(): void;
+}
+
+interface PiMonoTool {
+	readonly name: string;
+	execute(
+		toolCallId: string,
+		params: unknown,
+		signal?: AbortSignal,
+		onUpdate?: ((partialResult: unknown) => void) | undefined,
+	): Promise<unknown>;
+}
+
+interface CreateAgentSessionOptions {
+	readonly cwd: string;
+	readonly agentDir?: string;
+	readonly model?: PiMonoModel;
+	readonly thinkingLevel?: ThinkingLevel;
+	readonly tools?: readonly PiMonoTool[];
+	readonly authStorage?: unknown;
+	readonly modelRegistry?: unknown;
+	readonly sessionManager?: unknown;
+}
+
+interface PiMonoSdk {
+	AuthStorage: {
+		create(filePath?: string): unknown;
+	};
+	ModelRegistry: {
+		create(authStorage: unknown, modelsPath?: string): {
+			find(provider: string, modelId: string): PiMonoModel | undefined;
+		};
+	};
+	SessionManager: {
+		create(cwd: string): unknown;
+		open(sessionPath: string): unknown;
+	};
+	createAgentSession(options: CreateAgentSessionOptions): Promise<{ session: AgentSession }>;
+	createBashTool(cwd: string): PiMonoTool;
+	createEditTool(cwd: string): PiMonoTool;
+	createFindTool(cwd: string): PiMonoTool;
+	createGrepTool(cwd: string): PiMonoTool;
+	createLsTool(cwd: string): PiMonoTool;
+	createReadTool(cwd: string): PiMonoTool;
+	createWriteTool(cwd: string): PiMonoTool;
+}
+
+interface Deferred<T> {
+	resolve(value: T): void;
+	reject(reason?: unknown): void;
+	promise: Promise<T>;
+}
+
+interface ExtendedRecoveryData extends SessionRecoveryData {
+	readonly workingDirectory?: string;
+	readonly sessionFile?: string;
+	readonly agentDir?: string;
+}
+
+export interface PiMonoSessionAdapterOptions {
+	readonly workingDirectory: string;
+	readonly agentDir?: string;
+	readonly model: ModelDescriptor;
+	readonly toolSet?: readonly string[];
+	readonly thinkingLevel?: ThinkingLevel;
+	readonly createTools?: (cwd: string, toolSet: readonly string[]) => PiMonoTool[];
+	readonly createSession?: (options: CreateAgentSessionOptions) => Promise<AgentSession>;
+}
+
+export class PiMonoSessionAdapter implements KernelSessionAdapter {
+	private session: AgentSession | null = null;
+	private toolExecutionGate: ToolExecutionGate | null = null;
+	private activeQueue: AsyncPushQueue<RawUpstreamEvent> | null = null;
+	private readonly pendingToolStartEvents = new Map<string, RawUpstreamEvent>();
+	private readonly approvedToolCalls = new Set<string>();
+	private readonly deniedToolCalls = new Set<string>();
+	private readonly pendingPermissionResolvers = new Map<string, Deferred<PermissionDecision>>();
+	private pendingRecoveryData: ExtendedRecoveryData | null = null;
+	private closed = false;
+	private bridgeState: PiMonoBridgeState;
+
+	constructor(private readonly options: PiMonoSessionAdapterOptions) {
+		this.bridgeState = createInitialBridgeState({
+			model: options.model,
+			toolSet: options.toolSet ?? defaultToolSet(),
+		});
+	}
+
+	setToolExecutionGate(gate: ToolExecutionGate): void {
+		this.toolExecutionGate = gate;
+	}
+
+	async *sendPrompt(input: string): AsyncIterable<RawUpstreamEvent> {
+		yield* this.runPromptLikeOperation(input, "prompt");
+	}
+
+	async *sendContinue(input: string): AsyncIterable<RawUpstreamEvent> {
+		yield* this.runPromptLikeOperation(input, "continue");
+	}
+
+	async resolveToolPermission(callId: string, decision: PermissionDecision): Promise<void> {
+		const deferred = this.pendingPermissionResolvers.get(callId);
+		if (!deferred) {
+			return;
+		}
+		this.pendingPermissionResolvers.delete(callId);
+		deferred.resolve(decision);
+	}
+
+	abort(): void {
+		void this.session?.abort();
+	}
+
+	async close(): Promise<void> {
+		if (this.closed) return;
+		this.closed = true;
+		for (const [callId, deferred] of this.pendingPermissionResolvers) {
+			deferred.resolve("deny");
+			this.pendingPermissionResolvers.delete(callId);
+		}
+		this.session?.dispose();
+		this.session = null;
+		this.activeQueue?.close();
+		this.activeQueue = null;
+	}
+
+	getRecoveryData(): SessionRecoveryData {
+		return {
+			sessionId: { value: this.session?.sessionId ?? "unknown-session" },
+			model: this.options.model,
+			toolSet: [...this.bridgeState.toolSet],
+			planSummary: null,
+			compactionSummary: null,
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			workingDirectory: this.pendingRecoveryData?.workingDirectory ?? this.options.workingDirectory,
+			sessionFile: this.pendingRecoveryData?.sessionFile ?? this.session?.sessionFile,
+			agentDir: this.pendingRecoveryData?.agentDir ?? this.options.agentDir,
+		};
+	}
+
+	resume(data: SessionRecoveryData): void {
+		this.pendingRecoveryData = data;
+	}
+
+	private async *runPromptLikeOperation(
+		input: string,
+		mode: "prompt" | "continue",
+	): AsyncIterable<RawUpstreamEvent> {
+		if (this.closed) {
+			throw new Error("Session adapter is closed");
+		}
+
+		await this.initialize();
+		if (!this.session) {
+			throw new Error("Underlying Genesis kernel session is unavailable");
+		}
+
+		this.pendingToolStartEvents.clear();
+		this.approvedToolCalls.clear();
+		this.deniedToolCalls.clear();
+
+		const queue = new AsyncPushQueue<RawUpstreamEvent>();
+		this.activeQueue = queue;
+		let promptCompleted = false;
+
+		const unsubscribe = this.session.subscribe((event) => {
+			const bridged = bridgePiMonoEvent(event as never, this.bridgeState);
+			this.bridgeState = bridged.nextState;
+
+			for (const rawEvent of bridged.rawEvents) {
+				this.handleRawEvent(rawEvent);
+				if (promptCompleted && rawEvent.type === "agent_end") {
+					queue.close();
+				}
+			}
+		});
+
+		const promptPromise = (async () => {
+			try {
+				if (mode === "continue" && this.session!.isStreaming) {
+					await this.session!.followUp(input);
+				} else {
+					await this.session!.prompt(input);
+				}
+			} finally {
+				promptCompleted = true;
+				setTimeout(() => {
+					if (this.activeQueue === queue) {
+						queue.close();
+					}
+				}, 100);
+			}
+		})();
+
+		try {
+			while (true) {
+				const next = await queue.next();
+				if (next === null) {
+					break;
+				}
+				yield next;
+			}
+			await promptPromise;
+		} finally {
+			unsubscribe();
+			if (this.activeQueue === queue) {
+				this.activeQueue = null;
+			}
+		}
+	}
+
+	private handleRawEvent(rawEvent: RawUpstreamEvent): void {
+		if (rawEvent.type === "tool_execution_start" && this.toolExecutionGate) {
+			const toolCallId = getToolCallId(rawEvent);
+			if (toolCallId && this.deniedToolCalls.has(toolCallId)) {
+				return;
+			}
+			if (toolCallId && this.approvedToolCalls.has(toolCallId)) {
+				this.emitRawEvent(rawEvent);
+				return;
+			}
+			if (toolCallId) {
+				this.pendingToolStartEvents.set(toolCallId, rawEvent);
+				return;
+			}
+		}
+
+		const toolCallId = getToolCallId(rawEvent);
+		if (
+			toolCallId &&
+			this.deniedToolCalls.has(toolCallId) &&
+			(rawEvent.type === "tool_execution_update" || rawEvent.type === "tool_execution_end")
+		) {
+			if (rawEvent.type === "tool_execution_end") {
+				this.cleanupToolCall(toolCallId);
+			}
+			return;
+		}
+
+		if (toolCallId && rawEvent.type === "tool_execution_end") {
+			this.cleanupToolCall(toolCallId);
+		}
+
+		this.emitRawEvent(rawEvent);
+	}
+
+	private emitRawEvent(rawEvent: RawUpstreamEvent): void {
+		this.activeQueue?.push(rawEvent);
+	}
+
+	private cleanupToolCall(toolCallId: string): void {
+		this.pendingToolStartEvents.delete(toolCallId);
+		this.approvedToolCalls.delete(toolCallId);
+		this.deniedToolCalls.delete(toolCallId);
+	}
+
+	private approveToolCall(toolCallId: string): void {
+		this.deniedToolCalls.delete(toolCallId);
+		this.approvedToolCalls.add(toolCallId);
+		const pendingStart = this.pendingToolStartEvents.get(toolCallId);
+		if (pendingStart) {
+			this.pendingToolStartEvents.delete(toolCallId);
+			this.emitRawEvent(pendingStart);
+		}
+	}
+
+	private denyToolCall(toolName: string, toolCallId: string, reason: string): void {
+		this.pendingToolStartEvents.delete(toolCallId);
+		this.approvedToolCalls.delete(toolCallId);
+		this.deniedToolCalls.add(toolCallId);
+		this.emitRawEvent({
+			type: "tool_execution_denied",
+			timestamp: Date.now(),
+			payload: { toolName, toolCallId, reason },
+		});
+	}
+
+	private async initialize(): Promise<void> {
+		if (this.session) {
+			return;
+		}
+		this.session = await this.createUnderlyingSession();
+	}
+
+	private async createUnderlyingSession(): Promise<AgentSession> {
+		const recovery = this.pendingRecoveryData;
+		const workingDirectory = recovery?.workingDirectory ?? this.options.workingDirectory;
+		const agentDir = recovery?.agentDir ?? this.options.agentDir;
+		const toolSet = this.options.toolSet ?? defaultToolSet();
+
+		if (this.options.createSession) {
+			const tools = this.wrapTools(this.options.createTools?.(workingDirectory, toolSet) ?? []);
+			const session = await this.options.createSession({
+				cwd: workingDirectory,
+				agentDir,
+				model: {} as PiMonoModel,
+				thinkingLevel: this.options.thinkingLevel,
+				tools,
+			});
+			this.bridgeState = createInitialBridgeState({
+				model: {
+					id: this.options.model.id,
+					provider: this.options.model.provider,
+					displayName: this.options.model.displayName,
+				},
+				toolSet: tools.map((tool) => tool.name),
+			});
+			this.pendingRecoveryData = null;
+			return session;
+		}
+
+		const sdk = await loadPiMonoSdk();
+		const authStorage = sdk.AuthStorage.create(agentDir ? join(agentDir, "auth.json") : undefined);
+		const modelRegistry = sdk.ModelRegistry.create(authStorage, agentDir ? join(agentDir, "models.json") : undefined);
+		const model = modelRegistry.find(this.options.model.provider, this.options.model.id) as PiMonoModel | undefined;
+		if (!model) {
+			throw new Error(
+				`Model ${this.options.model.provider}/${this.options.model.id} is not configured in ${
+					agentDir ?? "~/.pi/agent"
+				}/models.json`,
+			);
+		}
+
+		const tools = this.wrapTools(createToolsForSet(workingDirectory, toolSet, sdk));
+		const sessionManager =
+			recovery?.sessionFile && recovery.sessionFile.length > 0
+				? sdk.SessionManager.open(recovery.sessionFile)
+				: sdk.SessionManager.create(workingDirectory);
+
+		const session = await defaultCreateSession({
+			cwd: workingDirectory,
+			agentDir,
+			model,
+			thinkingLevel: this.options.thinkingLevel,
+			tools,
+			authStorage,
+			modelRegistry,
+			sessionManager,
+		});
+
+		this.bridgeState = createInitialBridgeState({
+			model: {
+				id: this.options.model.id,
+				provider: this.options.model.provider,
+				displayName: this.options.model.displayName,
+			},
+			toolSet: tools.map((tool) => tool.name),
+		});
+		this.pendingRecoveryData = null;
+		return session;
+	}
+
+	private wrapTools(tools: readonly PiMonoTool[]): PiMonoTool[] {
+		return tools.map((tool) => {
+			return {
+				...tool,
+				execute: async (
+					toolCallId: string,
+					params: Parameters<PiMonoTool["execute"]>[1],
+					signal?: AbortSignal,
+					onUpdate?: Parameters<PiMonoTool["execute"]>[3],
+				) => {
+					return await this.executeGuardedTool(tool, toolCallId, params as Record<string, unknown>, signal, onUpdate);
+				},
+			};
+		});
+	}
+
+	private async executeGuardedTool(
+		tool: PiMonoTool,
+		toolCallId: string,
+		parameters: Record<string, unknown>,
+		signal?: AbortSignal,
+		onUpdate?: Parameters<PiMonoTool["execute"]>[3],
+	): Promise<ReturnType<PiMonoTool["execute"]> extends Promise<infer TResult> ? TResult : never> {
+		const decision =
+			this.toolExecutionGate?.beforeToolExecution({
+				toolName: tool.name,
+				toolCallId,
+				parameters,
+			}) ?? { type: "allow" as const };
+
+		if (decision.type === "allow") {
+			this.approveToolCall(toolCallId);
+			return await tool.execute(toolCallId, parameters as never, signal, onUpdate as never);
+		}
+
+		if (decision.type === "deny") {
+			this.denyToolCall(tool.name, toolCallId, decision.reason);
+			throw new Error(decision.reason);
+		}
+
+		this.emitRawEvent({
+			type: "permission_request",
+			timestamp: Date.now(),
+			payload: {
+				toolName: tool.name,
+				toolCallId,
+				riskLevel: decision.riskLevel,
+			},
+		});
+
+		const resolution = await this.waitForPermissionResolution(toolCallId, signal);
+		if (resolution === "deny") {
+			this.denyToolCall(tool.name, toolCallId, "Permission denied by user");
+			throw new Error("Permission denied by user");
+		}
+
+		this.approveToolCall(toolCallId);
+		return await tool.execute(toolCallId, parameters as never, signal, onUpdate as never);
+	}
+
+	private waitForPermissionResolution(toolCallId: string, signal?: AbortSignal): Promise<PermissionDecision> {
+		if (signal?.aborted) {
+			return Promise.reject(new Error("Tool execution aborted while awaiting permission"));
+		}
+
+		const deferred = createDeferred<PermissionDecision>();
+		const onAbort = () => {
+			this.pendingPermissionResolvers.delete(toolCallId);
+			deferred.reject(new Error("Tool execution aborted while awaiting permission"));
+		};
+
+		if (signal) {
+			signal.addEventListener("abort", onAbort, { once: true });
+		}
+
+		this.pendingPermissionResolvers.set(toolCallId, deferred);
+		return deferred.promise.finally(() => {
+			if (signal) {
+				signal.removeEventListener("abort", onAbort);
+			}
+		});
+	}
+}
+
+async function defaultCreateSession(options: CreateAgentSessionOptions): Promise<AgentSession> {
+	const sdk = await loadPiMonoSdk();
+	const result = await sdk.createAgentSession(options);
+	return result.session;
+}
+
+function createToolsForSet(cwd: string, toolSet: readonly string[], sdk: PiMonoSdk): PiMonoTool[] {
+	const tools: PiMonoTool[] = [];
+	for (const toolName of toolSet) {
+		switch (toolName) {
+			case "read":
+				tools.push(sdk.createReadTool(cwd));
+				break;
+			case "bash":
+				tools.push(sdk.createBashTool(cwd));
+				break;
+			case "edit":
+				tools.push(sdk.createEditTool(cwd));
+				break;
+			case "write":
+				tools.push(sdk.createWriteTool(cwd));
+				break;
+			case "grep":
+				tools.push(sdk.createGrepTool(cwd));
+				break;
+			case "find":
+				tools.push(sdk.createFindTool(cwd));
+				break;
+			case "ls":
+				tools.push(sdk.createLsTool(cwd));
+				break;
+			default:
+				break;
+		}
+	}
+	return tools.length > 0 ? tools : createToolsForSet(cwd, defaultToolSet(), sdk);
+}
+
+function defaultToolSet(): readonly string[] {
+	return ["read", "bash", "edit", "write"];
+}
+
+function getToolCallId(rawEvent: RawUpstreamEvent): string | undefined {
+	return typeof rawEvent.payload?.toolCallId === "string" ? rawEvent.payload.toolCallId : undefined;
+}
+
+function createDeferred<T>(): Deferred<T> {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { resolve, reject, promise };
+}
+
+async function loadPiMonoSdk(): Promise<PiMonoSdk> {
+	const candidates = [
+		resolvePath(process.cwd(), "packages/kernel/dist/index.js"),
+		resolvePath(process.cwd(), "packages/kernel/src/index.ts"),
+	];
+	for (const candidate of candidates) {
+		if (existsSync(candidate)) {
+			return (await import(pathToFileURL(candidate).href)) as unknown as PiMonoSdk;
+		}
+	}
+	throw new Error("Unable to resolve the vendored Genesis kernel module");
+}
+
+class AsyncPushQueue<T> {
+	private readonly items: T[] = [];
+	private readonly waiters = new Set<(value: T | null) => void>();
+	private closed = false;
+
+	push(value: T): void {
+		if (this.closed) return;
+		const waiter = this.waiters.values().next().value as ((value: T | null) => void) | undefined;
+		if (waiter) {
+			this.waiters.delete(waiter);
+			waiter(value);
+			return;
+		}
+		this.items.push(value);
+	}
+
+	next(): Promise<T | null> {
+		if (this.items.length > 0) {
+			return Promise.resolve(this.items.shift() ?? null);
+		}
+		if (this.closed) {
+			return Promise.resolve(null);
+		}
+		return new Promise<T | null>((resolve) => {
+			this.waiters.add(resolve);
+		});
+	}
+
+	close(): void {
+		if (this.closed) return;
+		this.closed = true;
+		for (const waiter of this.waiters) {
+			waiter(null);
+		}
+		this.waiters.clear();
+	}
+}

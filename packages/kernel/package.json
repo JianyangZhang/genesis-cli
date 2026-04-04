@@ -1,0 +1,25 @@
+{
+  "name": "@genesis-cli/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vendored Genesis kernel for agent sessions, providers, and built-in tools",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.65.0",
+    "@mariozechner/pi-ai": "^0.65.0",
+    "@sinclair/typebox": "^0.34.41"
+  }
+}

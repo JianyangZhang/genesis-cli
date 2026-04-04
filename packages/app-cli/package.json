@@ -3,10 +3,14 @@
 	"version": "0.0.0",
 	"private": true,
 	"description": "CLI entry point, argument parsing, and mode routing",
+	"bin": {
+		"genesis": "./dist/main.js"
+	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json"
+		"build": "tsc -p tsconfig.build.json",
+		"test": "vitest run"
 	},
 	"dependencies": {
 		"@genesis-cli/config": "*",

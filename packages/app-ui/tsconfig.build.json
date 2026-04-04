@@ -1,4 +1,11 @@
 {
 	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"@genesis-cli/runtime": ["../app-runtime/dist/index.d.ts"],
+			"@genesis-cli/tools": ["../app-tools/dist/index.d.ts"]
+		}
+	},
 	"exclude": ["test", "**/*.test.ts"]
 }

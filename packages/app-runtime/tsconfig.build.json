@@ -3,6 +3,7 @@
 	"compilerOptions": {
 		"baseUrl": ".",
 		"paths": {
+			"@genesis-cli/kernel": ["../kernel/dist/index.d.ts"],
 			"@genesis-cli/tools": ["../app-tools/dist/index.d.ts"]
 		}
 	},
