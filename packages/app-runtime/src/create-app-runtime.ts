@@ -2,7 +2,7 @@
  * The single entry point for creating the product-layer runtime.
  *
  * `createAppRuntime()` initializes the runtime with configuration, model,
- * tool set, and an optional adapter override. All four CLI modes (interactive,
+ * tool set, and adapter provisioning. All four CLI modes (interactive,
  * print, json, rpc) use the same factory and the same AppRuntime interface.
  */
 
@@ -34,10 +34,13 @@ export interface AppRuntimeConfig {
 	readonly toolSet?: readonly string[];
 
 	/**
-	 * Adapter override for testing or custom backends.
-	 * If omitted, a stub adapter must be provided when creating sessions.
+	 * Legacy single-session adapter override.
+	 * Prefer `createAdapter` for runtimes that may host multiple sessions.
 	 */
 	readonly adapter?: PiSessionAdapter;
+
+	/** Factory for creating one fresh adapter per session. */
+	readonly createAdapter?: () => PiSessionAdapter;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,11 +70,32 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 	const toolSet = new Set(config.toolSet ?? []);
 	const sessions = new Set<SessionFacade>();
 	let shutdown = false;
+	let staticAdapterClaimed = false;
 
 	function assertNotShutdown(): void {
 		if (shutdown) {
 			throw new Error("Runtime has been shut down");
 		}
+	}
+
+	function getAdapter(): PiSessionAdapter {
+		if (config.createAdapter) {
+			return config.createAdapter();
+		}
+
+		if (config.adapter) {
+			if (staticAdapterClaimed) {
+				throw new Error(
+					"AppRuntimeConfig.adapter can only back a single session. Use createAdapter() to provision a fresh adapter per session.",
+				);
+			}
+			staticAdapterClaimed = true;
+			return config.adapter;
+		}
+
+		throw new Error(
+			"No PiSessionAdapter provided. Pass adapter for a single session or createAdapter for multi-session runtimes.",
+		);
 	}
 
 	return {
@@ -92,13 +116,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 				toolSet,
 			});
 
-			if (!config.adapter) {
-				throw new Error(
-					"No PiSessionAdapter provided. Pass an adapter in the config or provide one at session creation.",
-				);
-			}
-
-			const facade = new SessionFacadeImpl(config.adapter, state, context, globalBus);
+			const facade = new SessionFacadeImpl(getAdapter(), state, context, globalBus);
 
 			// Emit session_created on the global bus
 			const event = sessionCreated(sessionId, config.model, [...toolSet]);
@@ -120,16 +138,12 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 				toolSet: new Set(data.toolSet),
 			});
 
-			if (!config.adapter) {
-				throw new Error(
-					"No PiSessionAdapter provided. Pass an adapter in the config or provide one at session creation.",
-				);
-			}
+			const adapter = getAdapter();
 
-			// Tell the adapter about the recovery so it can restore its own state
-			config.adapter.resume(data);
+			// Tell the adapter about the recovery so it can restore its own state.
+			adapter.resume(data);
 
-			const facade = new SessionFacadeImpl(config.adapter, state, context, globalBus);
+			const facade = new SessionFacadeImpl(adapter, state, context, globalBus);
 
 			// Emit session_resumed on the global bus
 			const event = sessionResumed(data.sessionId, data);

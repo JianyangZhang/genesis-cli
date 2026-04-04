@@ -71,7 +71,6 @@ describe("SessionFacade", () => {
 
 	it("updates task state during prompt", async () => {
 		const { facade, adapter } = createFacade();
-		const _states = facade.state.status;
 
 		adapter.enqueueDefaultEvents([{ type: "message_update", timestamp: 1000, payload: { content: "hi" } }]);
 
@@ -125,10 +124,70 @@ describe("SessionFacade", () => {
 		await expect(facade.prompt("test")).rejects.toThrow("Session is closed");
 	});
 
-	it("abort calls adapter abort", () => {
-		const { facade, adapter } = createFacade();
+	it("abort calls adapter abort for an active stream", async () => {
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+
+		let releaseStream!: () => void;
+		const streamBlocked = new Promise<void>((r) => {
+			releaseStream = r;
+		});
+		let abortCalled = false;
+
+		const slowAdapter: PiSessionAdapter = {
+			async *sendPrompt(_input: string) {
+				await streamBlocked;
+				if (!abortCalled) {
+					yield {
+						type: "message_update",
+						timestamp: 1000,
+						payload: { content: "after abort" },
+					} as RawUpstreamEvent;
+				}
+			},
+			async *sendContinue(_input: string): AsyncIterable<RawUpstreamEvent> {
+				await streamBlocked;
+				if (!abortCalled) {
+					yield {
+						type: "message_update",
+						timestamp: 1000,
+						payload: { content: "" },
+					} as RawUpstreamEvent;
+				}
+			},
+			abort() {
+				abortCalled = true;
+			},
+			async close() {},
+			getRecoveryData() {
+				return {
+					sessionId: stubId,
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				};
+			},
+			resume() {},
+		};
+
+		const facade = new SessionFacadeImpl(slowAdapter, state, context, globalBus);
+		const prompt = facade.prompt("test");
+		await new Promise((r) => setTimeout(r, 0));
+
 		facade.abort();
-		expect(adapter.abortCalled).toBe(true);
+		expect(abortCalled).toBe(true);
+
+		releaseStream();
+		await prompt;
 	});
 
 	it("onStateChange notifies listeners", async () => {
@@ -209,6 +268,64 @@ describe("SessionFacade", () => {
 		// Give the event loop a tick so the first prompt enters the for-await
 		await new Promise((r) => setTimeout(r, 0));
 
+		await expect(facade.prompt("second")).rejects.toThrow("already running");
+
+		releaseStream();
+		await first;
+	});
+
+	it("keeps the running lock until an aborted stream settles", async () => {
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+
+		let releaseStream!: () => void;
+		const streamBlocked = new Promise<void>((r) => {
+			releaseStream = r;
+		});
+		let aborted = false;
+
+		const slowAdapter: PiSessionAdapter = {
+			async *sendPrompt(_input: string) {
+				await streamBlocked;
+				if (!aborted) {
+					yield { type: "message_update", timestamp: 1000, payload: { content: "hi" } } as RawUpstreamEvent;
+				}
+			},
+			async *sendContinue(_input: string): AsyncIterable<RawUpstreamEvent> {
+				await streamBlocked;
+				if (!aborted) {
+					yield { type: "message_update", timestamp: 1000, payload: { content: "" } } as RawUpstreamEvent;
+				}
+			},
+			abort() {
+				aborted = true;
+			},
+			async close() {},
+			getRecoveryData() {
+				return {
+					sessionId: stubId,
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				};
+			},
+			resume() {},
+		};
+
+		const facade = new SessionFacadeImpl(slowAdapter, state, context, globalBus);
+		const first = facade.prompt("first");
+		await new Promise((r) => setTimeout(r, 0));
+
+		facade.abort();
 		await expect(facade.prompt("second")).rejects.toThrow("already running");
 
 		releaseStream();

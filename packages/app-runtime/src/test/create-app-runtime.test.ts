@@ -126,6 +126,50 @@ describe("createAppRuntime", () => {
 		expect(adapter.lastResumeData).toEqual(recoveryData);
 	});
 
+	it("createAdapter provisions a fresh adapter per session", async () => {
+		const adapters: StubPiSessionAdapter[] = [];
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			createAdapter: () => {
+				const adapter = new StubPiSessionAdapter();
+				adapters.push(adapter);
+				return adapter;
+			},
+		});
+
+		const s1 = runtime.createSession();
+		const s2 = runtime.createSession();
+
+		adapters[0]!.enqueueDefaultEvents([{ type: "message_update", timestamp: 1000, payload: { content: "one" } }]);
+		adapters[1]!.enqueueDefaultEvents([{ type: "message_update", timestamp: 2000, payload: { content: "two" } }]);
+
+		await s1.prompt("first");
+		await s2.prompt("second");
+
+		expect(adapters).toHaveLength(2);
+		expect(adapters[0]!.lastInput).toBe("first");
+		expect(adapters[1]!.lastInput).toBe("second");
+
+		await s1.close();
+		expect(adapters[0]!.closed).toBe(true);
+		expect(adapters[1]!.closed).toBe(false);
+	});
+
+	it("rejects a second session when only a single static adapter is provided", () => {
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			adapter: new StubPiSessionAdapter(),
+		});
+
+		runtime.createSession();
+
+		expect(() => runtime.createSession()).toThrow("createAdapter");
+	});
+
 	it("throws if no adapter is provided", () => {
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
@@ -137,12 +181,16 @@ describe("createAppRuntime", () => {
 	});
 
 	it("shutdown closes all sessions", async () => {
-		const adapter = new StubPiSessionAdapter();
+		const adapters: StubPiSessionAdapter[] = [];
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "print",
 			model: stubModel,
-			adapter,
+			createAdapter: () => {
+				const adapter = new StubPiSessionAdapter();
+				adapters.push(adapter);
+				return adapter;
+			},
 		});
 
 		const s1 = runtime.createSession();
@@ -152,6 +200,8 @@ describe("createAppRuntime", () => {
 
 		expect(s1.state.status).toBe("closed");
 		expect(s2.state.status).toBe("closed");
+		expect(adapters).toHaveLength(2);
+		expect(adapters.every((adapter) => adapter.closed)).toBe(true);
 	});
 
 	it("same runtime can drive multiple modes (print + json)", () => {

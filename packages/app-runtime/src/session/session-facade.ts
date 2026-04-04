@@ -129,9 +129,12 @@ export class SessionFacadeImpl implements SessionFacade {
 
 	abort(): void {
 		this.assertOpen();
+		if (!this._running) {
+			return;
+		}
+
+		// Keep the running lock until the active stream actually settles.
 		this._adapter.abort();
-		this._running = false;
-		this.transitionTask({ status: "idle", currentTaskId: null, startedAt: null });
 	}
 
 	async close(): Promise<void> {
