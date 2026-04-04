@@ -38,9 +38,6 @@ export interface AppRuntimeConfig {
 	 * If omitted, a stub adapter must be provided when creating sessions.
 	 */
 	readonly adapter?: PiSessionAdapter;
-
-	/** Recovery data to resume a previous session. */
-	readonly recoveryData?: SessionRecoveryData;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +125,9 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 					"No PiSessionAdapter provided. Pass an adapter in the config or provide one at session creation.",
 				);
 			}
+
+			// Tell the adapter about the recovery so it can restore its own state
+			config.adapter.resume(data);
 
 			const facade = new SessionFacadeImpl(config.adapter, state, context, globalBus);
 

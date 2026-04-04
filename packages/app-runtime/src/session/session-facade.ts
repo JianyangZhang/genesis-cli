@@ -11,6 +11,7 @@
 import type { PiSessionAdapter } from "../adapters/pi-session-adapter.js";
 import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
+import { updateTaskState as updateContextTaskState } from "../runtime-context.js";
 import { EventNormalizer } from "../services/event-normalizer.js";
 import type { RuntimeContext, SessionId, SessionState, TaskState } from "../types/index.js";
 import { sessionClosed } from "./session-events.js";
@@ -55,13 +56,14 @@ export interface SessionFacade {
 
 export class SessionFacadeImpl implements SessionFacade {
 	private _state: SessionState;
-	private readonly _context: RuntimeContext;
+	private _context: RuntimeContext;
 	private readonly _events: EventBus;
 	private readonly _adapter: PiSessionAdapter;
 	private readonly _globalBus: EventBus;
 	private readonly _normalizer: EventNormalizer;
 	private readonly _stateListeners = new Set<(state: SessionState) => void>();
 	private _closed = false;
+	private _running = false;
 
 	constructor(adapter: PiSessionAdapter, initialState: SessionState, context: RuntimeContext, globalBus: EventBus) {
 		this._adapter = adapter;
@@ -93,6 +95,8 @@ export class SessionFacadeImpl implements SessionFacade {
 
 	async prompt(input: string): Promise<void> {
 		this.assertOpen();
+		this.assertNotRunning();
+		this._running = true;
 		this.transitionTask({ status: "running", currentTaskId: null, startedAt: Date.now() });
 
 		try {
@@ -102,11 +106,14 @@ export class SessionFacadeImpl implements SessionFacade {
 			}
 		} finally {
 			this.transitionTask({ status: "idle", currentTaskId: null, startedAt: null });
+			this._running = false;
 		}
 	}
 
 	async continue(input: string): Promise<void> {
 		this.assertOpen();
+		this.assertNotRunning();
+		this._running = true;
 		this.transitionTask({ status: "running", currentTaskId: null, startedAt: Date.now() });
 
 		try {
@@ -116,12 +123,14 @@ export class SessionFacadeImpl implements SessionFacade {
 			}
 		} finally {
 			this.transitionTask({ status: "idle", currentTaskId: null, startedAt: null });
+			this._running = false;
 		}
 	}
 
 	abort(): void {
 		this.assertOpen();
 		this._adapter.abort();
+		this._running = false;
 		this.transitionTask({ status: "idle", currentTaskId: null, startedAt: null });
 	}
 
@@ -179,6 +188,7 @@ export class SessionFacadeImpl implements SessionFacade {
 
 	private transitionTask(taskState: TaskState): void {
 		this._state = updateTaskState(this._state, taskState);
+		this._context = updateContextTaskState(this._context, taskState);
 		this.notifyStateChange();
 	}
 
@@ -192,6 +202,12 @@ export class SessionFacadeImpl implements SessionFacade {
 	private assertOpen(): void {
 		if (this._closed) {
 			throw new Error("Session is closed");
+		}
+	}
+
+	private assertNotRunning(): void {
+		if (this._running) {
+			throw new Error("Session is already running a prompt or continue operation");
 		}
 	}
 }

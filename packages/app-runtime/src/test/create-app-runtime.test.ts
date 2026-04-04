@@ -100,6 +100,32 @@ describe("createAppRuntime", () => {
 		}
 	});
 
+	// --- Fix 1: adapter.resume() is called during recovery ---
+
+	it("recoverSession calls adapter.resume with recovery data", () => {
+		const adapter = new StubPiSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "rpc",
+			model: stubModel,
+			adapter,
+		});
+
+		const recoveryData = {
+			sessionId: { value: "test-recovery-id" },
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+		};
+
+		runtime.recoverSession(recoveryData);
+
+		expect(adapter.resumeCalled).toBe(true);
+		expect(adapter.lastResumeData).toEqual(recoveryData);
+	});
+
 	it("throws if no adapter is provided", () => {
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",

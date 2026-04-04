@@ -15,6 +15,7 @@ export class StubPiSessionAdapter implements PiSessionAdapter {
 	private _abortCalled = false;
 	private _closed = false;
 	private _lastInput: string | null = null;
+	private _resumeData: SessionRecoveryData | null = null;
 
 	// -----------------------------------------------------------------------
 	// Test helpers
@@ -43,6 +44,16 @@ export class StubPiSessionAdapter implements PiSessionAdapter {
 	/** The last input received by sendPrompt or sendContinue. */
 	get lastInput(): string | null {
 		return this._lastInput;
+	}
+
+	/** Whether resume() was called. */
+	get resumeCalled(): boolean {
+		return this._resumeData !== null;
+	}
+
+	/** The data passed to the last resume() call. */
+	get lastResumeData(): SessionRecoveryData | null {
+		return this._resumeData;
 	}
 
 	// -----------------------------------------------------------------------
@@ -84,5 +95,9 @@ export class StubPiSessionAdapter implements PiSessionAdapter {
 			compactionSummary: null,
 			taskState: { status: "idle", currentTaskId: null, startedAt: null },
 		};
+	}
+
+	resume(data: SessionRecoveryData): void {
+		this._resumeData = data;
 	}
 }

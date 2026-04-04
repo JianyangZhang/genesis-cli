@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PiSessionAdapter, RawUpstreamEvent } from "../adapters/pi-session-adapter.js";
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
 import { createRuntimeContext } from "../runtime-context.js";
@@ -142,5 +143,83 @@ describe("SessionFacade", () => {
 
 		expect(states.length).toBeGreaterThanOrEqual(2);
 		expect(states).toContain("running");
+	});
+
+	// --- Fix 3: RuntimeContext.taskState sync ---
+
+	it("updates context.taskState during prompt", async () => {
+		const { facade, adapter } = createFacade();
+		adapter.enqueueDefaultEvents([{ type: "message_update", timestamp: 1000, payload: { content: "hi" } }]);
+
+		const contextStates: string[] = [];
+		facade.onStateChange(() => contextStates.push(facade.context.taskState.status));
+
+		await facade.prompt("test");
+
+		expect(contextStates).toContain("running");
+		expect(contextStates.at(-1)).toBe("idle");
+	});
+
+	// --- Fix 2: Concurrency guard ---
+
+	it("rejects concurrent prompt calls", async () => {
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+
+		let releaseStream!: () => void;
+		const streamBlocked = new Promise<void>((r) => {
+			releaseStream = r;
+		});
+
+		const slowAdapter: PiSessionAdapter = {
+			async *sendPrompt(_input: string) {
+				await streamBlocked;
+				yield { type: "message_update", timestamp: 1000, payload: { content: "hi" } } as RawUpstreamEvent;
+			},
+			async *sendContinue(_input: string): AsyncIterable<RawUpstreamEvent> {
+				await streamBlocked;
+				yield { type: "message_update", timestamp: 1000, payload: { content: "" } } as RawUpstreamEvent;
+			},
+			abort() {},
+			async close() {},
+			getRecoveryData() {
+				return {
+					sessionId: stubId,
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				};
+			},
+			resume() {},
+		};
+
+		const facade = new SessionFacadeImpl(slowAdapter, state, context, globalBus);
+
+		const first = facade.prompt("first");
+
+		// Give the event loop a tick so the first prompt enters the for-await
+		await new Promise((r) => setTimeout(r, 0));
+
+		await expect(facade.prompt("second")).rejects.toThrow("already running");
+
+		releaseStream();
+		await first;
+	});
+
+	it("allows sequential prompt calls", async () => {
+		const { facade, adapter } = createFacade();
+		adapter.enqueueDefaultEvents([]);
+		await facade.prompt("first");
+		await facade.prompt("second");
+		// No error thrown
 	});
 });

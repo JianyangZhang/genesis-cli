@@ -50,4 +50,7 @@ export interface PiSessionAdapter {
 
 	/** Extract serializable recovery data from the current session state. */
 	getRecoveryData(): SessionRecoveryData;
+
+	/** Resume a previously serialized session. Called before any prompt/continue. */
+	resume(data: SessionRecoveryData): void;
 }
