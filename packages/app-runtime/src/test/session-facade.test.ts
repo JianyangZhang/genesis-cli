@@ -394,11 +394,143 @@ describe("SessionFacade", () => {
 		globalBus.onCategory("permission", (event) => received.push(event));
 		globalBus.onCategory("tool", (event) => received.push(event));
 
-		await facade.prompt("run bash");
-
+		const prompt = facade.prompt("run bash");
+		await new Promise((r) => setTimeout(r, 0));
 		expect(received).toHaveLength(1);
 		expect(received[0]!.type).toBe("permission_requested");
 		expect(governor.audit.size).toBe(0);
+		await facade.resolvePermission("bash_1", "deny");
+		await prompt;
+	});
+
+	it("resumes a gated tool after permission approval", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["bash"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["bash"]),
+		});
+		const governor = createToolGovernor();
+		governor.catalog.register({
+			identity: { name: "bash", category: "command-execution" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L3",
+				readOnly: false,
+				concurrency: "unlimited",
+				confirmation: "always",
+				subAgentAllowed: true,
+				timeoutMs: 60_000,
+			},
+			executorTag: "bash",
+		});
+		adapter.enqueueDefaultEvents([
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "bash",
+					toolCallId: "bash_1",
+					parameters: { command: "echo hello" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: { toolName: "bash", toolCallId: "bash_1", status: "success", durationMs: 20 },
+			},
+		]);
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+		const received: RuntimeEvent[] = [];
+		globalBus.onCategory("permission", (event) => received.push(event));
+		globalBus.onCategory("tool", (event) => received.push(event));
+
+		const prompt = facade.prompt("run bash");
+		await new Promise((r) => setTimeout(r, 0));
+		expect(received.map((event) => event.type)).toEqual(["permission_requested"]);
+
+		await facade.resolvePermission("bash_1", "allow_once");
+		await prompt;
+
+		expect(received.map((event) => event.type)).toEqual([
+			"permission_requested",
+			"permission_resolved",
+			"tool_started",
+			"tool_completed",
+		]);
+		expect(governor.audit.size).toBe(1);
+	});
+
+	it("emits tool_denied when a gated tool is rejected by the user", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["bash"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["bash"]),
+		});
+		const governor = createToolGovernor();
+		governor.catalog.register({
+			identity: { name: "bash", category: "command-execution" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L3",
+				readOnly: false,
+				concurrency: "unlimited",
+				confirmation: "always",
+				subAgentAllowed: true,
+				timeoutMs: 60_000,
+			},
+			executorTag: "bash",
+		});
+		adapter.enqueueDefaultEvents([
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "bash",
+					toolCallId: "bash_2",
+					parameters: { command: "echo hello" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: { toolName: "bash", toolCallId: "bash_2", status: "success", durationMs: 20 },
+			},
+		]);
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+		const received: RuntimeEvent[] = [];
+		globalBus.onCategory("permission", (event) => received.push(event));
+		globalBus.onCategory("tool", (event) => received.push(event));
+
+		const prompt = facade.prompt("run bash");
+		await new Promise((r) => setTimeout(r, 0));
+		await facade.resolvePermission("bash_2", "deny");
+		await prompt;
+
+		expect(received.map((event) => event.type)).toEqual([
+			"permission_requested",
+			"permission_resolved",
+			"tool_denied",
+		]);
 	});
 });
 

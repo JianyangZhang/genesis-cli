@@ -78,6 +78,7 @@ function createStdoutSink(): OutputSink {
 class InteractiveModeHandler implements ModeHandler {
 	private _lastRenderedLines = 0;
 	private _pendingPermissionCallId: string | null = null;
+	private _activeTurn: Promise<void> | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const session = runtime.createSession();
@@ -90,7 +91,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 
 		// Layout accumulator for TUI
-		const accumulator = createLayoutAccumulator(session.state);
+		const accumulator = createLayoutAccumulator(() => session.state);
 		let interactionState: InteractionState = initialInteractionState();
 
 		// Subscribe to session events
@@ -117,6 +118,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 		process.stdout.write(ansiHideCursor());
 		this.renderWelcome(session);
+		this.renderScreenUpdate(accumulator.snapshot());
 
 		try {
 			let line = await inputLoop.nextLine();
@@ -131,9 +133,9 @@ class InteractiveModeHandler implements ModeHandler {
 				if (this._pendingPermissionCallId !== null) {
 					const response = trimmed.toLowerCase();
 					if (response === "y" || response === "yes") {
-						session.resolvePermission(this._pendingPermissionCallId, "allow_once");
+						await session.resolvePermission(this._pendingPermissionCallId, "allow_once");
 					} else {
-						session.resolvePermission(this._pendingPermissionCallId, "deny");
+						await session.resolvePermission(this._pendingPermissionCallId, "deny");
 					}
 					this._pendingPermissionCallId = null;
 					line = await inputLoop.nextLine();
@@ -159,11 +161,19 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				// Regular prompt
-				try {
-					await session.prompt(trimmed);
-				} catch (err) {
-					sink.writeError(`Error: ${err}`);
+				if (this._activeTurn !== null) {
+					sink.writeError("Session is busy. Wait for the active turn or answer the permission prompt.");
+					line = await inputLoop.nextLine();
+					continue;
 				}
+				this._activeTurn = session
+					.prompt(trimmed)
+					.catch((err) => {
+						sink.writeError(`Error: ${err}`);
+					})
+					.finally(() => {
+						this._activeTurn = null;
+					});
 
 				line = await inputLoop.nextLine();
 			}

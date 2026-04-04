@@ -11,7 +11,7 @@
 import type { KernelSessionAdapter, ToolExecutionGateDecision } from "../adapters/kernel-session-adapter.js";
 import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
-import type { RuntimeEvent } from "../events/runtime-event.js";
+import type { RuntimeEvent, ToolStartedEvent } from "../events/runtime-event.js";
 import type { ToolGovernor } from "../governance/tool-governor.js";
 import type { PlanEngine } from "../planning/plan-engine.js";
 import type { PlanOrchestrator } from "../planning/plan-orchestrator.js";
@@ -52,7 +52,7 @@ export interface SessionFacade {
 	close(): Promise<void>;
 
 	/** Resolve a pending permission request. */
-	resolvePermission(callId: string, decision: "allow" | "allow_for_session" | "allow_once" | "deny"): void;
+	resolvePermission(callId: string, decision: "allow" | "allow_for_session" | "allow_once" | "deny"): Promise<void>;
 
 	/** Subscribe to state changes. */
 	onStateChange(listener: (state: SessionState) => void): Unsubscribe;
@@ -77,6 +77,8 @@ export class SessionFacadeImpl implements SessionFacade {
 	private readonly _usesAdapterGovernanceHook: boolean;
 	private readonly _stateListeners = new Set<(state: SessionState) => void>();
 	private readonly _pendingPermissions = new Map<string, { toolName: string; riskLevel: string }>();
+	private readonly _bufferedToolExecutions = new Map<string, { startedEvent: ToolStartedEvent; bufferedEvents: RuntimeEvent[] }>();
+	private readonly _deniedToolCalls = new Set<string>();
 	private _closed = false;
 	private _running = false;
 
@@ -206,7 +208,10 @@ export class SessionFacadeImpl implements SessionFacade {
 		};
 	}
 
-	resolvePermission(callId: string, decision: "allow" | "allow_for_session" | "allow_once" | "deny"): void {
+	async resolvePermission(
+		callId: string,
+		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
+	): Promise<void> {
 		this.assertOpen();
 		const pending = this._pendingPermissions.get(callId);
 		if (!pending) {
@@ -224,8 +229,7 @@ export class SessionFacadeImpl implements SessionFacade {
 			decision,
 		};
 
-		this._events.emit(resolvedEvent);
-		this._globalBus.emit(resolvedEvent);
+		this.emitRuntimeEvent(resolvedEvent);
 
 		if (decision === "allow_for_session" && this._governor) {
 			this._governor.recordSessionApproval({
@@ -239,6 +243,10 @@ export class SessionFacadeImpl implements SessionFacade {
 		}
 
 		this._pendingPermissions.delete(callId);
+		if (typeof this._adapter.resolveToolPermission === "function") {
+			await this._adapter.resolveToolPermission(callId, decision);
+		}
+		this.flushBufferedToolExecution(callId, decision);
 	}
 
 	// -----------------------------------------------------------------------
@@ -257,24 +265,12 @@ export class SessionFacadeImpl implements SessionFacade {
 		if (this._governor && !this._usesAdapterGovernanceHook && normalized.category === "tool") {
 			const governed = this.applyGovernance(normalized);
 			if (governed !== null) {
-				this._events.emit(governed);
-				this._globalBus.emit(governed);
+				this.emitRuntimeEvent(governed);
 			}
-			this.handleStateUpdate(normalized);
 			return;
 		}
 
-		this._events.emit(normalized);
-		this._globalBus.emit(normalized);
-		if (this._governor && normalized.type === "tool_completed") {
-			this._governor.afterExecution({
-				toolName: normalized.toolName,
-				toolCallId: normalized.toolCallId,
-				status: normalized.status,
-				durationMs: normalized.durationMs,
-			});
-		}
-		this.handleStateUpdate(normalized);
+		this.emitRuntimeEvent(normalized);
 	}
 
 	private installAdapterGovernanceHook(): boolean {
@@ -323,6 +319,21 @@ export class SessionFacadeImpl implements SessionFacade {
 	private applyGovernance(normalized: RuntimeEvent): RuntimeEvent | null {
 		if (!this._governor) return normalized;
 
+		if (
+			(normalized.type === "tool_update" || normalized.type === "tool_completed") &&
+			this._deniedToolCalls.has(normalized.toolCallId)
+		) {
+			return null;
+		}
+
+		if (
+			(normalized.type === "tool_update" || normalized.type === "tool_completed") &&
+			this._bufferedToolExecutions.has(normalized.toolCallId)
+		) {
+			this._bufferedToolExecutions.get(normalized.toolCallId)!.bufferedEvents.push(normalized);
+			return null;
+		}
+
 		if (normalized.type === "tool_started") {
 			const targetPath =
 				typeof normalized.parameters?.file_path === "string"
@@ -360,6 +371,10 @@ export class SessionFacadeImpl implements SessionFacade {
 					toolName: normalized.toolName,
 					riskLevel: decision.riskLevel,
 				});
+				this._bufferedToolExecutions.set(normalized.toolCallId, {
+					startedEvent: normalized,
+					bufferedEvents: [],
+				});
 				return {
 					id: normalized.id,
 					timestamp: normalized.timestamp,
@@ -387,6 +402,51 @@ export class SessionFacadeImpl implements SessionFacade {
 
 		// tool_update, tool_denied, etc. — pass through
 		return normalized;
+	}
+
+	private emitRuntimeEvent(event: RuntimeEvent): void {
+		this._events.emit(event);
+		this._globalBus.emit(event);
+		if (this._governor && event.type === "tool_completed") {
+			this._governor.afterExecution({
+				toolName: event.toolName,
+				toolCallId: event.toolCallId,
+				status: event.status,
+				durationMs: event.durationMs,
+			});
+		}
+		this.handleStateUpdate(event);
+	}
+
+	private flushBufferedToolExecution(
+		callId: string,
+		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
+	): void {
+		const buffered = this._bufferedToolExecutions.get(callId);
+		if (!buffered) {
+			return;
+		}
+
+		this._bufferedToolExecutions.delete(callId);
+		if (decision === "deny") {
+			this._deniedToolCalls.add(callId);
+			this.emitRuntimeEvent({
+				id: generateEventId(),
+				timestamp: Date.now(),
+				sessionId: this._state.id,
+				category: "tool",
+				type: "tool_denied",
+				toolName: buffered.startedEvent.toolName,
+				toolCallId: callId,
+				reason: "Permission denied by user",
+			});
+			return;
+		}
+
+		this.emitRuntimeEvent(buffered.startedEvent);
+		for (const event of buffered.bufferedEvents) {
+			this.emitRuntimeEvent(event);
+		}
 	}
 
 	private handleStateUpdate(normalized: RuntimeEvent): void {

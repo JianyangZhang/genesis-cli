@@ -153,6 +153,7 @@ describe("Permission resolution flow", () => {
 			expect(permRequested.toolName).toBe("write_file");
 			expect(permRequested.toolCallId).toBe("tc-perm-1");
 		}
+		expect(sessionEvents.some((e) => e.category === "tool" && e.type === "tool_completed")).toBe(false);
 
 		await facade.close();
 	});
@@ -162,13 +163,19 @@ describe("Permission resolution flow", () => {
 
 		await facade.prompt("write something");
 
-		facade.resolvePermission("tc-perm-1", "allow_once");
+		await facade.resolvePermission("tc-perm-1", "allow_once");
 
 		const permResolved = sessionEvents.find((e) => e.category === "permission" && e.type === "permission_resolved");
 		expect(permResolved).toBeDefined();
 		if (permResolved && permResolved.type === "permission_resolved") {
 			expect(permResolved.decision).toBe("allow_once");
 		}
+		expect(sessionEvents.map((e) => e.type)).toEqual([
+			"permission_requested",
+			"permission_resolved",
+			"tool_started",
+			"tool_completed",
+		]);
 
 		await facade.close();
 	});
@@ -178,13 +185,15 @@ describe("Permission resolution flow", () => {
 
 		await facade.prompt("write something");
 
-		facade.resolvePermission("tc-perm-1", "deny");
+		await facade.resolvePermission("tc-perm-1", "deny");
 
 		const permResolved = sessionEvents.find((e) => e.category === "permission" && e.type === "permission_resolved");
 		expect(permResolved).toBeDefined();
 		if (permResolved && permResolved.type === "permission_resolved") {
 			expect(permResolved.decision).toBe("deny");
 		}
+		expect(sessionEvents.some((e) => e.category === "tool" && e.type === "tool_completed")).toBe(false);
+		expect(sessionEvents.some((e) => e.category === "tool" && e.type === "tool_denied")).toBe(true);
 
 		await facade.close();
 	});
@@ -194,7 +203,7 @@ describe("Permission resolution flow", () => {
 
 		await facade.prompt("write something");
 
-		facade.resolvePermission("tc-perm-1", "allow_once");
+		await facade.resolvePermission("tc-perm-1", "allow_once");
 
 		const globalResolved = globalEvents.find((e) => e.category === "permission" && e.type === "permission_resolved");
 		expect(globalResolved).toBeDefined();
@@ -207,9 +216,7 @@ describe("Permission resolution flow", () => {
 
 		await facade.prompt("write something");
 
-		expect(() => {
-			facade.resolvePermission("nonexistent-call-id", "deny");
-		}).toThrow("No pending permission request");
+		await expect(facade.resolvePermission("nonexistent-call-id", "deny")).rejects.toThrow("No pending permission request");
 
 		await facade.close();
 	});
@@ -219,11 +226,9 @@ describe("Permission resolution flow", () => {
 
 		await facade.prompt("write something");
 
-		facade.resolvePermission("tc-perm-1", "allow_once");
+		await facade.resolvePermission("tc-perm-1", "allow_once");
 
-		expect(() => {
-			facade.resolvePermission("tc-perm-1", "deny");
-		}).toThrow("No pending permission request");
+		await expect(facade.resolvePermission("tc-perm-1", "deny")).rejects.toThrow("No pending permission request");
 
 		await facade.close();
 	});
@@ -233,7 +238,7 @@ describe("Permission resolution flow", () => {
 
 		await facade.prompt("write something");
 
-		facade.resolvePermission("tc-perm-1", "allow_for_session");
+		await facade.resolvePermission("tc-perm-1", "allow_for_session");
 
 		const permResolved = sessionEvents.find((e) => e.category === "permission" && e.type === "permission_resolved");
 		expect(permResolved).toBeDefined();

@@ -239,4 +239,24 @@ describe("statusLine with plan progress", () => {
 		const snapshot = acc.snapshot();
 		expect(snapshot.statusLine.planProgress).toBe("Plan: 2/5");
 	});
+
+	it("reads the latest session state from a supplier", () => {
+		let state = createTestSessionState();
+		const acc = createLayoutAccumulator(() => state);
+
+		state = {
+			...state,
+			planSummary: {
+				planId: "p-2",
+				goal: "ship fix",
+				status: "active",
+				stepCount: 4,
+				completedSteps: 3,
+			},
+		};
+
+		const snapshot = acc.snapshot();
+		expect(snapshot.header.planStatus).toBe("Plan: ship fix");
+		expect(snapshot.statusLine.planProgress).toBe("Plan: 3/4");
+	});
 });

@@ -40,6 +40,8 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 	const output = options.output ?? process.stdout;
 	let running = false;
 	let session: SessionFacade | null = null;
+	let activePrompt: Promise<void> | null = null;
+	const PERMISSION_DECISIONS = new Set(["allow", "allow_for_session", "allow_once", "deny"]);
 
 	function send(envelope: RpcEnvelope): void {
 		output.write(`${JSON.stringify(envelope)}\n`);
@@ -51,6 +53,7 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 		switch (req.method) {
 			case RPC_METHODS.SESSION_CREATE: {
 				session = runtime.createSession();
+				activePrompt = null;
 				// Subscribe to all events and forward as notifications
 				session.events.onCategory("*", (event) => {
 					send(eventToRpcNotification(event));
@@ -64,17 +67,24 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, "No active session"));
 					break;
 				}
+				if (activePrompt) {
+					send(createRpcError(id, RPC_ERRORS.SESSION_BUSY, "Session is already processing a prompt"));
+					break;
+				}
 				const text = (req.params as Record<string, unknown>)?.text;
 				if (typeof text !== "string") {
 					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'text' parameter"));
 					break;
 				}
-				try {
-					await session.prompt(text);
-					send(createRpcResponse(id ?? 0, { status: "prompt_sent" }));
-				} catch (err) {
-					send(createRpcError(id, RPC_ERRORS.INTERNAL_ERROR, String(err)));
-				}
+				activePrompt = session
+					.prompt(text)
+					.catch(() => {
+						// Prompt failures are surfaced through session events; keep the RPC loop responsive.
+					})
+					.finally(() => {
+						activePrompt = null;
+					});
+				send(createRpcResponse(id ?? 0, { status: "prompt_sent" }));
 				break;
 			}
 
@@ -95,6 +105,7 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 				}
 				await session.close();
 				session = null;
+				activePrompt = null;
 				send(createRpcResponse(id ?? 0, { status: "closed" }));
 				break;
 			}
@@ -151,11 +162,11 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 				const permParams = req.params as Record<string, unknown> | undefined;
 				const callId = permParams?.callId;
 				const decision = permParams?.decision;
-				if (typeof callId !== "string" || typeof decision !== "string") {
+				if (typeof callId !== "string" || typeof decision !== "string" || !PERMISSION_DECISIONS.has(decision)) {
 					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'callId' or 'decision'"));
 					break;
 				}
-				session.resolvePermission(callId, decision as "allow" | "allow_for_session" | "allow_once" | "deny");
+				await session.resolvePermission(callId, decision as "allow" | "allow_for_session" | "allow_once" | "deny");
 				send(createRpcResponse(id ?? 0, { status: "resolved" }));
 				break;
 			}

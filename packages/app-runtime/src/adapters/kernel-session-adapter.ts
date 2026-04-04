@@ -65,6 +65,15 @@ export interface KernelSessionAdapter {
 	/** Continue an existing conversation turn. */
 	sendContinue(input: string): AsyncIterable<RawUpstreamEvent>;
 
+	/**
+	 * Optional permission-resolution callback for adapters that can suspend a
+	 * tool until the product layer collects a user decision.
+	 */
+	resolveToolPermission?(
+		callId: string,
+		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
+	): void | Promise<void>;
+
 	/** Abort the current streaming response. */
 	abort(): void;
 

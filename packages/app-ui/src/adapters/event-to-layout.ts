@@ -35,11 +35,13 @@ export interface LayoutAccumulator {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createLayoutAccumulator(sessionState: SessionState): LayoutAccumulator {
+export function createLayoutAccumulator(sessionState: SessionState | (() => SessionState)): LayoutAccumulator {
 	let interactionState = initialInteractionState();
 	const lines: ConversationLine[] = [];
 	// Track active tool calls so we can update their status on completion.
 	const activeToolCalls = new Map<string, number>(); // toolCallId → index in lines[]
+	const getSessionState =
+		typeof sessionState === "function" ? sessionState : () => sessionState;
 
 	return {
 		push(event: RuntimeEvent): void {
@@ -48,7 +50,7 @@ export function createLayoutAccumulator(sessionState: SessionState): LayoutAccum
 		},
 
 		snapshot(): TuiScreenLayout {
-			return buildLayout(sessionState, interactionState, lines);
+			return buildLayout(getSessionState(), interactionState, lines);
 		},
 
 		reset(): void {

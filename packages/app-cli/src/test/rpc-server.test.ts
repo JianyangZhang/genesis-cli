@@ -49,7 +49,7 @@ function createMockSession(overrides?: Partial<SessionState>): SessionFacade {
 		abort: () => {},
 		close: async () => {},
 		onStateChange: () => () => {},
-		resolvePermission: () => {},
+		resolvePermission: async () => {},
 	} as unknown as SessionFacade;
 }
 
@@ -191,7 +191,7 @@ describe("RPC server", () => {
 	it("resolves permission with valid session", async () => {
 		const mockSession = createMockSession();
 		const resolvedCalls: Array<{ callId: string; decision: string }> = [];
-		mockSession.resolvePermission = (callId: string, decision: string) => {
+		mockSession.resolvePermission = async (callId: string, decision: string) => {
 			resolvedCalls.push({ callId, decision });
 		};
 		const mockRuntime = createMockRuntime(mockSession);
@@ -208,6 +208,33 @@ describe("RPC server", () => {
 		expect(resolvedCalls).toHaveLength(1);
 		expect(resolvedCalls[0].callId).toBe("tc-1");
 		expect(resolvedCalls[0].decision).toBe("allow_once");
+	});
+
+	it("keeps processing permission/resolve while a prompt is still running", async () => {
+		let releasePrompt!: () => void;
+		const promptBlocked = new Promise<void>((resolve) => {
+			releasePrompt = resolve;
+		});
+		const resolvedCalls: Array<{ callId: string; decision: string }> = [];
+		const mockSession = createMockSession();
+		mockSession.prompt = async () => {
+			await promptBlocked;
+		};
+		mockSession.resolvePermission = async (callId: string, decision: string) => {
+			resolvedCalls.push({ callId, decision });
+			releasePrompt();
+		};
+		const mockRuntime = createMockRuntime(mockSession);
+
+		const responses = await runRpcTest(mockRuntime, [
+			{ method: RPC_METHODS.SESSION_CREATE, id: 1 },
+			{ method: RPC_METHODS.SESSION_PROMPT, id: 2, params: { text: "do it" } },
+			{ method: RPC_METHODS.PERMISSION_RESOLVE, id: 3, params: { callId: "tc-1", decision: "allow_once" } },
+		]);
+
+		expect(responses.find((r) => r.id === 2)?.result).toEqual({ status: "prompt_sent" });
+		expect(responses.find((r) => r.id === 3)?.result).toEqual({ status: "resolved" });
+		expect(resolvedCalls).toEqual([{ callId: "tc-1", decision: "allow_once" }]);
 	});
 
 	it("returns INVALID_PARAMS for permission/resolve missing params", async () => {

@@ -15,6 +15,11 @@ import type { SessionRecoveryData } from "../../types/index.js";
 
 export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	private readonly eventsByPrompt = new Map<string, RawUpstreamEvent[]>();
+	private readonly pendingPermissionResolvers = new Map<
+		string,
+		(value: "allow" | "allow_for_session" | "allow_once" | "deny") => void
+	>();
+	private readonly resolvedPermissions = new Map<string, "allow" | "allow_for_session" | "allow_once" | "deny">();
 	private defaultEvents: RawUpstreamEvent[] = [];
 	private toolExecutionGate: ToolExecutionGate | null = null;
 	private _abortCalled = false;
@@ -81,6 +86,19 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 		yield* this.processEvents(events);
 	}
 
+	resolveToolPermission(
+		callId: string,
+		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
+	): void {
+		const resolver = this.pendingPermissionResolvers.get(callId);
+		if (resolver) {
+			this.pendingPermissionResolvers.delete(callId);
+			resolver(decision);
+			return;
+		}
+		this.resolvedPermissions.set(callId, decision);
+	}
+
 	private async *processEvents(events: RawUpstreamEvent[]): AsyncIterable<RawUpstreamEvent> {
 		const suppressedToolCalls = new Set<string>();
 
@@ -102,7 +120,6 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 					continue;
 				}
 
-				suppressedToolCalls.add(toolCallId);
 				yield {
 					type: decision.type === "deny" ? "tool_execution_denied" : "permission_request",
 					timestamp: event.timestamp,
@@ -111,6 +128,22 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 							? { toolName, toolCallId, reason: decision.reason }
 							: { toolName, toolCallId, riskLevel: decision.riskLevel },
 				};
+				if (decision.type === "deny") {
+					suppressedToolCalls.add(toolCallId);
+					continue;
+				}
+
+				const resolution = await this.waitForPermission(toolCallId);
+				if (resolution === "deny") {
+					suppressedToolCalls.add(toolCallId);
+					yield {
+						type: "tool_execution_denied",
+						timestamp: Date.now(),
+						payload: { toolName, toolCallId, reason: "Permission denied by user" },
+					};
+					continue;
+				}
+				yield event;
 				continue;
 			}
 
@@ -133,6 +166,10 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 
 	async close(): Promise<void> {
 		this._closed = true;
+		for (const [callId, resolve] of this.pendingPermissionResolvers) {
+			resolve("deny");
+			this.pendingPermissionResolvers.delete(callId);
+		}
 	}
 
 	getRecoveryData(): SessionRecoveryData {
@@ -148,5 +185,17 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 
 	resume(data: SessionRecoveryData): void {
 		this._resumeData = data;
+	}
+
+	private waitForPermission(callId: string): Promise<"allow" | "allow_for_session" | "allow_once" | "deny"> {
+		const existing = this.resolvedPermissions.get(callId);
+		if (existing) {
+			this.resolvedPermissions.delete(callId);
+			return Promise.resolve(existing);
+		}
+
+		return new Promise((resolve) => {
+			this.pendingPermissionResolvers.set(callId, resolve);
+		});
 	}
 }
