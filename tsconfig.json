@@ -1,0 +1,25 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "Node16",
+		"moduleResolution": "Node16",
+		"strict": true,
+		"declaration": true,
+		"sourceMap": true,
+		"composite": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"esModuleInterop": true
+	},
+	"references": [
+		{ "path": "packages/app-config" },
+		{ "path": "packages/app-runtime" },
+		{ "path": "packages/app-tools" },
+		{ "path": "packages/app-ui" },
+		{ "path": "packages/app-extensions" },
+		{ "path": "packages/app-evaluation" },
+		{ "path": "packages/app-cli" }
+	]
+}

@@ -1,0 +1,14 @@
+{
+	"name": "@anthropic-ai/claude-code-pi-ui",
+	"version": "0.0.0",
+	"private": true,
+	"description": "TUI components, text formatters, and JSON/RPC event format mapping",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json"
+	},
+	"dependencies": {
+		"@anthropic-ai/claude-code-pi-runtime": "*"
+	}
+}

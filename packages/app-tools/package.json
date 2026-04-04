@@ -1,0 +1,14 @@
+{
+	"name": "@anthropic-ai/claude-code-pi-tools",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Tool catalog, risk classification, permission labels, and execution wrappers",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json"
+	},
+	"dependencies": {
+		"@anthropic-ai/claude-code-pi-runtime": "*"
+	}
+}
