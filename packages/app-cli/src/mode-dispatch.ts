@@ -1112,6 +1112,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private writeFooterUi(ui: InteractiveFooterRenderResult): void {
 		process.stdout.write(ui.block);
+		process.stdout.write("\n");
 		const rowsUpFromEnd = computeFooterCursorRowsFromEnd(
 			ui.lines,
 			process.stdout.columns ?? 80,
@@ -1119,8 +1120,8 @@ class InteractiveModeHandler implements ModeHandler {
 			ui.cursorColumn,
 		);
 		process.stdout.write("\r");
-		if (rowsUpFromEnd > 0) {
-			process.stdout.write(ansiMoveUp(rowsUpFromEnd));
+		if (rowsUpFromEnd + 1 > 0) {
+			process.stdout.write(ansiMoveUp(rowsUpFromEnd + 1));
 		}
 		process.stdout.write(ansiMoveRight(computeFooterCursorColumn(process.stdout.columns ?? 80, ui.cursorColumn)));
 		process.stdout.write(ansiShowCursor());
