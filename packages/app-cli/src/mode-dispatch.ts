@@ -343,28 +343,33 @@ class InteractiveModeHandler implements ModeHandler {
 			type: "local",
 			async execute(ctx) {
 				const cwd = ctx.session.context.workingDirectory;
+				ctx.output.writeLine("Working tree:");
 				if (handler._changedPaths.size > 0) {
-					ctx.output.writeLine("Changed files (observed):");
+					ctx.output.writeLine("Changed files (observed by tools):");
 					for (const path of [...handler._changedPaths].sort((a, b) => a.localeCompare(b))) {
 						ctx.output.writeLine(`  ${path}`);
 					}
 				} else {
-					ctx.output.writeLine("Changed files (observed): none");
+					ctx.output.writeLine("Changed files (observed by tools): none");
 				}
 
 				const status = await runGit(cwd, ["status", "--porcelain"]);
 				if (status.type === "ok") {
-					ctx.output.writeLine("git status:");
-					ctx.output.writeLine(status.stdout.trim().length > 0 ? status.stdout.trimEnd() : "  clean");
+					const trimmed = status.stdout.trim();
+					ctx.output.writeLine("git status --porcelain:");
+					ctx.output.writeLine(trimmed.length > 0 ? trimmed : "  clean");
 				}
 				const stat = await runGit(cwd, ["diff", "--stat"]);
 				if (stat.type === "ok" && stat.stdout.trim().length > 0) {
 					ctx.output.writeLine("git diff --stat:");
-					ctx.output.writeLine(stat.stdout.trimEnd());
+					ctx.output.writeLine(`  ${stat.stdout.trimEnd().split("\n").join("\n  ")}`);
 				}
 				if (status.type === "error" || stat.type === "error") {
 					ctx.output.writeError("git not available in this working directory.");
+					ctx.output.writeLine("Next: use /review to inspect tool-observed changes.");
+					return undefined;
 				}
+				ctx.output.writeLine("Next: /review to inspect, /diff [file] to see patches, /revert <file> to undo.");
 				return undefined;
 			},
 		});
@@ -376,6 +381,11 @@ class InteractiveModeHandler implements ModeHandler {
 			async execute(ctx) {
 				const cwd = ctx.session.context.workingDirectory;
 				const target = ctx.args.trim();
+				if (target.length === 0) {
+					ctx.output.writeLine("Diff:");
+				} else {
+					ctx.output.writeLine(`Diff: ${target}`);
+				}
 				const args = target.length > 0 ? ["diff", "--", target] : ["diff"];
 				const diff = await runGit(cwd, args);
 				if (diff.type === "error") {
@@ -383,6 +393,7 @@ class InteractiveModeHandler implements ModeHandler {
 					return undefined;
 				}
 				ctx.output.writeLine(diff.stdout.trimEnd().length > 0 ? diff.stdout.trimEnd() : "(no diff)");
+				ctx.output.writeLine("Next: /revert <file> to undo, or /review to see a summary.");
 				return undefined;
 			},
 		});
@@ -406,6 +417,7 @@ class InteractiveModeHandler implements ModeHandler {
 					}
 					handler._changedPaths.clear();
 					ctx.output.writeLine("Reverted all changes.");
+					ctx.output.writeLine("Next: /changes to confirm clean state.");
 					return undefined;
 				}
 				const result = await runGit(cwd, ["checkout", "--", arg]);
@@ -415,6 +427,7 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				handler._changedPaths.delete(arg);
 				ctx.output.writeLine(`Reverted: ${arg}`);
+				ctx.output.writeLine("Next: /changes to confirm, or keep iterating.");
 				return undefined;
 			},
 		});
@@ -424,8 +437,19 @@ class InteractiveModeHandler implements ModeHandler {
 			description: "Review changes and decide to keep or revert",
 			type: "local",
 			async execute(ctx) {
+				const cwd = ctx.session.context.workingDirectory;
+				const status = await runGit(cwd, ["status", "--porcelain"]);
+				if (status.type === "ok" && status.stdout.trim().length === 0 && handler._changedPaths.size === 0) {
+					ctx.output.writeLine("Review: clean working tree.");
+					ctx.output.writeLine("Next: continue chatting, or run /status if you want a snapshot.");
+					return undefined;
+				}
 				await registry.get("changes")!.execute?.(ctx);
-				ctx.output.writeLine("Next: /diff [file] to inspect, /revert <file> to undo, or continue chatting.");
+				ctx.output.writeLine("Review tips:");
+				ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
+				ctx.output.writeLine("  /revert <file> Undo a change");
+				ctx.output.writeLine("  /revert --all  Undo all changes");
+				ctx.output.writeLine("Next: inspect diffs, then continue chatting.");
 				return undefined;
 			},
 		});
