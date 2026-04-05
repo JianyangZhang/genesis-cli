@@ -42,7 +42,7 @@ describe("interactive transcript formatting", () => {
 	it("formats user lines as a compact highlighted block", () => {
 		const line = formatTranscriptUserLine("Hello");
 		expect(line).toContain("Hello");
-		expect(line).toContain("\x1b[48;5;250m");
+		expect(line).toContain("\x1b[48;5;252m");
 	});
 
 	it("formats assistant lines with a themed bullet prefix", () => {
