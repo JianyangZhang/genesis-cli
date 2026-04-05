@@ -412,6 +412,31 @@ class InteractiveModeHandler implements ModeHandler {
 		});
 
 		register({
+			name: "usage",
+			description: "Show tool usage and governance summary",
+			type: "local",
+			async execute(ctx) {
+				const entries = ctx.runtime.governor.audit.getAll();
+				const total = entries.length;
+				const success = entries.filter((e) => e.status === "success").length;
+				const failure = entries.filter((e) => e.status === "failure").length;
+				const denied = entries.filter((e) => e.status === "denied").length;
+				ctx.output.writeLine(`Tools: ${total} total — ${success} success, ${failure} failure, ${denied} denied`);
+				const tail = entries.slice(-10);
+				if (tail.length > 0) {
+					ctx.output.writeLine("Recent:");
+					for (const entry of tail) {
+						const path = entry.targetPath ? ` ${entry.targetPath}` : "";
+						ctx.output.writeLine(
+							`  ${entry.status} ${entry.toolName} (${entry.riskLevel})${path} ${entry.durationMs}ms`,
+						);
+					}
+				}
+				return undefined;
+			},
+		});
+
+		register({
 			name: "config",
 			description: "Show effective config",
 			type: "local",
