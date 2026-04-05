@@ -1,91 +1,65 @@
 # Genesis CLI
 
-**An open-source coding CLI for real repository work, with explicit planning, tool governance, and agent collaboration.**
+**An open-source coding CLI that combines a clean, layered pi-agent kernel with a Claude-Code-inspired product runtime.**
 
 [中文版](README.zh.md)
 
 ---
 
-## Overview
+## What It Is
 
-`Genesis CLI` is an open-source coding CLI project built around a simple idea:
+Genesis is built for real repository work (not toy demos): plan, review, change, verify.
 
-> a strong coding workflow needs both a reliable runtime backbone and a clear product layer.
+The architecture is the point:
 
-The project focuses on:
+- a **vendored kernel** (pi-agent lineage) that stays small, explicit, and interface-agnostic
+- a **product runtime** that turns raw agent capability into a controllable user experience
 
-- turning plan -> modify -> verify into a first-class product experience
-- making tool use, permissions, and execution behavior explicit and reviewable
-- supporting multiple interfaces on top of one shared runtime backbone
-
-Rather than treating coding as a loose prompt loop, `Genesis CLI` aims to make real repository work more structured, inspectable, and repeatable.
-
----
-
-## Design Direction
-
-The project is guided by a few core principles:
-
-- **One runtime backbone**: interactive, print, structured, and embedded experiences should share the same core execution model
-- **Clear product boundaries**: planning, permissions, orchestration, and presentation should not collapse into one layer
-- **Operational transparency**: users should be able to understand what was attempted, what was approved, and what actually happened
-- **Long-term maintainability**: architecture should stay reviewable as the project grows
-
----
-
-## What Genesis CLI Tries To Be
-
-`Genesis CLI` is intended to be:
-
-- a serious local coding companion for real repositories
-- a foundation for plan-driven execution and controlled tool use
-- a runtime that can power more than one interface
-- a codebase where advanced workflows remain understandable instead of hidden in prompts
-
-It is not trying to be a feature-for-feature clone of any single upstream tool.
-
----
-
-## Current Status
-
-The project is active and already has a runnable implementation.
-
-Today, the repository includes:
-
-- a working CLI entry for real conversations
-- a shared runtime used across multiple modes
-- live validation on the primary model integration path
-- product-layer foundations for planning, permissions, and structured execution
-- technical documents that describe both the current architecture and the next stage of evolution
-
-The current focus is not a rewrite. It is steady functional progress on a working system, while keeping architectural boundaries sharp.
-
----
-
-## Modes
-
-The long-term goal is one runtime serving multiple interfaces:
-
-- `Interactive` for day-to-day use
-- `Print` for simple terminal output and scripting
-- `JSON` for automation and CI
-- `RPC` for IDEs and host processes
-
-These modes are expected to differ in presentation, not in core execution semantics.
-
----
-
-## Project Structure
-
-At a high level, the repository separates:
-
-- runtime foundations
-- product orchestration
-- tool governance
-- interface and presentation layers
-- evaluation and future extension boundaries
-
+Genesis is inspired by the best of Claude Code’s product layer, but it is not a code clone. The goal is a maintainable system with sharper boundaries and stronger governance.
 The exact package layout is intentionally documented in the technical plan rather than overloaded into the project homepage.
+
+---
+## Why This Architecture Works
+
+Genesis is structured so the kernel can stay clean while the product layer moves fast.
+
+### 1) A Clean, Vendored pi-agent Kernel
+
+The kernel is kept inside this repository (not hidden behind an external SDK boundary), and focuses on core primitives:
+
+- agent session lifecycle, streaming, and event emission
+- model/provider registries and auth storage
+- built-in tools and a stable session surface
+
+This makes the “agent core” reviewable, testable, and reusable across interfaces.
+
+### 2) A Product Runtime That Doesn’t Leak Internals
+
+The product runtime sits above the kernel and enforces a stable contract:
+
+- **normalized runtime events** (raw upstream events are never exposed)
+- **tool governance** as code: risk classification, permission decisions, audit logging, mutation queueing
+- **planning and subagent contracts**: scoped file access, verification requirements, stop conditions
+
+Different interfaces can render the same runtime semantics without re-implementing governance.
+
+---
+
+## What You Get Today
+
+- one runtime powering multiple modes: `Interactive`, `Print`, `JSON`, `RPC`
+- explicit permission gating and audit trails for tool execution
+- OpenAI-compatible provider path for real model integration, plus a provider registry for expansion
+- a product-layer event pipeline designed for “workbench” UIs (terminal today, hosts later)
+
+---
+
+## Extending Genesis
+
+- add a tool: define the contract, classify risk, enforce permission + audit
+- add a provider/model: register it once, consume it from any interface
+- add an interface: consume normalized events and render a mode without forking semantics
+- add product commands: keep UX logic out of the kernel
 
 ---
 
@@ -100,26 +74,11 @@ npm run chat:live -- --mode print
 npm run test:live:pi-mono
 ```
 
-Local secrets are intentionally kept out of version control. Use `.env.local` for local API keys and endpoint configuration.
+Local secrets are intentionally kept out of version control. Copy `.env.example` to `.env.local` and fill `GENESIS_API_KEY` (and optionally endpoint overrides).
 
 ---
 
 ## Documentation
 
-Detailed design and implementation notes live in `technical-plan/genesis-cli/`.
-
-Those documents are meant to do two things:
-
-- explain the architecture that is actually being built
-- record the next steps for configuration, hardening, and agent evolution
-
----
-
-## Near-Term Focus
-
-The next stage is focused on:
-
-- continuing delivery on the working runtime path
-- strengthening configuration and hardening
-- expanding verification and regression coverage
-- evolving subagent orchestration without blurring system boundaries
+- High-level package docs: `packages/*/README.md`
+- ADRs and runbooks: `docs/` (work in progress)
