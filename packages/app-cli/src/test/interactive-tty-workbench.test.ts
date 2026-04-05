@@ -710,7 +710,7 @@ describe("interactive workbench TTY", () => {
 			const userLine = findLineIndexContaining(snapshot, "hello");
 			const assistantLine = findLineIndexContaining(snapshot, "Hi from Genesis");
 			const footerSeparatorLine = findLineIndexContaining(snapshot, "────────────────");
-			expect(assistantLine - userLine).toBeGreaterThanOrEqual(2);
+			expect(assistantLine - userLine).toBe(2);
 			expect(footerSeparatorLine - assistantLine).toBeLessThanOrEqual(2);
 
 			input.write("/exit\r");
@@ -958,6 +958,26 @@ describe("interactive workbench TTY", () => {
 
 			input.write("/exit\r");
 			await startPromise;
+		});
+	}, 10000);
+
+	it("enters alternate screen for interactive mode", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => output.getRawOutput().includes("\x1b[?1049h"));
+			await waitFor(() => screen.snapshot().includes("Genesis CLI"));
+			expect(output.getRawOutput()).not.toContain("\x1b[?1000h");
+			expect(output.getRawOutput()).not.toContain("\x1b[?1002h");
+			expect(output.getRawOutput()).not.toContain("\x1b[?1006h");
+
+			input.write("/exit\r");
+			await startPromise;
+			expect(output.getRawOutput()).toContain("\x1b[?1049l");
 		});
 	}, 10000);
 

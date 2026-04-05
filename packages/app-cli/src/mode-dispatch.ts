@@ -64,6 +64,7 @@ interface UsageSnapshot {
 }
 
 const TURN_NOTICE_ELAPSED_THRESHOLD_MS = 2_000;
+const RESIZE_REDRAW_DEBOUNCE_MS = 120;
 
 // ---------------------------------------------------------------------------
 // Interactive mode
@@ -143,11 +144,14 @@ class InteractiveModeHandler implements ModeHandler {
 			onResume: () => {
 				this.rerenderInteractiveRegions();
 			},
-			useAlternateScreen: false,
+			useAlternateScreen: true,
 			enableMouseTracking: false,
 		});
-		const onResize = (): void => {
+		const debouncedResizeRedraw = createDebouncedCallback(() => {
 			this.rerenderInteractiveRegions();
+		}, RESIZE_REDRAW_DEBOUNCE_MS);
+		const onResize = (): void => {
+			debouncedResizeRedraw.schedule();
 		};
 		process.stdout.on("resize", onResize);
 
@@ -910,6 +914,7 @@ class InteractiveModeHandler implements ModeHandler {
 			}
 		} finally {
 			process.stdout.off("resize", onResize);
+			debouncedResizeRedraw.cancel();
 			inputLoop.close();
 			process.stdout.write(ansiResetScrollRegion());
 			ttySession.restore();
@@ -1312,8 +1317,8 @@ class InteractiveModeHandler implements ModeHandler {
 		const end = Math.min(lines.length, start + viewportSize);
 		const summary =
 			lines.length <= viewportSize
-				? "esc to collapse · wheel/↑↓"
-				: `esc to collapse · wheel/↑↓ · ${start + 1}-${end}/${lines.length}`;
+				? "esc to collapse · ↑↓"
+				: `esc to collapse · ↑↓ · ${start + 1}-${end}/${lines.length}`;
 		return {
 			lines: lines.slice(start, end),
 			summary,
@@ -1456,7 +1461,9 @@ class InteractiveModeHandler implements ModeHandler {
 		if (block.length === 0) {
 			return;
 		}
-		this._transcriptBlocks.push(block);
+		const nextBlocks = appendTranscriptBlockWithSpacer(this._transcriptBlocks, block);
+		this._transcriptBlocks.length = 0;
+		this._transcriptBlocks.push(...nextBlocks);
 	}
 
 	private rememberAssistantTranscriptBlock(block: string): void {
@@ -1640,9 +1647,9 @@ function applyWelcomeBorderColor(text: string): string {
 
 function buildWelcomeHintLine(width: number): string {
 	if (width < 64) {
-		return "Start: Enter  Help: /help  Scroll: wheel/arrows";
+		return "Start: Enter  Help: /help  Scroll: arrows";
 	}
-	return "Start: type a prompt and press Enter  Help: /help  Scroll: wheel/arrows";
+	return "Start: type a prompt and press Enter  Help: /help  Scroll: arrows";
 }
 
 export const WELCOME_BIBLE_GREETINGS = [
@@ -2031,6 +2038,35 @@ function detailPanelScrollDeltaForKey(
 		default:
 			return 0;
 	}
+}
+
+export function createDebouncedCallback(
+	callback: () => void,
+	delayMs: number,
+): {
+	schedule(): void;
+	cancel(): void;
+} {
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	return {
+		schedule(): void {
+			if (timer !== null) {
+				clearTimeout(timer);
+			}
+			timer = setTimeout(() => {
+				timer = null;
+				callback();
+			}, delayMs);
+			timer.unref?.();
+		},
+		cancel(): void {
+			if (timer === null) {
+				return;
+			}
+			clearTimeout(timer);
+			timer = null;
+		},
+	};
 }
 
 function normalizeToolResultLines(
@@ -2468,11 +2504,28 @@ export function materializeAssistantTranscriptBlock(buffer: string): string | nu
 }
 
 export function appendAssistantTranscriptBlock(blocks: readonly string[], assistantBlock: string): readonly string[] {
-	const lastNonEmptyBlock = [...blocks].reverse().find((block) => block.length > 0);
-	if (lastNonEmptyBlock && isTranscriptUserBlock(lastNonEmptyBlock)) {
-		return [...blocks, "", assistantBlock];
+	return appendTranscriptBlockWithSpacer(blocks, assistantBlock);
+}
+
+export function appendTranscriptBlockWithSpacer(blocks: readonly string[], block: string): readonly string[] {
+	if (block.length === 0) {
+		return [...blocks];
 	}
-	return [...blocks, assistantBlock];
+	const lastNonEmptyIndex = findLastNonEmptyBlockIndex(blocks);
+	if (lastNonEmptyIndex === -1) {
+		return [block];
+	}
+	const normalized = blocks.slice(0, lastNonEmptyIndex + 1);
+	return [...normalized, "", block];
+}
+
+function findLastNonEmptyBlockIndex(blocks: readonly string[]): number {
+	for (let index = blocks.length - 1; index >= 0; index -= 1) {
+		if ((blocks[index] ?? "").length > 0) {
+			return index;
+		}
+	}
+	return -1;
 }
 
 export function computeFooterStartRow(

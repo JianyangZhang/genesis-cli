@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
 	appendAssistantTranscriptBlock,
+	appendTranscriptBlockWithSpacer,
 	buildWelcomeLines,
 	computeFooterCursorColumn,
 	computeFooterCursorRowsFromEnd,
@@ -14,6 +15,7 @@ import {
 	computeTranscriptDisplayRows,
 	computeVisibleTranscriptLines,
 	countRenderedTerminalRows,
+	createDebouncedCallback,
 	fitTerminalLine,
 	formatInteractiveFooter,
 	formatInteractiveInputSeparator,
@@ -320,12 +322,12 @@ describe("interactive transcript formatting", () => {
 			turnNotice: "thinking",
 			turnNoticeAnimationFrame: 0,
 			detailPanelExpanded: true,
-			detailPanelSummary: "esc to collapse · wheel/↑↓",
+			detailPanelSummary: "esc to collapse · ↑↓",
 			detailPanelLines: ["Let me plan this carefully."],
 			permission: null,
 		});
 		expect(expanded.block).toContain("esc to collapse");
-		expect(expanded.block).toContain("wheel/↑↓");
+		expect(expanded.block).toContain("↑↓");
 		expect(expanded.block).toContain("Let me plan this carefully.");
 	});
 
@@ -339,11 +341,33 @@ describe("interactive transcript formatting", () => {
 			turnNotice: "thinking",
 			turnNoticeAnimationFrame: 0,
 			detailPanelExpanded: true,
-			detailPanelSummary: "esc to collapse · wheel/↑↓ · 1-16/24",
+			detailPanelSummary: "esc to collapse · ↑↓ · 1-16/24",
 			detailPanelLines: ["Thinking line 1", "Thinking line 2"],
 			permission: null,
 		});
 		expect(expanded.block).toContain("1-16/24");
+	});
+
+	it("debounces repeated callbacks and supports cancellation", () => {
+		vi.useFakeTimers();
+		try {
+			const callback = vi.fn();
+			const debounced = createDebouncedCallback(callback, 100);
+			debounced.schedule();
+			debounced.schedule();
+			vi.advanceTimersByTime(99);
+			expect(callback).not.toHaveBeenCalled();
+			vi.advanceTimersByTime(1);
+			expect(callback).toHaveBeenCalledTimes(1);
+
+			callback.mockClear();
+			debounced.schedule();
+			debounced.cancel();
+			vi.runAllTimers();
+			expect(callback).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("wraps transcript content for streaming redraw", () => {
@@ -356,7 +380,7 @@ describe("interactive transcript formatting", () => {
 		expect(materializeAssistantTranscriptBlock("")).toBeNull();
 	});
 
-	it("inserts a spacer row between a user block and the next assistant block", () => {
+	it("inserts a spacer row uniformly between transcript blocks", () => {
 		expect(
 			appendAssistantTranscriptBlock([formatTranscriptUserLine("Hello")], formatTranscriptAssistantLine("World")),
 		).toEqual([formatTranscriptUserLine("Hello"), "", formatTranscriptAssistantLine("World")]);
@@ -365,7 +389,8 @@ describe("interactive transcript formatting", () => {
 				[formatTranscriptAssistantLine("Before")],
 				formatTranscriptAssistantLine("After"),
 			),
-		).toEqual([formatTranscriptAssistantLine("Before"), formatTranscriptAssistantLine("After")]);
+		).toEqual([formatTranscriptAssistantLine("Before"), "", formatTranscriptAssistantLine("After")]);
+		expect(appendTranscriptBlockWithSpacer(["first"], "second")).toEqual(["first", "", "second"]);
 	});
 
 	it("keeps only the visible transcript tail for full-screen redraw", () => {
