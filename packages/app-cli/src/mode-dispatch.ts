@@ -923,7 +923,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.fullRedrawInteractiveScreen();
 			return;
 		}
-		this.renderFooterRegion();
+		this.fullRedrawInteractiveScreen();
 	}
 
 	private handleTranscriptEvent(event: RuntimeEvent): void {

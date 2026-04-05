@@ -424,6 +424,7 @@ describe("interactive workbench TTY", () => {
 			input.write("bash pwd\r");
 			await waitFor(() => session.isWaitingForPermission());
 			await waitFor(() => screen.snapshot().includes("choice [Enter/1/2/3]>"));
+			expect(screen.snapshot()).toContain("bash pwd");
 
 			input.write("2\r");
 			await waitFor(() => screen.snapshot().includes("Current directory: /tmp"));
