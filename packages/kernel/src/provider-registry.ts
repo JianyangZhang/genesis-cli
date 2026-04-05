@@ -1,4 +1,4 @@
-import { type Context, type Model, type SimpleStreamOptions, streamSimple } from "@mariozechner/pi-ai";
+import { type Context, type Model, type SimpleStreamOptions, streamSimple } from "@pickle-pee/pi-ai";
 import { streamAnthropicMessages } from "./providers/anthropic.js";
 import { streamOpenAiCompletions } from "./providers/openai.js";
 

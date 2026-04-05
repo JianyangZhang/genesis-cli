@@ -1,4 +1,17 @@
-# @genesis-cli/cli
+# @pickle-pee/genesis-cli
+
+## 安装
+
+```bash
+npm install -g @pickle-pee/genesis-cli
+genesis --version
+genesis
+```
+
+## 发布目标
+
+- npm 包名：`@pickle-pee/genesis-cli`
+- 全局命令：`genesis`
 
 ## 职责
 

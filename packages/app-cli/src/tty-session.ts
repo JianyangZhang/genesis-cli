@@ -8,7 +8,7 @@ import {
 	ansiExitAlternateScreen,
 	ansiHideCursor,
 	ansiShowCursor,
-} from "@genesis-cli/ui";
+} from "@pickle-pee/ui";
 
 type TtyInput = NodeJS.ReadableStream & {
 	isTTY?: boolean;

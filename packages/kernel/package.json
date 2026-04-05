@@ -1,7 +1,6 @@
 {
-  "name": "@genesis-cli/kernel",
+  "name": "@pickle-pee/kernel",
   "version": "0.0.0",
-  "private": true,
   "type": "module",
   "description": "Vendored Genesis kernel for agent sessions, providers, and built-in tools",
   "main": "./dist/index.js",
@@ -14,12 +13,18 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"const fs = require('node:fs'); fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && tsc -p tsconfig.build.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.65.0",
-    "@mariozechner/pi-ai": "^0.65.0",
+    "@pickle-pee/pi-ai": "0.65.0",
     "@sinclair/typebox": "^0.34.41"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ]
 }

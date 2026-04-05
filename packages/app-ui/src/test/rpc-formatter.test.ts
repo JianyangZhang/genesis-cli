@@ -2,7 +2,7 @@
  * Tests for the RPC formatter.
  */
 
-import type { RuntimeEvent } from "@genesis-cli/runtime";
+import type { RuntimeEvent } from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 import {
 	createRpcError,

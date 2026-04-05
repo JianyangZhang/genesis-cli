@@ -23,7 +23,7 @@ import type {
 	RiskLevel,
 	ToolCatalog,
 	ToolDefinition,
-} from "@genesis-cli/tools";
+} from "@pickle-pee/tools";
 import {
 	classifyRisk,
 	createAuditLog,
@@ -31,7 +31,7 @@ import {
 	createPermissionEngine,
 	createToolCatalog,
 	isDestructiveCommand,
-} from "@genesis-cli/tools";
+} from "@pickle-pee/tools";
 
 // ---------------------------------------------------------------------------
 // Types

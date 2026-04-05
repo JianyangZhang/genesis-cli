@@ -29,6 +29,19 @@ The implementation boundary is intentionally narrower than either upstream refer
 
 ## Quick Start
 
+### Global Install
+
+```bash
+npm install -g @pickle-pee/genesis-cli
+genesis --version
+genesis
+```
+
+Expected result:
+
+- `genesis --version` prints the installed CLI version
+- `genesis` starts the interactive workbench
+
 ### Interactive CLI
 
 ```bash

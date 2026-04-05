@@ -5,7 +5,7 @@
  * of the current screen layout on demand. No I/O.
  */
 
-import type { RuntimeEvent, SessionState } from "@genesis-cli/runtime";
+import type { RuntimeEvent, SessionState } from "@pickle-pee/runtime";
 import { initialInteractionState, reduceInteractionState } from "../services/interaction-state.js";
 import type { InteractionPhase } from "../types/index.js";
 import type {

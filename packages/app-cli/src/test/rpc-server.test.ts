@@ -6,9 +6,9 @@
  */
 
 import { PassThrough } from "node:stream";
-import type { AppRuntime, SessionFacade, SessionId, SessionState } from "@genesis-cli/runtime";
-import type { RpcEnvelope } from "@genesis-cli/ui";
-import { RPC_ERRORS, RPC_METHODS } from "@genesis-cli/ui";
+import type { AppRuntime, SessionFacade, SessionId, SessionState } from "@pickle-pee/runtime";
+import type { RpcEnvelope } from "@pickle-pee/ui";
+import { RPC_ERRORS, RPC_METHODS } from "@pickle-pee/ui";
 import { describe, expect, it } from "vitest";
 import { createRpcServer } from "../rpc-server.js";
 

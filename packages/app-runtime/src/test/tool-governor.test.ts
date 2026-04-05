@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "@genesis-cli/tools";
+import type { ToolDefinition } from "@pickle-pee/tools";
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionContext } from "../governance/tool-governor.js";
 import { createToolGovernor } from "../governance/tool-governor.js";

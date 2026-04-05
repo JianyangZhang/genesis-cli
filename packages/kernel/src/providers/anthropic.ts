@@ -7,7 +7,7 @@ import type {
 	Tool,
 	ToolResultMessage,
 	UserMessage,
-} from "@mariozechner/pi-ai";
+} from "@pickle-pee/pi-ai";
 import { KernelAssistantMessageEventStream } from "../event-stream.js";
 import {
 	asNumber,
@@ -327,7 +327,7 @@ function buildHeaders(apiKey: string | undefined, extraHeaders?: Record<string, 
 	return headers;
 }
 
-function convertMessages(messages: readonly import("@mariozechner/pi-ai").Message[]): Record<string, unknown>[] {
+function convertMessages(messages: readonly import("@pickle-pee/pi-ai").Message[]): Record<string, unknown>[] {
 	const converted: Record<string, unknown>[] = [];
 
 	for (let index = 0; index < messages.length; index += 1) {
@@ -397,7 +397,7 @@ function convertUserMessage(message: UserMessage): Record<string, unknown> {
 }
 
 function convertAssistantContent(
-	message: Extract<import("@mariozechner/pi-ai").Message, { role: "assistant" }>,
+	message: Extract<import("@pickle-pee/pi-ai").Message, { role: "assistant" }>,
 ): Record<string, unknown>[] {
 	const blocks: Record<string, unknown>[] = [];
 

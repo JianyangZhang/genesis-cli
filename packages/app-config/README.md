@@ -1,4 +1,4 @@
-# @genesis-cli/config
+# @pickle-pee/config
 
 ## 职责
 

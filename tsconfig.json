@@ -1,29 +1,6 @@
 {
-	"compilerOptions": {
-		"target": "ES2022",
-		"module": "Node16",
-		"moduleResolution": "Node16",
-		"baseUrl": ".",
-		"paths": {
-			"@genesis-cli/cli": ["packages/app-cli/src/index.ts"],
-			"@genesis-cli/config": ["packages/app-config/src/index.ts"],
-			"@genesis-cli/evaluation": ["packages/app-evaluation/src/index.ts"],
-			"@genesis-cli/extensions": ["packages/app-extensions/src/index.ts"],
-			"@genesis-cli/kernel": ["packages/kernel/src/index.ts"],
-			"@genesis-cli/runtime": ["packages/app-runtime/src/index.ts"],
-			"@genesis-cli/tools": ["packages/app-tools/src/index.ts"],
-			"@genesis-cli/ui": ["packages/app-ui/src/index.ts"]
-		},
-		"strict": true,
-		"declaration": true,
-		"sourceMap": true,
-		"composite": true,
-		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true,
-		"resolveJsonModule": true,
-		"isolatedModules": true,
-		"esModuleInterop": true
-	},
+	"extends": "./tsconfig.base.json",
+	"files": [],
 	"references": [
 		{ "path": "packages/app-config" },
 		{ "path": "packages/app-tools" },

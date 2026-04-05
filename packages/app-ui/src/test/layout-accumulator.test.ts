@@ -2,7 +2,7 @@
  * Tests for the layout accumulator.
  */
 
-import type { SessionId, SessionState } from "@genesis-cli/runtime";
+import type { SessionId, SessionState } from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 import { createLayoutAccumulator } from "../adapters/event-to-layout.js";
 import type { ConversationLine } from "../adapters/tui-layout.js";

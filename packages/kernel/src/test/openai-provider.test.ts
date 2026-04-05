@@ -1,4 +1,4 @@
-import type { Context, Model } from "@mariozechner/pi-ai";
+import type { Context, Model } from "@pickle-pee/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { streamOpenAiCompletions } from "../providers/openai.js";
 

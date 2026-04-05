@@ -6,7 +6,7 @@
  * print, json, rpc) use the same factory and the same AppRuntime interface.
  */
 
-import type { ToolDefinition } from "@genesis-cli/tools";
+import type { ToolDefinition } from "@pickle-pee/tools";
 import type { KernelSessionAdapter } from "./adapters/kernel-session-adapter.js";
 import type { EventBus } from "./events/event-bus.js";
 import { createEventBus } from "./events/event-bus.js";

@@ -6,8 +6,8 @@
  */
 
 import * as readline from "node:readline";
-import type { AppRuntime, SessionFacade } from "@genesis-cli/runtime";
-import type { RpcEnvelope } from "@genesis-cli/ui";
+import type { AppRuntime, SessionFacade } from "@pickle-pee/runtime";
+import type { RpcEnvelope } from "@pickle-pee/ui";
 import {
 	createRpcError,
 	createRpcResponse,
@@ -15,7 +15,7 @@ import {
 	parseRpcRequest,
 	RPC_ERRORS,
 	RPC_METHODS,
-} from "@genesis-cli/ui";
+} from "@pickle-pee/ui";
 
 // ---------------------------------------------------------------------------
 // Types

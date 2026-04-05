@@ -1,15 +1,15 @@
 {
-	"name": "@genesis-cli/extensions",
-	"version": "0.0.0",
-	"private": true,
-	"description": "Built-in extensions, Bridge/IDE adapters, and extension point management",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"scripts": {
-		"build": "tsc -p tsconfig.build.json"
-	},
-	"dependencies": {
-		"@genesis-cli/config": "*",
-		"@genesis-cli/runtime": "*"
-	}
+  "name": "@pickle-pee/extensions",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Built-in extensions, Bridge/IDE adapters, and extension point management",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node -e \"const fs = require('node:fs'); fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@pickle-pee/config": "*",
+    "@pickle-pee/runtime": "*"
+  }
 }

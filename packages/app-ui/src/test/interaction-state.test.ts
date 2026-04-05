@@ -2,7 +2,7 @@
  * Tests for the interaction state reducer.
  */
 
-import type { RuntimeEvent } from "@genesis-cli/runtime";
+import type { RuntimeEvent } from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 import { initialInteractionState, reduceInteractionState } from "../services/interaction-state.js";
 

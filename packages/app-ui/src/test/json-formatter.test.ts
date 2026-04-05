@@ -2,7 +2,7 @@
  * Tests for the JSON formatter.
  */
 
-import type { RuntimeEvent } from "@genesis-cli/runtime";
+import type { RuntimeEvent } from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 import { eventToJsonEnvelope, sanitizeForJson } from "../services/json-formatter.js";
 

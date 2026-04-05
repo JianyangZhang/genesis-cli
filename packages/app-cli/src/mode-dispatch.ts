@@ -8,8 +8,8 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
-import type { InteractionState, OutputSink, SlashCommand } from "@genesis-cli/ui";
+import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@pickle-pee/runtime";
+import type { InteractionState, OutputSink, SlashCommand } from "@pickle-pee/ui";
 import {
 	ansiClearLine,
 	ansiCursorHome,
@@ -20,7 +20,7 @@ import {
 	formatEventAsText,
 	initialInteractionState,
 	reduceInteractionState,
-} from "@genesis-cli/ui";
+} from "@pickle-pee/ui";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";

@@ -1,4 +1,4 @@
-import type { AssistantMessage, Model } from "@mariozechner/pi-ai";
+import type { AssistantMessage, Model } from "@pickle-pee/pi-ai";
 
 export function createAssistantMessage(model: Model<any>): AssistantMessage {
 	return {

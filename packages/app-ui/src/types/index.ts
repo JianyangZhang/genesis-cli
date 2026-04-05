@@ -6,7 +6,7 @@
  * are the building blocks for the four CLI modes.
  */
 
-import type { AppRuntime, SessionFacade } from "@genesis-cli/runtime";
+import type { AppRuntime, SessionFacade } from "@pickle-pee/runtime";
 
 // ---------------------------------------------------------------------------
 // Output mode — canonical definition shared by all formatters

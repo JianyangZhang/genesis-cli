@@ -1,4 +1,4 @@
-# @genesis-cli/ui
+# @pickle-pee/ui
 
 ## 职责
 

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import type { Model } from "@mariozechner/pi-ai";
+import type { Model } from "@pickle-pee/pi-ai";
 import type { AuthStorage } from "./auth-storage.js";
 
 interface KernelModelConfig {

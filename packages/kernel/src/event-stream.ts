@@ -1,4 +1,4 @@
-import type { AssistantMessage, AssistantMessageEvent } from "@mariozechner/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent } from "@pickle-pee/pi-ai";
 
 class EventStream<T, TResult = T> implements AsyncIterable<T> {
 	private readonly queue: T[] = [];

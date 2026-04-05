@@ -29,6 +29,19 @@ Genesis 面向真实仓库工作：理解代码、规划修改、安全执行、
 
 ## 快速开始
 
+### 全局安装
+
+```bash
+npm install -g @pickle-pee/genesis-cli
+genesis --version
+genesis
+```
+
+预期结果：
+
+- `genesis --version` 输出当前安装的 CLI 版本
+- `genesis` 启动交互式工作台
+
 ### 交互式命令行
 
 ```bash

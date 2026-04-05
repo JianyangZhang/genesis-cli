@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
-import type { AppRuntime, RuntimeEvent, SessionFacade } from "@genesis-cli/runtime";
-import { createEventBus, createPlanEngine, createToolGovernor } from "@genesis-cli/runtime";
+import type { AppRuntime, RuntimeEvent, SessionFacade } from "@pickle-pee/runtime";
+import { createEventBus, createPlanEngine, createToolGovernor } from "@pickle-pee/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { createModeHandler } from "../mode-dispatch.js";
 

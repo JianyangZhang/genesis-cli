@@ -2,7 +2,7 @@
  * Tests for the event-to-text formatter.
  */
 
-import type { PlanSummary, RuntimeEvent } from "@genesis-cli/runtime";
+import type { PlanSummary, RuntimeEvent } from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 import {
 	formatEventAsText,

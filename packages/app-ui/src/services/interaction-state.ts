@@ -5,7 +5,7 @@
  * No side effects, no I/O.
  */
 
-import type { RuntimeEvent } from "@genesis-cli/runtime";
+import type { RuntimeEvent } from "@pickle-pee/runtime";
 import type { InteractionPhase, InteractionState } from "../types/index.js";
 
 /** Create the initial interaction state (idle, no active tool/plan). */

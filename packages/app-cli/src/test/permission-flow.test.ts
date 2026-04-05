@@ -11,14 +11,14 @@ import type {
 	RawUpstreamEvent,
 	RuntimeEvent,
 	SessionId,
-} from "@genesis-cli/runtime";
+} from "@pickle-pee/runtime";
 import {
 	createEventBus,
 	createInitialSessionState,
 	createRuntimeContext,
 	createToolGovernor,
 	SessionFacadeImpl,
-} from "@genesis-cli/runtime";
+} from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------

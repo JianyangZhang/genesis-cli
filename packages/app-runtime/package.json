@@ -1,22 +1,28 @@
 {
-	"name": "@genesis-cli/runtime",
-	"version": "0.0.0",
-	"private": true,
-	"description": "Product-layer runtime: session facade, plan execution, event normalization",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"default": "./dist/index.js"
-		}
-	},
-	"scripts": {
-		"build": "tsc -p tsconfig.build.json",
-		"test": "vitest run"
-	},
-	"dependencies": {
-		"@genesis-cli/kernel": "*",
-		"@genesis-cli/tools": "*"
-	}
+  "name": "@pickle-pee/runtime",
+  "version": "0.0.0",
+  "description": "Product-layer runtime: session facade, plan execution, event normalization",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node -e \"const fs = require('node:fs'); fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && tsc -p tsconfig.build.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pickle-pee/kernel": "0.0.0",
+    "@pickle-pee/tools": "0.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }

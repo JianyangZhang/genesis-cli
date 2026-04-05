@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@genesis-cli/runtime";
+import { type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@pickle-pee/runtime";
 import { ensureAgentDirBootstrapped } from "./bootstrap.js";
 import { createModeHandler } from "./mode-dispatch.js";
 
@@ -42,6 +43,14 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
 
 	for (let i = 0; i < argv.length; i += 1) {
 		const value = argv[i];
+		if (value === "-h") {
+			flags.help = true;
+			continue;
+		}
+		if (value === "-v") {
+			flags.version = true;
+			continue;
+		}
 		if (!value.startsWith("--")) {
 			positional.push(value);
 			continue;
@@ -63,6 +72,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
 	const parsed = parseArgs(argv);
+	if (parsed.flags.version) {
+		process.stdout.write(`${readCliPackageVersion()}\n`);
+		return;
+	}
 	if (parsed.flags.help) {
 		printHelp();
 		return;
@@ -430,4 +443,10 @@ if (typeof require !== "undefined" && require.main === module) {
 		process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
 		process.exitCode = 1;
 	});
+}
+
+export function readCliPackageVersion(packageJsonPath = resolve(__dirname, "../package.json")): string {
+	const raw = readFileSync(packageJsonPath, "utf8");
+	const parsed = JSON.parse(raw) as { version?: unknown };
+	return typeof parsed.version === "string" && parsed.version.length > 0 ? parsed.version : "0.0.0";
 }

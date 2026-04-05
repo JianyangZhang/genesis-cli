@@ -6,7 +6,7 @@
  * Pure functions — no I/O, no side effects.
  */
 
-import type { RuntimeEvent } from "@genesis-cli/runtime";
+import type { RuntimeEvent } from "@pickle-pee/runtime";
 import type { RpcEnvelope } from "../types/index.js";
 
 // ---------------------------------------------------------------------------

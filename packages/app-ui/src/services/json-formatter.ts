@@ -8,7 +8,7 @@
  * (InteractionPhase, layout coordinates, ANSI strings, cursor positions).
  */
 
-import type { RuntimeEvent } from "@genesis-cli/runtime";
+import type { RuntimeEvent } from "@pickle-pee/runtime";
 import type { JsonEnvelope } from "../types/index.js";
 
 // ---------------------------------------------------------------------------

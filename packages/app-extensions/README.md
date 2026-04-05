@@ -1,4 +1,4 @@
-# @genesis-cli/extensions
+# @pickle-pee/extensions
 
 ## 职责
 

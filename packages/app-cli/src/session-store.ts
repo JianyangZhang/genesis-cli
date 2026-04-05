@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { SessionRecoveryData } from "@genesis-cli/runtime";
+import type { SessionRecoveryData } from "@pickle-pee/runtime";
 
 export interface RecentSessionEntry {
 	readonly recoveryData: SessionRecoveryData;

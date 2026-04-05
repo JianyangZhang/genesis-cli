@@ -19,7 +19,7 @@ import type {
 	ToolCompletedEvent,
 	ToolDeniedEvent,
 	ToolStartedEvent,
-} from "@genesis-cli/runtime";
+} from "@pickle-pee/runtime";
 
 // ---------------------------------------------------------------------------
 // ANSI helpers

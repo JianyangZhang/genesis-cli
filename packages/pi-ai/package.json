@@ -1,25 +1,30 @@
 {
-	"name": "@mariozechner/pi-ai",
-	"version": "0.65.0",
-	"private": true,
-	"type": "module",
-	"description": "Vendored minimal pi-ai surface for Genesis (no provider SDK dependencies).",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"default": "./dist/index.js"
-		}
-	},
-	"scripts": {
-		"build": "tsc -p tsconfig.build.json",
-		"test": "vitest run --passWithNoTests"
-	},
-	"dependencies": {
-		"@sinclair/typebox": "^0.34.41",
-		"ajv": "^8.17.1",
-		"ajv-formats": "^3.0.1",
-		"partial-json": "^0.1.7"
-	}
+  "name": "@pickle-pee/pi-ai",
+  "version": "0.65.0",
+  "type": "module",
+  "description": "Vendored minimal pi-ai surface for Genesis (no provider SDK dependencies).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node -e \"const fs = require('node:fs'); fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && tsc -p tsconfig.build.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.41",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "partial-json": "^0.1.7"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ]
 }

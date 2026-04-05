@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["test", "**/*.test.ts"]
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@pickle-pee/pi-ai": ["../pi-ai/dist/index.d.ts"]
+    }
+  },
+  "exclude": ["src/test", "src/**/*.test.ts"]
 }

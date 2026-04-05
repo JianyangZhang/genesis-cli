@@ -1,11 +1,17 @@
 {
-	"name": "@genesis-cli/config",
-	"version": "0.0.0",
-	"private": true,
-	"description": "Configuration layering, resource loading, and skill/template management",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"scripts": {
-		"build": "tsc -p tsconfig.build.json"
-	}
+  "name": "@pickle-pee/config",
+  "version": "0.0.0",
+  "description": "Configuration layering, resource loading, and skill/template management",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node -e \"const fs = require('node:fs'); fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && tsc -p tsconfig.build.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }

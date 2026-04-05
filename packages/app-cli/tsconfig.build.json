@@ -3,10 +3,10 @@
 	"compilerOptions": {
 		"baseUrl": ".",
 		"paths": {
-			"@genesis-cli/config": ["../app-config/dist/index.d.ts"],
-			"@genesis-cli/runtime": ["../app-runtime/dist/index.d.ts"],
-			"@genesis-cli/ui": ["../app-ui/dist/index.d.ts"]
+			"@pickle-pee/config": ["../app-config/dist/index.d.ts"],
+			"@pickle-pee/runtime": ["../app-runtime/dist/index.d.ts"],
+			"@pickle-pee/ui": ["../app-ui/dist/index.d.ts"]
 		}
 	},
-	"exclude": ["test", "**/*.test.ts"]
+	"exclude": ["src/test", "src/**/*.test.ts"]
 }

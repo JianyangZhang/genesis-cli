@@ -1,16 +1,16 @@
 {
-	"name": "@genesis-cli/evaluation",
-	"version": "0.0.0",
-	"private": true,
-	"description": "Smoke scenarios, protocol verification, regression baselines, and subagent acceptance tests",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"scripts": {
-		"build": "tsc -p tsconfig.build.json",
-		"test": "vitest run --passWithNoTests"
-	},
-	"dependencies": {
-		"@genesis-cli/runtime": "*",
-		"@genesis-cli/tools": "*"
-	}
+  "name": "@pickle-pee/evaluation",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Smoke scenarios, protocol verification, regression baselines, and subagent acceptance tests",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node -e \"const fs = require('node:fs'); fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && tsc -p tsconfig.build.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@pickle-pee/runtime": "*",
+    "@pickle-pee/tools": "*"
+  }
 }

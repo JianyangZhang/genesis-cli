@@ -2,7 +2,7 @@
  * Tests for built-in slash commands.
  */
 
-import type { AppRuntime, SessionFacade, SessionId, SessionState } from "@genesis-cli/runtime";
+import type { AppRuntime, SessionFacade, SessionId, SessionState } from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 import { createBuiltinCommands } from "../domain/builtin-commands.js";
 import type { OutputSink, SlashCommandContext } from "../types/index.js";

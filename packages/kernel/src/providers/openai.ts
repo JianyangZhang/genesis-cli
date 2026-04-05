@@ -8,7 +8,7 @@ import type {
 	Tool,
 	ToolCall,
 	ToolResultMessage,
-} from "@mariozechner/pi-ai";
+} from "@pickle-pee/pi-ai";
 import { KernelAssistantMessageEventStream } from "../event-stream.js";
 import {
 	asNumber,
