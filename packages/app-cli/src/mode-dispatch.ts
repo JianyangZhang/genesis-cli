@@ -5,8 +5,10 @@
  * from it. Mode-specific behavior is isolated to how events are rendered.
  */
 
-import type { AppRuntime, CliMode, RuntimeEvent, SessionFacade } from "@genesis-cli/runtime";
-import type { InteractionState, OutputSink, TuiScreenLayout } from "@genesis-cli/ui";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
+import type { InteractionState, OutputSink, SlashCommand, TuiScreenLayout } from "@genesis-cli/ui";
 import {
 	ansiClearBelow,
 	ansiClearLine,
@@ -29,6 +31,7 @@ import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
+import { getSessionStoreDir, readLastSession, writeLastSession } from "./session-store.js";
 
 // ---------------------------------------------------------------------------
 // Mode handler interface
@@ -89,13 +92,15 @@ class InteractiveModeHandler implements ModeHandler {
 	private _terminalRows = process.stdout.rows ?? 24;
 	private readonly _history: string[] = [];
 	private _historyIndex: number | null = null;
+	private _suppressPersistOnce = false;
 
 	async start(runtime: AppRuntime): Promise<void> {
+		const handler = this;
 		if (!process.stdin.isTTY || !process.stdout.isTTY) {
 			throw new Error("Interactive mode requires a TTY. Use --mode print|json|rpc instead.");
 		}
 
-		const session = runtime.createSession();
+		const sessionRef: { current: SessionFacade } = { current: runtime.createSession() };
 		const sink = createStdoutSink();
 
 		// Slash command registry
@@ -105,7 +110,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 
 		// Layout accumulator for TUI
-		const accumulator = createLayoutAccumulator(() => session.state);
+		const accumulator = createLayoutAccumulator(() => sessionRef.current.state);
 		let interactionState: InteractionState = initialInteractionState();
 		const onResize = (): void => {
 			this._terminalRows = process.stdout.rows ?? 24;
@@ -113,22 +118,255 @@ class InteractiveModeHandler implements ModeHandler {
 		};
 		process.stdout.on("resize", onResize);
 
-		// Subscribe to session events
-		session.events.onCategory("*", (event: RuntimeEvent) => {
-			accumulator.push(event);
-			interactionState = reduceInteractionState(interactionState, event);
+		const resolveAgentDir = (): string => {
+			return (
+				sessionRef.current.context.agentDir ??
+				join(sessionRef.current.context.workingDirectory, ".genesis-local", "pi-agent")
+			);
+		};
 
-			// Track pending permission requests
-			if (interactionState.phase === "waiting_permission" && interactionState.activeToolCallId) {
-				this._pendingPermissionCallId = interactionState.activeToolCallId;
-			} else if (interactionState.phase !== "waiting_permission") {
-				this._pendingPermissionCallId = null;
-			}
+		const attachSession = (next: SessionFacade): void => {
+			sessionRef.current.events.removeAllListeners();
+			sessionRef.current = next;
+			this._pendingPermissionCallId = null;
+			this._activeTurn = null;
+			this._viewportOffsetFromBottom = 0;
+			this._historyIndex = null;
+			interactionState = initialInteractionState();
+			accumulator.reset();
 
-			// Re-render full screen on each event
-			const snapshot = accumulator.snapshot();
-			this.renderScreenUpdate(snapshot);
+			sessionRef.current.events.on("session_closed", (event) => {
+				if (this._suppressPersistOnce) {
+					this._suppressPersistOnce = false;
+					return;
+				}
+				try {
+					const dir = getSessionStoreDir(resolveAgentDir());
+					void writeLastSession(dir, (event as SessionClosedEvent).recoveryData);
+				} catch {}
+			});
+
+			sessionRef.current.events.onAny((event: RuntimeEvent) => {
+				accumulator.push(event);
+				interactionState = reduceInteractionState(interactionState, event);
+
+				if (interactionState.phase === "waiting_permission" && interactionState.activeToolCallId) {
+					this._pendingPermissionCallId = interactionState.activeToolCallId;
+				} else if (interactionState.phase !== "waiting_permission") {
+					this._pendingPermissionCallId = null;
+				}
+
+				const snapshot = accumulator.snapshot();
+				this.renderScreenUpdate(snapshot);
+			});
+		};
+
+		const register = (command: SlashCommand): void => {
+			registry.register(command);
+		};
+
+		register({
+			name: "help",
+			description: "Show available commands",
+			type: "local",
+			async execute(ctx) {
+				const all = registry
+					.listAll()
+					.slice()
+					.sort((a, b) => a.name.localeCompare(b.name));
+				ctx.output.writeLine("Commands:");
+				for (const cmd of all) {
+					ctx.output.writeLine(`  /${cmd.name} — ${cmd.description}`);
+				}
+				return undefined;
+			},
 		});
+
+		register({
+			name: "clear",
+			description: "Clear the transcript",
+			type: "local",
+			async execute() {
+				accumulator.reset();
+				handler._viewportOffsetFromBottom = 0;
+				handler.renderScreenUpdate(accumulator.snapshot());
+				return undefined;
+			},
+		});
+
+		register({
+			name: "status",
+			description: "Show status",
+			type: "local",
+			async execute(ctx) {
+				const state = ctx.session.state;
+				ctx.output.writeLine(`Session: ${state.id.value}`);
+				ctx.output.writeLine(`  CWD: ${ctx.session.context.workingDirectory}`);
+				ctx.output.writeLine(`  Agent dir: ${resolveAgentDir()}`);
+				ctx.output.writeLine(`  Model: ${state.model.displayName ?? state.model.id}`);
+				ctx.output.writeLine(`  Provider: ${state.model.provider}`);
+				ctx.output.writeLine(`  Phase: ${interactionState.phase}`);
+				ctx.output.writeLine(
+					`  Task: ${state.taskState.status}${
+						state.taskState.currentTaskId ? ` (${state.taskState.currentTaskId})` : ""
+					}`,
+				);
+				ctx.output.writeLine(`  Tools: ${[...state.toolSet].join(", ") || "(none)"}`);
+				if (state.planSummary) {
+					ctx.output.writeLine(`  Plan: ${state.planSummary.completedSteps}/${state.planSummary.stepCount}`);
+				}
+				if (state.compactionSummary) {
+					ctx.output.writeLine(`  Last compaction: ${state.compactionSummary.estimatedTokensSaved} tokens saved`);
+				}
+				if (handler._pendingPermissionCallId) {
+					ctx.output.writeLine(`  Waiting permission: ${handler._pendingPermissionCallId}`);
+				}
+				return undefined;
+			},
+		});
+
+		register({
+			name: "config",
+			description: "Show effective config",
+			type: "local",
+			async execute(ctx) {
+				const agentDir = resolveAgentDir();
+				const modelsPath = join(agentDir, "models.json");
+				ctx.output.writeLine(`agentDir: ${agentDir}`);
+				ctx.output.writeLine(`models.json: ${modelsPath}`);
+				let raw = "";
+				try {
+					raw = await readFile(modelsPath, "utf8");
+				} catch {
+					ctx.output.writeError("models.json not found. Run Genesis once or pass --agent-dir.");
+					return undefined;
+				}
+
+				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
+				const providerKey = ctx.session.state.model.provider;
+				const provider = parsed.providers?.[providerKey];
+				if (!provider) {
+					ctx.output.writeError(`Provider not configured: ${providerKey}`);
+					return undefined;
+				}
+
+				ctx.output.writeLine(`provider: ${providerKey}`);
+				ctx.output.writeLine(`  api: ${provider.api ?? "(missing)"}`);
+				ctx.output.writeLine(`  baseUrl: ${provider.baseUrl ?? "(missing)"}`);
+				const apiKeyEnv = typeof provider.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
+				ctx.output.writeLine(`  apiKey env: ${apiKeyEnv} (${process.env[apiKeyEnv] ? "set" : "missing"})`);
+
+				const models = Array.isArray(provider.models) ? provider.models : [];
+				const active = models.find((m: any) => m?.id === ctx.session.state.model.id);
+				if (active) {
+					ctx.output.writeLine(`model: ${active.name ?? active.id}`);
+					ctx.output.writeLine(`  id: ${active.id}`);
+					ctx.output.writeLine(`  reasoning: ${Boolean(active.reasoning)}`);
+				} else {
+					ctx.output.writeError(`Model not configured: ${ctx.session.state.model.id}`);
+				}
+				return undefined;
+			},
+		});
+
+		register({
+			name: "doctor",
+			description: "Diagnose OpenAI-compatible mainline",
+			type: "local",
+			async execute(ctx) {
+				const agentDir = resolveAgentDir();
+				const modelsPath = join(agentDir, "models.json");
+				let raw = "";
+				try {
+					raw = await readFile(modelsPath, "utf8");
+				} catch {
+					ctx.output.writeError("models.json not found.");
+					return undefined;
+				}
+				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
+				const providerKey = ctx.session.state.model.provider;
+				const provider = parsed.providers?.[providerKey];
+				const baseUrl = typeof provider?.baseUrl === "string" ? provider.baseUrl : "";
+				const api = typeof provider?.api === "string" ? provider.api : "";
+				const apiKeyEnv = typeof provider?.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
+				const apiKey = process.env[apiKeyEnv];
+
+				ctx.output.writeLine(`provider: ${providerKey}`);
+				ctx.output.writeLine(`  api: ${api || "(missing)"}`);
+				ctx.output.writeLine(`  baseUrl: ${baseUrl || "(missing)"}`);
+				ctx.output.writeLine(`  apiKey env: ${apiKeyEnv} (${apiKey ? "set" : "missing"})`);
+				if (!apiKey || !baseUrl || api !== "openai-completions") {
+					return undefined;
+				}
+
+				const controller = new AbortController();
+				const timeout = setTimeout(() => controller.abort(), 3000);
+				try {
+					const response = await fetch(
+						new URL("chat/completions", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`),
+						{
+							method: "POST",
+							headers: {
+								"content-type": "application/json",
+								authorization: `Bearer ${apiKey}`,
+							},
+							body: JSON.stringify({
+								model: ctx.session.state.model.id,
+								stream: false,
+								messages: [{ role: "user", content: "Reply exactly DOCTOR_OK" }],
+							}),
+							signal: controller.signal,
+						},
+					);
+					ctx.output.writeLine(`  http: ${response.status}`);
+					if (!response.ok) {
+						ctx.output.writeError(await response.text());
+						return undefined;
+					}
+					const payload = (await response.json()) as any;
+					const text = payload?.choices?.[0]?.message?.content;
+					if (typeof text === "string") {
+						ctx.output.writeLine(`  response: ${text.trim()}`);
+					}
+				} catch (err) {
+					ctx.output.writeError(`  error: ${err instanceof Error ? err.message : String(err)}`);
+				} finally {
+					clearTimeout(timeout);
+				}
+				return undefined;
+			},
+		});
+
+		register({
+			name: "resume",
+			description: "Resume the last session",
+			type: "local",
+			async execute(ctx) {
+				if (handler._activeTurn || handler._pendingPermissionCallId) {
+					ctx.output.writeError("Session is busy.");
+					return undefined;
+				}
+
+				const agentDir = resolveAgentDir();
+				const dir = getSessionStoreDir(agentDir);
+				const data = await readLastSession(dir);
+				if (!data) {
+					ctx.output.writeError("No previous session found.");
+					return undefined;
+				}
+
+				handler._suppressPersistOnce = true;
+				await sessionRef.current.close();
+
+				const recovered = runtime.recoverSession(data);
+				attachSession(recovered);
+				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
+				handler.renderScreenUpdate(accumulator.snapshot());
+				return undefined;
+			},
+		});
+
+		attachSession(sessionRef.current);
 
 		// Input loop
 		const inputLoop: InputLoop = createInputLoop({
@@ -145,7 +383,7 @@ class InteractiveModeHandler implements ModeHandler {
 		});
 
 		process.stdout.write(ansiEnterAlternateScreen());
-		this.renderWelcome(session);
+		this.renderWelcome(sessionRef.current);
 		this.renderScreenUpdate(accumulator.snapshot());
 
 		try {
@@ -161,9 +399,9 @@ class InteractiveModeHandler implements ModeHandler {
 				if (this._pendingPermissionCallId !== null) {
 					const response = trimmed.toLowerCase();
 					if (response === "y" || response === "yes") {
-						await session.resolvePermission(this._pendingPermissionCallId, "allow_once");
+						await sessionRef.current.resolvePermission(this._pendingPermissionCallId, "allow_once");
 					} else {
-						await session.resolvePermission(this._pendingPermissionCallId, "deny");
+						await sessionRef.current.resolvePermission(this._pendingPermissionCallId, "deny");
 					}
 					this._pendingPermissionCallId = null;
 					line = await inputLoop.nextLine();
@@ -176,7 +414,7 @@ class InteractiveModeHandler implements ModeHandler {
 					await resolution.command.execute?.({
 						args: resolution.args,
 						runtime,
-						session,
+						session: sessionRef.current,
 						output: sink,
 					});
 					line = await inputLoop.nextLine();
@@ -195,7 +433,7 @@ class InteractiveModeHandler implements ModeHandler {
 					continue;
 				}
 				this.rememberHistory(trimmed);
-				this._activeTurn = session
+				this._activeTurn = sessionRef.current
 					.prompt(trimmed)
 					.catch((err) => {
 						sink.writeError(`Error: ${err}`);
@@ -211,7 +449,8 @@ class InteractiveModeHandler implements ModeHandler {
 			inputLoop.close();
 			process.stdout.write(ansiShowCursor());
 			process.stdout.write(ansiExitAlternateScreen());
-			await session.close();
+			sessionRef.current.events.removeAllListeners();
+			await sessionRef.current.close();
 		}
 	}
 

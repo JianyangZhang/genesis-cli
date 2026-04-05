@@ -28,6 +28,9 @@ export interface AppRuntimeConfig {
 	/** Working directory for the session. */
 	readonly workingDirectory: string;
 
+	/** Agent directory (models/auth/session storage). */
+	readonly agentDir?: string;
+
 	/** CLI mode — determines how input/output is handled by consumers. */
 	readonly mode: CliMode;
 
@@ -131,6 +134,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			const context = createRuntimeContext({
 				sessionId,
 				workingDirectory: config.workingDirectory,
+				agentDir: config.agentDir,
 				mode: config.mode,
 				model: config.model,
 				toolSet,
@@ -153,6 +157,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			const context = createRuntimeContext({
 				sessionId: data.sessionId,
 				workingDirectory: config.workingDirectory,
+				agentDir: data.agentDir ?? config.agentDir,
 				mode: config.mode,
 				model: data.model,
 				toolSet: new Set(data.toolSet),

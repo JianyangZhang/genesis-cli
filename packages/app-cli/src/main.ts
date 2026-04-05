@@ -84,6 +84,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
 	const runtime = createAppRuntime({
 		workingDirectory: options.workingDirectory,
+		agentDir: options.agentDir,
 		mode: options.mode,
 		model: options.model,
 		toolSet: options.toolSet,

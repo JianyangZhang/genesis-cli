@@ -134,6 +134,7 @@ export interface SessionRecoveryData {
 export interface RuntimeContext {
 	readonly sessionId: SessionId;
 	readonly workingDirectory: string;
+	readonly agentDir?: string;
 	readonly mode: CliMode;
 	readonly model: ModelDescriptor;
 	readonly toolSet: ToolSetDescriptor;
