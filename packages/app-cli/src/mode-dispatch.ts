@@ -503,6 +503,19 @@ class InteractiveModeHandler implements ModeHandler {
 				if (handler._pendingPermissionCallId) {
 					ctx.output.writeLine(`  Waiting permission: ${handler._pendingPermissionCallId}`);
 				}
+
+				ctx.output.writeLine("Next:");
+				if (handler._pendingPermissionCallId) {
+					ctx.output.writeLine("  Reply y (once), Y (session), n (deny), or Ctrl+C to deny");
+				} else if (handler._activeTurn) {
+					ctx.output.writeLine("  Wait for the active turn, or Ctrl+C to abort");
+				} else if (handler._changedPaths.size > 0) {
+					ctx.output.writeLine("  /review to inspect changes, or /diff <file>");
+				} else if (handler._lastError) {
+					ctx.output.writeLine("  /doctor to diagnose, or /help for commands");
+				} else {
+					ctx.output.writeLine("  Type a prompt, or /help for commands");
+				}
 				return undefined;
 			},
 		});
