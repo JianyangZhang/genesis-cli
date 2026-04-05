@@ -895,11 +895,11 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("\n");
 		process.stdout.write(fill());
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}        ◌        ${RESET}`));
+		process.stdout.write(center(`${DIM}        ${GREEN}✦${RESET}        ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}      ◌ ${GREEN}◎${RESET} ◌      ${RESET}`));
+		process.stdout.write(center(`${CYAN}      ──╂──      ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}        ◌        ${RESET}`));
+		process.stdout.write(center(`${DIM}        ${CYAN}│${RESET}        ${RESET}`));
 		process.stdout.write("\n");
 		process.stdout.write(center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`));
 		process.stdout.write("\n");
