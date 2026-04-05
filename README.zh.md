@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="image/genesis-cli-cover.jpeg" alt="Genesis CLI 交互式工作台" width="1024">
+  <img src="image/image.png" alt="Genesis CLI 交互式工作台" width="1024">
 </p>
 
 # Genesis CLI
