@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
+	computeInteractiveFooterSeparatorWidth,
 	computePromptCursorRowsUp,
 	computeSlashSuggestions,
 	countRenderedTerminalRows,
@@ -44,6 +45,11 @@ describe("interactive transcript formatting", () => {
 
 	it("formats a full-width separator for the input area", () => {
 		expect(formatInteractiveInputSeparator(5)).toContain("─────");
+	});
+
+	it("keeps footer separators inside a safe terminal margin", () => {
+		expect(computeInteractiveFooterSeparatorWidth(80)).toBe(78);
+		expect(computeInteractiveFooterSeparatorWidth(10)).toBe(20);
 	});
 
 	it("closes the welcome card top border at the requested width", () => {

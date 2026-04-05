@@ -1105,7 +1105,9 @@ class InteractiveModeHandler implements ModeHandler {
 	private buildPromptUi(): { block: string; prompt: string } {
 		const buffer = this._inputState.buffer;
 		const prompt = this._pendingPermissionCallId !== null ? "choice [Enter/1/2/3]> " : this._prompt;
-		const separator = formatInteractiveInputSeparator(Math.max(20, (process.stdout.columns ?? 80) - 1));
+		const separator = formatInteractiveInputSeparator(
+			computeInteractiveFooterSeparatorWidth(process.stdout.columns ?? 80),
+		);
 		const hint = formatSlashSuggestionHint(
 			this._commandSuggestions,
 			(process.stdout.columns ?? 80) - computePromptCursorColumn(prompt, buffer, buffer.length),
@@ -1583,6 +1585,10 @@ export function formatInteractivePromptBuffer(content: string, plain = false): s
 
 export function formatInteractiveInputSeparator(width: number): string {
 	return `${INTERACTIVE_THEME.muted}${"─".repeat(Math.max(1, width))}${INTERACTIVE_THEME.reset}`;
+}
+
+export function computeInteractiveFooterSeparatorWidth(terminalWidth: number): number {
+	return Math.max(20, terminalWidth - 2);
 }
 
 export function countRenderedTerminalRows(lines: readonly string[], width: number): number {
