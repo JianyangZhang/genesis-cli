@@ -247,11 +247,11 @@ export function ansiExitAlternateScreen(): string {
 }
 
 export function ansiEnableMouseTracking(): string {
-	return `${ESC}?1000h${ESC}?1006h`;
+	return `${ESC}?1000h${ESC}?1002h${ESC}?1006h`;
 }
 
 export function ansiDisableMouseTracking(): string {
-	return `${ESC}?1006l${ESC}?1000l`;
+	return `${ESC}?1006l${ESC}?1002l${ESC}?1000l`;
 }
 
 export function ansiEnableFocusReporting(): string {

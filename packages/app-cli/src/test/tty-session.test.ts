@@ -41,9 +41,11 @@ describe("createTtySession", () => {
 		expect(written).toContain("\x1b[?1049h");
 		expect(written).toContain("\x1b[?1004h");
 		expect(written).toContain("\x1b[?1000h");
+		expect(written).toContain("\x1b[?1002h");
 		expect(written).toContain("\x1b[?1006h");
 		expect(written).toContain("\x1b[?1004l");
 		expect(written).toContain("\x1b[?1006l");
+		expect(written).toContain("\x1b[?1002l");
 		expect(written).toContain("\x1b[?1000l");
 		expect(written).toContain("\x1b[?1049l");
 		expect(input.setRawMode).toHaveBeenCalledWith(false);

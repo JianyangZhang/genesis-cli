@@ -347,9 +347,5 @@ function isEscapeSequenceComplete(sequence: string): boolean {
 	if (sequence === "\u001b") {
 		return false;
 	}
-	const last = sequence[sequence.length - 1];
-	if (last === "~") {
-		return true;
-	}
-	return last >= "A" && last <= "Z";
+	return new RegExp(`${String.fromCharCode(27)}\\[[0-9;<?]*[ -/]*[@-~]$`).test(sequence);
 }

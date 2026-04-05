@@ -31,6 +31,7 @@ import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
 import { getSessionStoreDir, readLastSession, readRecentSessions, writeLastSession } from "./session-store.js";
+import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { createTtySession } from "./tty-session.js";
 
 // ---------------------------------------------------------------------------
@@ -981,7 +982,9 @@ class InteractiveModeHandler implements ModeHandler {
 			process.stdout.write(buffer);
 		}
 		process.stdout.write("\r");
-		process.stdout.write(ansiMoveRight(prompt.length + this._inputState.cursor));
+		process.stdout.write(
+			ansiMoveRight(computePromptCursorColumn(prompt, this._inputState.buffer, this._inputState.cursor)),
+		);
 		process.stdout.write(ansiShowCursor());
 	}
 
@@ -1192,4 +1195,8 @@ function conversationViewportHeight(terminalRows: number): number {
 
 function stripAnsiWelcome(text: string): string {
 	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+}
+
+export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
+	return measureTerminalDisplayWidth(prompt) + measureTerminalDisplayWidth(buffer.slice(0, cursor));
 }

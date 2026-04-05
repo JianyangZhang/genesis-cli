@@ -67,6 +67,22 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("accepts lowercase sgr mouse terminators used by some terminals", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onKey = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onKey });
+		try {
+			const pending = loop.nextLine();
+			input.write("\u001b[<65;10;10m");
+			input.write("\r");
+			await pending;
+			expect(onKey).toHaveBeenCalledWith("wheeldown");
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("emits terminal focus events", async () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();
