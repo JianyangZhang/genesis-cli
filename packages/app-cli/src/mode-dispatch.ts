@@ -96,6 +96,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _prompt = "genesis> ";
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
 	private _viewportOffsetFromBottom = 0;
+	private _wheelOrientation: 1 | -1 = 1;
+	private _wheelProbe: { key: "wheelup" | "wheeldown"; count: number; time: number } | null = null;
 	private _terminalRows = process.stdout.rows ?? 24;
 	private readonly _history: string[] = [];
 	private _historyIndex: number | null = null;
@@ -1002,13 +1004,14 @@ class InteractiveModeHandler implements ModeHandler {
 			this.navigateHistory(key === "up" ? -1 : 1);
 			return;
 		}
-		if (key === "wheelup") {
-			this._viewportOffsetFromBottom = Math.min(maxOffset, this._viewportOffsetFromBottom + 1);
-			this.renderScreenUpdate(snapshot);
-			return;
-		}
-		if (key === "wheeldown") {
-			this._viewportOffsetFromBottom = Math.max(0, this._viewportOffsetFromBottom - 1);
+		if (key === "wheelup" || key === "wheeldown") {
+			this.maybeFlipWheelOrientation(key, maxOffset);
+			const effectiveKey = this.resolveWheelKey(key);
+			if (effectiveKey === "wheelup") {
+				this._viewportOffsetFromBottom = Math.min(maxOffset, this._viewportOffsetFromBottom + 1);
+			} else {
+				this._viewportOffsetFromBottom = Math.max(0, this._viewportOffsetFromBottom - 1);
+			}
 			this.renderScreenUpdate(snapshot);
 			return;
 		}
@@ -1029,6 +1032,29 @@ class InteractiveModeHandler implements ModeHandler {
 			);
 			this.renderScreenUpdate(snapshot);
 			return;
+		}
+	}
+
+	private resolveWheelKey(key: "wheelup" | "wheeldown"): "wheelup" | "wheeldown" {
+		return this._wheelOrientation === 1 ? key : key === "wheelup" ? "wheeldown" : "wheelup";
+	}
+
+	private maybeFlipWheelOrientation(key: "wheelup" | "wheeldown", maxOffset: number): void {
+		if (maxOffset <= 0) {
+			this._wheelProbe = null;
+			return;
+		}
+		const expectedBoundaryKey = boundaryProbeKey(this._wheelOrientation);
+		if (this._viewportOffsetFromBottom !== 0 || key !== expectedBoundaryKey) {
+			this._wheelProbe = null;
+			return;
+		}
+		const now = Date.now();
+		const nextProbe = advanceWheelProbe(this._wheelProbe, key, now);
+		this._wheelProbe = nextProbe.probe;
+		if (nextProbe.shouldFlip) {
+			this._wheelOrientation = flipWheelOrientation(this._wheelOrientation);
+			this._wheelProbe = null;
 		}
 	}
 
@@ -1195,6 +1221,37 @@ function conversationViewportHeight(terminalRows: number): number {
 
 function stripAnsiWelcome(text: string): string {
 	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+}
+
+const WHEEL_PROBE_THRESHOLD = 2;
+const WHEEL_PROBE_WINDOW_MS = 600;
+
+function boundaryProbeKey(orientation: 1 | -1): "wheelup" | "wheeldown" {
+	return orientation === 1 ? "wheeldown" : "wheelup";
+}
+
+function flipWheelOrientation(orientation: 1 | -1): 1 | -1 {
+	return orientation === 1 ? -1 : 1;
+}
+
+export function advanceWheelProbe(
+	probe: { key: "wheelup" | "wheeldown"; count: number; time: number } | null,
+	key: "wheelup" | "wheeldown",
+	now: number,
+): {
+	readonly probe: { key: "wheelup" | "wheeldown"; count: number; time: number };
+	readonly shouldFlip: boolean;
+} {
+	const withinWindow = probe && probe.key === key && now - probe.time <= WHEEL_PROBE_WINDOW_MS;
+	const nextProbe = {
+		key,
+		count: withinWindow ? probe.count + 1 : 1,
+		time: now,
+	};
+	return {
+		probe: nextProbe,
+		shouldFlip: nextProbe.count >= WHEEL_PROBE_THRESHOLD,
+	};
 }
 
 export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
