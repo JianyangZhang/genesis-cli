@@ -135,26 +135,34 @@ interface FileConfig {
 	};
 }
 
-interface SettingsFile {
+interface SettingsFile extends FileConfig {
 	readonly env?: Readonly<Record<string, unknown>>;
 }
 
-type SourceLayer = "default" | "agent" | "project" | "settings" | "env" | "cli";
+type SourceLayer = "default" | "agent" | "user" | "project" | "local" | "env" | "cli";
+
+interface LoadedSettingsLayers {
+	readonly user: SettingsFile | null;
+	readonly project: SettingsFile | null;
+	readonly local: SettingsFile | null;
+	readonly mergedEnv: Readonly<Record<string, string>>;
+}
 
 export async function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): Promise<CliOptions> {
 	const workingDirectory = resolve(readStringFlag(flags, "cwd", process.cwd()));
 	const agentDir = resolve(readStringFlag(flags, "agent-dir", resolve(".genesis-local/pi-agent")));
 	const settingsPath = resolve(homedir(), ".genesis-cli", "settings.json");
+	const shellEnv: NodeJS.ProcessEnv = { ...process.env };
 	try {
 		await ensureUserSettingsFile(settingsPath);
 	} catch {}
-	const settingsEnv = await readSettingsEnv(settingsPath);
-	applySettingsEnv(settingsEnv);
+	const settingsLayers = await loadSettingsLayers(settingsPath, workingDirectory);
+	applySettingsEnv(settingsLayers.mergedEnv);
 
 	const agentConfigPath = resolve(agentDir, "config.json");
-	const projectConfigPath = resolve(workingDirectory, ".genesis/config.json");
-	const agentConfig = await readOptionalJson(agentConfigPath);
-	const projectConfig = await readOptionalJson(projectConfigPath);
+	const agentConfig = await readOptionalSettingsFile(agentConfigPath);
+	const projectSettingsPath = resolve(workingDirectory, ".genesis/settings.json");
+	const localSettingsPath = resolve(workingDirectory, ".genesis/settings.local.json");
 
 	const mode = readModeFlag(flags, "mode", "interactive");
 
@@ -169,13 +177,37 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const provider = pickString(
 		[
 			{ value: asOptionalString(flags.provider), layer: "cli", detail: "--provider" },
-			{ value: process.env.GENESIS_MODEL_PROVIDER, layer: "env", detail: "GENESIS_MODEL_PROVIDER" },
+			{ value: shellEnv.GENESIS_MODEL_PROVIDER, layer: "env", detail: "GENESIS_MODEL_PROVIDER" },
 			{
-				value: readSettingsEnvValue(settingsEnv, "GENESIS_MODEL_PROVIDER"),
-				layer: "settings",
+				value: settingsLayers.local?.provider,
+				layer: "local",
+				detail: localSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_MODEL_PROVIDER"),
+				layer: "local",
+				detail: `${localSettingsPath} env.GENESIS_MODEL_PROVIDER`,
+			},
+			{
+				value: settingsLayers.project?.provider,
+				layer: "project",
+				detail: projectSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_MODEL_PROVIDER"),
+				layer: "project",
+				detail: `${projectSettingsPath} env.GENESIS_MODEL_PROVIDER`,
+			},
+			{
+				value: settingsLayers.user?.provider,
+				layer: "user",
+				detail: settingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_MODEL_PROVIDER"),
+				layer: "user",
 				detail: `${settingsPath} env.GENESIS_MODEL_PROVIDER`,
 			},
-			{ value: projectConfig?.provider, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.provider, layer: "agent", detail: agentConfigPath },
 		],
 		"zai",
@@ -189,13 +221,37 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const modelId = pickString(
 		[
 			{ value: asOptionalString(flags.model), layer: "cli", detail: "--model" },
-			{ value: process.env.GENESIS_MODEL_ID, layer: "env", detail: "GENESIS_MODEL_ID" },
+			{ value: shellEnv.GENESIS_MODEL_ID, layer: "env", detail: "GENESIS_MODEL_ID" },
 			{
-				value: readSettingsEnvValue(settingsEnv, "GENESIS_MODEL_ID"),
-				layer: "settings",
+				value: settingsLayers.local?.model,
+				layer: "local",
+				detail: localSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_MODEL_ID"),
+				layer: "local",
+				detail: `${localSettingsPath} env.GENESIS_MODEL_ID`,
+			},
+			{
+				value: settingsLayers.project?.model,
+				layer: "project",
+				detail: projectSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_MODEL_ID"),
+				layer: "project",
+				detail: `${projectSettingsPath} env.GENESIS_MODEL_ID`,
+			},
+			{
+				value: settingsLayers.user?.model,
+				layer: "user",
+				detail: settingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_MODEL_ID"),
+				layer: "user",
 				detail: `${settingsPath} env.GENESIS_MODEL_ID`,
 			},
-			{ value: projectConfig?.model, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.model, layer: "agent", detail: agentConfigPath },
 		],
 		"glm-5.1",
@@ -209,13 +265,37 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const displayName = pickOptionalString(
 		[
 			{ value: asOptionalString(flags["display-name"]), layer: "cli", detail: "--display-name" },
-			{ value: process.env.GENESIS_MODEL_DISPLAY_NAME, layer: "env", detail: "GENESIS_MODEL_DISPLAY_NAME" },
+			{ value: shellEnv.GENESIS_MODEL_DISPLAY_NAME, layer: "env", detail: "GENESIS_MODEL_DISPLAY_NAME" },
 			{
-				value: readSettingsEnvValue(settingsEnv, "GENESIS_MODEL_DISPLAY_NAME"),
-				layer: "settings",
+				value: settingsLayers.local?.displayName,
+				layer: "local",
+				detail: localSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_MODEL_DISPLAY_NAME"),
+				layer: "local",
+				detail: `${localSettingsPath} env.GENESIS_MODEL_DISPLAY_NAME`,
+			},
+			{
+				value: settingsLayers.project?.displayName,
+				layer: "project",
+				detail: projectSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_MODEL_DISPLAY_NAME"),
+				layer: "project",
+				detail: `${projectSettingsPath} env.GENESIS_MODEL_DISPLAY_NAME`,
+			},
+			{
+				value: settingsLayers.user?.displayName,
+				layer: "user",
+				detail: settingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_MODEL_DISPLAY_NAME"),
+				layer: "user",
 				detail: `${settingsPath} env.GENESIS_MODEL_DISPLAY_NAME`,
 			},
-			{ value: projectConfig?.displayName, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.displayName, layer: "agent", detail: agentConfigPath },
 		],
 		(value, source) => {
@@ -227,13 +307,37 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const toolSetRaw = pickTools(
 		[
 			{ value: asOptionalString(flags.tools), layer: "cli", detail: "--tools" },
-			{ value: process.env.GENESIS_TOOL_SET, layer: "env", detail: "GENESIS_TOOL_SET" },
+			{ value: shellEnv.GENESIS_TOOL_SET, layer: "env", detail: "GENESIS_TOOL_SET" },
 			{
-				value: readSettingsEnvValue(settingsEnv, "GENESIS_TOOL_SET"),
-				layer: "settings",
+				value: settingsLayers.local?.tools,
+				layer: "local",
+				detail: localSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_TOOL_SET"),
+				layer: "local",
+				detail: `${localSettingsPath} env.GENESIS_TOOL_SET`,
+			},
+			{
+				value: settingsLayers.project?.tools,
+				layer: "project",
+				detail: projectSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_TOOL_SET"),
+				layer: "project",
+				detail: `${projectSettingsPath} env.GENESIS_TOOL_SET`,
+			},
+			{
+				value: settingsLayers.user?.tools,
+				layer: "user",
+				detail: settingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_TOOL_SET"),
+				layer: "user",
 				detail: `${settingsPath} env.GENESIS_TOOL_SET`,
 			},
-			{ value: projectConfig?.tools, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.tools, layer: "agent", detail: agentConfigPath },
 		],
 		"read,bash,edit,write",
@@ -248,13 +352,37 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const thinkingLevel = pickOptionalString(
 		[
 			{ value: asOptionalString(flags.thinking), layer: "cli", detail: "--thinking" },
-			{ value: process.env.GENESIS_THINKING_LEVEL, layer: "env", detail: "GENESIS_THINKING_LEVEL" },
+			{ value: shellEnv.GENESIS_THINKING_LEVEL, layer: "env", detail: "GENESIS_THINKING_LEVEL" },
 			{
-				value: readSettingsEnvValue(settingsEnv, "GENESIS_THINKING_LEVEL"),
-				layer: "settings",
+				value: settingsLayers.local?.thinking,
+				layer: "local",
+				detail: localSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_THINKING_LEVEL"),
+				layer: "local",
+				detail: `${localSettingsPath} env.GENESIS_THINKING_LEVEL`,
+			},
+			{
+				value: settingsLayers.project?.thinking,
+				layer: "project",
+				detail: projectSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_THINKING_LEVEL"),
+				layer: "project",
+				detail: `${projectSettingsPath} env.GENESIS_THINKING_LEVEL`,
+			},
+			{
+				value: settingsLayers.user?.thinking,
+				layer: "user",
+				detail: settingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_THINKING_LEVEL"),
+				layer: "user",
 				detail: `${settingsPath} env.GENESIS_THINKING_LEVEL`,
 			},
-			{ value: projectConfig?.thinking, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.thinking, layer: "agent", detail: agentConfigPath },
 		],
 		(value, source) => {
@@ -266,13 +394,37 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const bootstrapBaseUrl = pickOptionalString(
 		[
 			{ value: asOptionalString(flags["bootstrap-base-url"]), layer: "cli", detail: "--bootstrap-base-url" },
-			{ value: process.env.GENESIS_BOOTSTRAP_BASE_URL, layer: "env", detail: "GENESIS_BOOTSTRAP_BASE_URL" },
+			{ value: shellEnv.GENESIS_BOOTSTRAP_BASE_URL, layer: "env", detail: "GENESIS_BOOTSTRAP_BASE_URL" },
 			{
-				value: readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_BASE_URL"),
-				layer: "settings",
+				value: settingsLayers.local?.bootstrap?.baseUrl,
+				layer: "local",
+				detail: localSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_BOOTSTRAP_BASE_URL"),
+				layer: "local",
+				detail: `${localSettingsPath} env.GENESIS_BOOTSTRAP_BASE_URL`,
+			},
+			{
+				value: settingsLayers.project?.bootstrap?.baseUrl,
+				layer: "project",
+				detail: projectSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_BOOTSTRAP_BASE_URL"),
+				layer: "project",
+				detail: `${projectSettingsPath} env.GENESIS_BOOTSTRAP_BASE_URL`,
+			},
+			{
+				value: settingsLayers.user?.bootstrap?.baseUrl,
+				layer: "user",
+				detail: settingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_BOOTSTRAP_BASE_URL"),
+				layer: "user",
 				detail: `${settingsPath} env.GENESIS_BOOTSTRAP_BASE_URL`,
 			},
-			{ value: projectConfig?.bootstrap?.baseUrl, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.bootstrap?.baseUrl, layer: "agent", detail: agentConfigPath },
 		],
 		(value, source) => {
@@ -283,13 +435,37 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const bootstrapApi = pickOptionalString(
 		[
 			{ value: asOptionalString(flags["bootstrap-api"]), layer: "cli", detail: "--bootstrap-api" },
-			{ value: process.env.GENESIS_BOOTSTRAP_API, layer: "env", detail: "GENESIS_BOOTSTRAP_API" },
+			{ value: shellEnv.GENESIS_BOOTSTRAP_API, layer: "env", detail: "GENESIS_BOOTSTRAP_API" },
 			{
-				value: readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_API"),
-				layer: "settings",
+				value: settingsLayers.local?.bootstrap?.api,
+				layer: "local",
+				detail: localSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_BOOTSTRAP_API"),
+				layer: "local",
+				detail: `${localSettingsPath} env.GENESIS_BOOTSTRAP_API`,
+			},
+			{
+				value: settingsLayers.project?.bootstrap?.api,
+				layer: "project",
+				detail: projectSettingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_BOOTSTRAP_API"),
+				layer: "project",
+				detail: `${projectSettingsPath} env.GENESIS_BOOTSTRAP_API`,
+			},
+			{
+				value: settingsLayers.user?.bootstrap?.api,
+				layer: "user",
+				detail: settingsPath,
+			},
+			{
+				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_BOOTSTRAP_API"),
+				layer: "user",
 				detail: `${settingsPath} env.GENESIS_BOOTSTRAP_API`,
 			},
-			{ value: projectConfig?.bootstrap?.api, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.bootstrap?.api, layer: "agent", detail: agentConfigPath },
 		],
 		(value, source) => {
@@ -315,32 +491,43 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 			apiKeyEnv: readOptionalStringFlag(
 				flags,
 				"bootstrap-api-key-env",
-				process.env.GENESIS_BOOTSTRAP_API_KEY_ENV ??
-					readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_API_KEY_ENV"),
+				shellEnv.GENESIS_BOOTSTRAP_API_KEY_ENV ??
+					readSettingsEnvValue(settingsLayers.local, "GENESIS_BOOTSTRAP_API_KEY_ENV") ??
+					readSettingsEnvValue(settingsLayers.project, "GENESIS_BOOTSTRAP_API_KEY_ENV") ??
+					readSettingsEnvValue(settingsLayers.user, "GENESIS_BOOTSTRAP_API_KEY_ENV"),
 			),
 			authHeader: readOptionalBooleanFlag(
 				flags,
 				"bootstrap-auth-header",
-				process.env.GENESIS_BOOTSTRAP_AUTH_HEADER ??
-					readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_AUTH_HEADER"),
+				shellEnv.GENESIS_BOOTSTRAP_AUTH_HEADER ??
+					readSettingsEnvValue(settingsLayers.local, "GENESIS_BOOTSTRAP_AUTH_HEADER") ??
+					readSettingsEnvValue(settingsLayers.project, "GENESIS_BOOTSTRAP_AUTH_HEADER") ??
+					readSettingsEnvValue(settingsLayers.user, "GENESIS_BOOTSTRAP_AUTH_HEADER"),
 			),
 			reasoning: readOptionalBooleanFlag(
 				flags,
 				"bootstrap-reasoning",
-				process.env.GENESIS_BOOTSTRAP_REASONING ?? readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_REASONING"),
+				shellEnv.GENESIS_BOOTSTRAP_REASONING ??
+					readSettingsEnvValue(settingsLayers.local, "GENESIS_BOOTSTRAP_REASONING") ??
+					readSettingsEnvValue(settingsLayers.project, "GENESIS_BOOTSTRAP_REASONING") ??
+					readSettingsEnvValue(settingsLayers.user, "GENESIS_BOOTSTRAP_REASONING"),
 			),
 			compat: {
 				supportsDeveloperRole: readOptionalBooleanFlag(
 					flags,
 					"bootstrap-supports-developer-role",
-					process.env.GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE ??
-						readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE"),
+					shellEnv.GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE ??
+						readSettingsEnvValue(settingsLayers.local, "GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE") ??
+						readSettingsEnvValue(settingsLayers.project, "GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE") ??
+						readSettingsEnvValue(settingsLayers.user, "GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE"),
 				),
 				supportsReasoningEffort: readOptionalBooleanFlag(
 					flags,
 					"bootstrap-supports-reasoning-effort",
-					process.env.GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT ??
-						readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT"),
+					shellEnv.GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT ??
+						readSettingsEnvValue(settingsLayers.local, "GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT") ??
+						readSettingsEnvValue(settingsLayers.project, "GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT") ??
+						readSettingsEnvValue(settingsLayers.user, "GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT"),
 				),
 			},
 		},
@@ -412,11 +599,25 @@ function pickTools(
 	return onPicked(fallback, fallbackSource);
 }
 
-async function readOptionalJson(filePath: string): Promise<FileConfig | null> {
+async function loadSettingsLayers(settingsPath: string, workingDirectory: string): Promise<LoadedSettingsLayers> {
+	const projectSettingsPath = resolve(workingDirectory, ".genesis/settings.json");
+	const localSettingsPath = resolve(workingDirectory, ".genesis/settings.local.json");
+	const user = await readOptionalSettingsFile(settingsPath);
+	const project = await readOptionalSettingsFile(projectSettingsPath);
+	const local = await readOptionalSettingsFile(localSettingsPath);
+	return {
+		user,
+		project,
+		local,
+		mergedEnv: mergeSettingsEnv(user, project, local),
+	};
+}
+
+async function readOptionalSettingsFile(filePath: string): Promise<SettingsFile | null> {
 	try {
 		const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
 		if (!parsed || typeof parsed !== "object") return null;
-		return parsed as FileConfig;
+		return parsed as SettingsFile;
 	} catch {
 		return null;
 	}
@@ -457,15 +658,13 @@ function buildDefaultSettingsFile(env: NodeJS.ProcessEnv = process.env): Setting
 	};
 }
 
-async function readSettingsEnv(settingsPath: string): Promise<Readonly<Record<string, string>>> {
-	try {
-		const parsed = JSON.parse(await readFile(settingsPath, "utf8")) as SettingsFile;
-		if (!parsed || typeof parsed !== "object" || !parsed.env || typeof parsed.env !== "object") {
-			return {};
+function mergeSettingsEnv(...settingsFiles: readonly (SettingsFile | null)[]): Readonly<Record<string, string>> {
+	const env: Record<string, string> = {};
+	for (const settingsFile of settingsFiles) {
+		if (!settingsFile?.env) {
+			continue;
 		}
-
-		const env: Record<string, string> = {};
-		for (const [key, value] of Object.entries(parsed.env)) {
+		for (const [key, value] of Object.entries(settingsFile.env)) {
 			if (typeof value === "string") {
 				const trimmed = value.trim();
 				if (trimmed.length > 0) {
@@ -477,10 +676,8 @@ async function readSettingsEnv(settingsPath: string): Promise<Readonly<Record<st
 				env[key] = String(value);
 			}
 		}
-		return env;
-	} catch {
-		return {};
 	}
+	return env;
 }
 
 function applySettingsEnv(
@@ -494,8 +691,16 @@ function applySettingsEnv(
 	}
 }
 
-function readSettingsEnvValue(settingsEnv: Readonly<Record<string, string>>, key: string): string | undefined {
-	return settingsEnv[key];
+function readSettingsEnvValue(settingsFile: SettingsFile | null, key: string): string | undefined {
+	const value = settingsFile?.env?.[key];
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		return trimmed.length > 0 ? trimmed : undefined;
+	}
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+	return undefined;
 }
 
 function readModeFlag(flags: Readonly<Record<string, string | boolean>>, key: string, fallback: CliMode): CliMode {

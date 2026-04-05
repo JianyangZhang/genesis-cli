@@ -45,7 +45,8 @@ Common fields:
 
 Optional project-level overrides:
 
-- `.genesis/config.json`
+- `.genesis/settings.json`
+- `.genesis/settings.local.json`
 - `.genesis-local/pi-agent/models.json`
 
 Current precedence:
@@ -53,7 +54,8 @@ Current precedence:
 - CLI flags
 - shell environment variables
 - `env` from `~/.genesis-cli/settings.json`
-- project `.genesis/config.json`
+- project `.genesis/settings.local.json`
+- project `.genesis/settings.json`
 - local agent config under `--agent-dir`
 
 ### 2. Global Install

@@ -45,7 +45,8 @@ Genesis 的目标，是成为一个真正像软件搭档一样工作的开源代
 
 可选的项目级覆盖：
 
-- `.genesis/config.json`
+- `.genesis/settings.json`
+- `.genesis/settings.local.json`
 - `.genesis-local/pi-agent/models.json`
 
 当前优先级：
@@ -53,7 +54,8 @@ Genesis 的目标，是成为一个真正像软件搭档一样工作的开源代
 - CLI flags
 - shell 环境变量
 - `~/.genesis-cli/settings.json` 的 `env`
-- 项目级 `.genesis/config.json`
+- 项目级 `.genesis/settings.local.json`
+- 项目级 `.genesis/settings.json`
 - `--agent-dir` 下的本地 agent 配置
 
 ### 2. 全局安装

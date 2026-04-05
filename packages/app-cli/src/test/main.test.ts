@@ -151,4 +151,96 @@ describe("resolveCliOptions", () => {
 		expect(options.model.provider).toBe("shell-provider");
 		expect(options.model.id).toBe("shell-model");
 	});
+
+	it("prefers project settings over user settings", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		const workingDirectory = await mkdtemp(join(tmpdir(), "genesis-cli-project-"));
+		const userSettingsDir = join(homeDir, ".genesis-cli");
+		const projectSettingsDir = join(workingDirectory, ".genesis");
+		process.env.HOME = homeDir;
+		delete process.env.GENESIS_MODEL_PROVIDER;
+		delete process.env.GENESIS_MODEL_ID;
+		await mkdir(userSettingsDir, { recursive: true });
+		await mkdir(projectSettingsDir, { recursive: true });
+		await writeFile(
+			join(userSettingsDir, "settings.json"),
+			JSON.stringify({ model: "user-model", provider: "user-provider" }),
+			"utf8",
+		);
+		await writeFile(
+			join(projectSettingsDir, "settings.json"),
+			JSON.stringify({ model: "project-model", provider: "project-provider" }),
+			"utf8",
+		);
+
+		const options = await resolveCliOptions({ cwd: workingDirectory });
+		expect(options.model.provider).toBe("project-provider");
+		expect(options.model.id).toBe("project-model");
+		expect(options.configSources.provider).toEqual({
+			layer: "project",
+			detail: join(projectSettingsDir, "settings.json"),
+		});
+		expect(options.configSources.model).toEqual({
+			layer: "project",
+			detail: join(projectSettingsDir, "settings.json"),
+		});
+	});
+
+	it("prefers local settings over project settings", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		const workingDirectory = await mkdtemp(join(tmpdir(), "genesis-cli-project-"));
+		const settingsDir = join(workingDirectory, ".genesis");
+		process.env.HOME = homeDir;
+		delete process.env.GENESIS_MODEL_PROVIDER;
+		delete process.env.GENESIS_MODEL_ID;
+		await mkdir(join(homeDir, ".genesis-cli"), { recursive: true });
+		await mkdir(settingsDir, { recursive: true });
+		await writeFile(
+			join(settingsDir, "settings.json"),
+			JSON.stringify({ model: "project-model", provider: "project-provider" }),
+			"utf8",
+		);
+		await writeFile(
+			join(settingsDir, "settings.local.json"),
+			JSON.stringify({ model: "local-model", provider: "local-provider" }),
+			"utf8",
+		);
+
+		const options = await resolveCliOptions({ cwd: workingDirectory });
+		expect(options.model.provider).toBe("local-provider");
+		expect(options.model.id).toBe("local-model");
+		expect(options.configSources.provider).toEqual({
+			layer: "local",
+			detail: join(settingsDir, "settings.local.json"),
+		});
+		expect(options.configSources.model).toEqual({
+			layer: "local",
+			detail: join(settingsDir, "settings.local.json"),
+		});
+	});
+
+	it("prefers cli flags over shell env and local settings", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		const workingDirectory = await mkdtemp(join(tmpdir(), "genesis-cli-project-"));
+		const settingsDir = join(workingDirectory, ".genesis");
+		process.env.HOME = homeDir;
+		process.env.GENESIS_MODEL_PROVIDER = "shell-provider";
+		process.env.GENESIS_MODEL_ID = "shell-model";
+		await mkdir(settingsDir, { recursive: true });
+		await writeFile(
+			join(settingsDir, "settings.local.json"),
+			JSON.stringify({ model: "local-model", provider: "local-provider" }),
+			"utf8",
+		);
+
+		const options = await resolveCliOptions({
+			cwd: workingDirectory,
+			provider: "cli-provider",
+			model: "cli-model",
+		});
+		expect(options.model.provider).toBe("cli-provider");
+		expect(options.model.id).toBe("cli-model");
+		expect(options.configSources.provider).toEqual({ layer: "cli", detail: "--provider" });
+		expect(options.configSources.model).toEqual({ layer: "cli", detail: "--model" });
+	});
 });
