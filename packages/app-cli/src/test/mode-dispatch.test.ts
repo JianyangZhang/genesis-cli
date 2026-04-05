@@ -235,6 +235,7 @@ describe("interactive transcript formatting", () => {
 		expect(formatTurnNotice("responding", { animationFrame: 0 })).toContain("Responding.");
 		expect(formatTurnNotice("responding", { animationFrame: 1 })).toContain("Responding..");
 		expect(formatTurnNotice("responding", { animationFrame: 2 })).toContain("Responding...");
+		expect(formatTurnNotice("responding", { elapsedMs: 2500 })).toContain("2s");
 	});
 
 	it("shows queued prompt previews in the footer", () => {

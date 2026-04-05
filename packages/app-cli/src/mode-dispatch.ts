@@ -989,9 +989,9 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		if (event.category === "text" && event.type === "text_delta") {
 			if (this._turnNotice !== "responding") {
-				this.stopTurnNoticeAnimation();
 				this._turnNoticeAnimationFrame = 0;
 				this._turnNotice = "responding";
+				this.startTurnNoticeAnimation();
 			}
 			this._assistantBuffer = mergeStreamingText(this._assistantBuffer, event.content);
 			this.renderStreamingAssistantBlock();
@@ -1241,7 +1241,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentTurnElapsedMs(): number | null {
-		if (this._turnNotice !== "thinking" || this._turnStartedAt === null) {
+		if (this._turnNotice === null || this._turnStartedAt === null) {
 			return null;
 		}
 		return Math.max(0, Date.now() - this._turnStartedAt);
@@ -2139,10 +2139,10 @@ export function formatTurnNotice(
 	const DIM = "\x1b[2m";
 	const CYAN = "\x1b[36m";
 	const RESET = "\x1b[0m";
-	const suffix = kind === "thinking" ? ".".repeat(((options.animationFrame ?? 0) % 3) + 1) : "...";
+	const suffix = ".".repeat(((options.animationFrame ?? 0) % 3) + 1);
 	const label = kind === "thinking" ? `Thinking${suffix}` : `Responding${suffix}`;
 	const meta: string[] = [];
-	if (kind === "thinking" && (options.elapsedMs ?? 0) >= TURN_NOTICE_ELAPSED_THRESHOLD_MS) {
+	if ((options.elapsedMs ?? 0) >= TURN_NOTICE_ELAPSED_THRESHOLD_MS) {
 		meta.push(`${Math.floor((options.elapsedMs ?? 0) / 1000)}s`);
 	}
 	const usageLabel = formatUsageCompact(options.usage ?? null);

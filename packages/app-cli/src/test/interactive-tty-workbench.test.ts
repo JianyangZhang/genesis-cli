@@ -250,7 +250,8 @@ class FakeInteractiveSession implements SessionFacade {
 				type: "text_delta",
 				content: "Draft reply",
 			} as RuntimeEvent);
-			await sleep(950);
+			this.emitUsage("usage-respond-partial", { input: 75, output: 12, totalTokens: 87 }, false);
+			await sleep(2300);
 			this.emit({
 				id: "text-respond-2",
 				timestamp: Date.now(),
@@ -683,10 +684,12 @@ describe("interactive workbench TTY", () => {
 
 			input.write("slow respond\r");
 			await waitFor(() => screen.snapshot().includes("Responding."));
+			await waitFor(() => screen.snapshot().includes("Σ87"));
 			await waitFor(() => {
 				const snapshot = screen.snapshot();
 				return snapshot.includes("Responding..") || snapshot.includes("Responding...");
 			}, 2000);
+			await waitFor(() => screen.snapshot().includes("2s"), 3000);
 			await waitFor(() => screen.snapshot().includes("Draft reply finished"), 3000);
 
 			input.write("/exit\r");
