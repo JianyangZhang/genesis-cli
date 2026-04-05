@@ -132,10 +132,46 @@ describe("interactive transcript formatting", () => {
 				toolCallId: "call-2",
 				parameters: { file_path: "/tmp/test.txt", content: "hello\nworld" },
 			}),
-		).toContain("│ hello");
-		expect(formatInteractiveToolResult("edit", undefined, { file_path: "/tmp/test.txt", new_string: "x" })).toContain(
-			"Applied edit to test.txt",
-		);
+		).toContain("│ Preview");
+		expect(
+			formatInteractiveToolEvent({
+				id: "tool-3",
+				category: "tool",
+				type: "tool_started",
+				timestamp: Date.now(),
+				sessionId: { value: "s1" },
+				toolName: "edit",
+				toolCallId: "call-3",
+				parameters: {
+					file_path: "/tmp/test.txt",
+					old_string: "old line",
+					new_string: "new line",
+				},
+			}),
+		).toContain("│ Diff");
+		expect(
+			formatInteractiveToolEvent({
+				id: "tool-3",
+				category: "tool",
+				type: "tool_started",
+				timestamp: Date.now(),
+				sessionId: { value: "s1" },
+				toolName: "edit",
+				toolCallId: "call-3",
+				parameters: {
+					file_path: "/tmp/test.txt",
+					old_string: "old line",
+					new_string: "new line",
+				},
+			}),
+		).toContain("- old line");
+		expect(
+			formatInteractiveToolResult("edit", undefined, {
+				file_path: "/tmp/test.txt",
+				old_string: "old line",
+				new_string: "new line",
+			}),
+		).toContain("Applied edit to test.txt");
 	});
 
 	it("formats a structured permission block", () => {

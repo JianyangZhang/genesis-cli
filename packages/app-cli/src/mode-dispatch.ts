@@ -1349,15 +1349,20 @@ export function formatInteractiveToolResult(
 
 function formatInteractiveToolPreview(toolName: string, parameters: Readonly<Record<string, unknown>>): string {
 	if (toolName !== "write" && toolName !== "edit") return "";
-	const previewSource =
-		typeof parameters.content === "string"
-			? parameters.content
-			: typeof parameters.new_string === "string"
-				? parameters.new_string
-				: "";
+	if (toolName === "edit") {
+		const oldString = typeof parameters.old_string === "string" ? parameters.old_string : "";
+		const newString = typeof parameters.new_string === "string" ? parameters.new_string : "";
+		const diff = formatMiniDiffPreview(oldString, newString);
+		if (diff.length > 0) {
+			return diff;
+		}
+	}
+	const previewSource = typeof parameters.content === "string" ? parameters.content : "";
 	if (previewSource.trim().length === 0) return "";
-	const previewLines = previewSource.trimEnd().split("\n").slice(0, 3);
-	return previewLines.map((line, index) => `${index === 0 ? "  │" : "  │"} ${truncatePreviewLine(line)}`).join("\n");
+	const previewLines = previewSource.trimEnd().split("\n").slice(0, 4);
+	return ["  │ Preview", ...previewLines.map((line) => `  │ ${truncatePreviewLine(line)}`)]
+		.filter((line) => line.length > 0)
+		.join("\n");
 }
 
 function interactiveToolDisplayName(toolName: string): string {
@@ -1426,7 +1431,13 @@ function normalizeToolResultLines(
 			if (toolName === "write") {
 				return [`Wrote ${lineCount ?? 1} lines to ${target}`];
 			}
-			return [`Applied edit to ${target}${lineCount ? ` (${lineCount} lines)` : ""}`];
+			const replacementCount =
+				typeof startedParameters.old_string === "string" || typeof startedParameters.new_string === "string"
+					? 1
+					: null;
+			return [
+				`Applied edit to ${target}${replacementCount ? ` (${replacementCount} change)` : lineCount ? ` (${lineCount} lines)` : ""}`,
+			];
 		}
 		if (toolName === "bash" && typeof startedParameters.command === "string") {
 			return [`Ran: ${startedParameters.command}`];
@@ -1442,6 +1453,24 @@ function normalizeToolResultLines(
 
 function truncatePreviewLine(line: string): string {
 	return measureTerminalDisplayWidth(line) <= 72 ? line : `${line.slice(0, 69)}...`;
+}
+
+function formatMiniDiffPreview(oldString: string, newString: string): string {
+	if (oldString.trim().length === 0 && newString.trim().length === 0) return "";
+	const removed = oldString
+		.trimEnd()
+		.split("\n")
+		.filter((line) => line.length > 0)
+		.slice(0, 2);
+	const added = newString
+		.trimEnd()
+		.split("\n")
+		.filter((line) => line.length > 0)
+		.slice(0, 2);
+	const lines = ["  │ Diff"];
+	lines.push(...removed.map((line) => `  - ${truncatePreviewLine(line)}`));
+	lines.push(...added.map((line) => `  + ${truncatePreviewLine(line)}`));
+	return lines.join("\n");
 }
 
 export function computeSlashSuggestions(input: string, commands: readonly SlashCommand[]): readonly string[] {
