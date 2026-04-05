@@ -486,6 +486,8 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 				toolName: tool.name,
 				toolCallId,
 				riskLevel: decision.riskLevel,
+				reason: decision.reason,
+				targetPath: extractTargetPath(parameters),
 			},
 		});
 
@@ -577,6 +579,27 @@ function createDeferred<T>(): Deferred<T> {
 		reject = rej;
 	});
 	return { resolve, reject, promise };
+}
+
+function extractTargetPath(parameters: Readonly<Record<string, unknown>> | undefined): string | undefined {
+	if (!parameters) {
+		return undefined;
+	}
+
+	if (typeof parameters.file_path === "string") {
+		return parameters.file_path;
+	}
+
+	if (typeof parameters.path === "string") {
+		return parameters.path;
+	}
+
+	if (Array.isArray(parameters.file_paths)) {
+		const first = parameters.file_paths.find((p) => typeof p === "string" && p.length > 0);
+		return typeof first === "string" ? first : undefined;
+	}
+
+	return undefined;
 }
 
 async function loadPiMonoSdk(): Promise<PiMonoSdk> {

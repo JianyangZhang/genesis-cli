@@ -151,6 +151,8 @@ export class EventNormalizer {
 					toolName: (raw.payload?.toolName as string) ?? "unknown",
 					toolCallId: (raw.payload?.toolCallId as string) ?? "",
 					riskLevel: (raw.payload?.riskLevel as string) ?? "L0",
+					reason: raw.payload?.reason as string | undefined,
+					targetPath: raw.payload?.targetPath as string | undefined,
 				};
 
 			case "permission_resolve":

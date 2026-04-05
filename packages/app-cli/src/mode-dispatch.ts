@@ -7,6 +7,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
 import type { InteractionState, OutputSink, SlashCommand, TuiScreenLayout } from "@genesis-cli/ui";
 import {
@@ -85,6 +86,15 @@ function createStdoutSink(): OutputSink {
 class InteractiveModeHandler implements ModeHandler {
 	private _lastRenderedLines = 0;
 	private _pendingPermissionCallId: string | null = null;
+	private _pendingPermissionDetails:
+		| {
+				toolName: string;
+				toolCallId: string;
+				riskLevel: string;
+				reason?: string;
+				targetPath?: string;
+		  }
+		| null = null;
 	private _activeTurn: Promise<void> | null = null;
 	private readonly _prompt = "genesis> ";
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
@@ -93,6 +103,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _history: string[] = [];
 	private _historyIndex: number | null = null;
 	private _suppressPersistOnce = false;
+	private _lastError: string | null = null;
+	private readonly _changedPaths = new Set<string>();
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -130,9 +142,12 @@ class InteractiveModeHandler implements ModeHandler {
 			sessionRef.current.events.removeAllListeners();
 			sessionRef.current = next;
 			this._pendingPermissionCallId = null;
+			this._pendingPermissionDetails = null;
 			this._activeTurn = null;
 			this._viewportOffsetFromBottom = 0;
 			this._historyIndex = null;
+			this._lastError = null;
+			this._changedPaths.clear();
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 			accumulator.reset();
@@ -149,6 +164,38 @@ class InteractiveModeHandler implements ModeHandler {
 			});
 
 			sessionRef.current.events.onAny((event: RuntimeEvent) => {
+				if (event.type === "permission_requested") {
+					this._pendingPermissionDetails = {
+						toolName: event.toolName,
+						toolCallId: event.toolCallId,
+						riskLevel: event.riskLevel,
+						reason: (event as { reason?: string }).reason,
+						targetPath: (event as { targetPath?: string }).targetPath,
+					};
+				}
+				if (event.type === "permission_resolved") {
+					if (this._pendingPermissionDetails?.toolCallId === event.toolCallId) {
+						this._pendingPermissionDetails = null;
+					}
+				}
+				if (event.type === "tool_started") {
+					const targetPath =
+						typeof event.parameters.file_path === "string"
+							? event.parameters.file_path
+							: typeof event.parameters.path === "string"
+								? event.parameters.path
+								: undefined;
+					if (targetPath && (event.toolName === "edit" || event.toolName === "write")) {
+						this._changedPaths.add(targetPath);
+					}
+				}
+				if (event.type === "tool_denied") {
+					this._lastError = `${event.toolName}: ${event.reason}`;
+				}
+				if (event.type === "tool_completed" && event.status === "failure") {
+					this._lastError = `${event.toolName}: ${event.result ?? "failure"}`;
+				}
+
 				accumulator.push(event);
 				interactionState = reduceInteractionState(interactionState, event);
 
@@ -235,6 +282,99 @@ class InteractiveModeHandler implements ModeHandler {
 		});
 
 		register({
+			name: "changes",
+			description: "Show changed files and diff summary",
+			type: "local",
+			async execute(ctx) {
+				const cwd = ctx.session.context.workingDirectory;
+				if (handler._changedPaths.size > 0) {
+					ctx.output.writeLine("Changed files (observed):");
+					for (const path of [...handler._changedPaths].sort((a, b) => a.localeCompare(b))) {
+						ctx.output.writeLine(`  ${path}`);
+					}
+				} else {
+					ctx.output.writeLine("Changed files (observed): none");
+				}
+
+				const status = await runGit(cwd, ["status", "--porcelain"]);
+				if (status.type === "ok") {
+					ctx.output.writeLine("git status:");
+					ctx.output.writeLine(status.stdout.trim().length > 0 ? status.stdout.trimEnd() : "  clean");
+				}
+				const stat = await runGit(cwd, ["diff", "--stat"]);
+				if (stat.type === "ok" && stat.stdout.trim().length > 0) {
+					ctx.output.writeLine("git diff --stat:");
+					ctx.output.writeLine(stat.stdout.trimEnd());
+				}
+				if (status.type === "error" || stat.type === "error") {
+					ctx.output.writeError("git not available in this working directory.");
+				}
+				return undefined;
+			},
+		});
+
+		register({
+			name: "diff",
+			description: "Show git diff (optionally for a file)",
+			type: "local",
+			async execute(ctx) {
+				const cwd = ctx.session.context.workingDirectory;
+				const target = ctx.args.trim();
+				const args = target.length > 0 ? ["diff", "--", target] : ["diff"];
+				const diff = await runGit(cwd, args);
+				if (diff.type === "error") {
+					ctx.output.writeError("git not available in this working directory.");
+					return undefined;
+				}
+				ctx.output.writeLine(diff.stdout.trimEnd().length > 0 ? diff.stdout.trimEnd() : "(no diff)");
+				return undefined;
+			},
+		});
+
+		register({
+			name: "revert",
+			description: "Revert a file using git checkout -- <file> (or --all)",
+			type: "local",
+			async execute(ctx) {
+				const cwd = ctx.session.context.workingDirectory;
+				const arg = ctx.args.trim();
+				if (arg.length === 0) {
+					ctx.output.writeError("Usage: /revert <file> | /revert --all");
+					return undefined;
+				}
+				if (arg === "--all") {
+					const result = await runGit(cwd, ["checkout", "--", "."]);
+					if (result.type === "error") {
+						ctx.output.writeError("git not available in this working directory.");
+						return undefined;
+					}
+					handler._changedPaths.clear();
+					ctx.output.writeLine("Reverted all changes.");
+					return undefined;
+				}
+				const result = await runGit(cwd, ["checkout", "--", arg]);
+				if (result.type === "error") {
+					ctx.output.writeError("git not available in this working directory.");
+					return undefined;
+				}
+				handler._changedPaths.delete(arg);
+				ctx.output.writeLine(`Reverted: ${arg}`);
+				return undefined;
+			},
+		});
+
+		register({
+			name: "review",
+			description: "Review changes and decide to keep or revert",
+			type: "local",
+			async execute(ctx) {
+				await registry.get("changes")!.execute?.(ctx);
+				ctx.output.writeLine("Next: /diff [file] to inspect, /revert <file> to undo, or continue chatting.");
+				return undefined;
+			},
+		});
+
+		register({
 			name: "status",
 			description: "Show status",
 			type: "local",
@@ -257,6 +397,12 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				if (state.compactionSummary) {
 					ctx.output.writeLine(`  Last compaction: ${state.compactionSummary.estimatedTokensSaved} tokens saved`);
+				}
+				if (handler._lastError) {
+					ctx.output.writeLine(`  Last error: ${handler._lastError}`);
+				}
+				if (handler._changedPaths.size > 0) {
+					ctx.output.writeLine(`  Changed files: ${handler._changedPaths.size}`);
 				}
 				if (handler._pendingPermissionCallId) {
 					ctx.output.writeLine(`  Waiting permission: ${handler._pendingPermissionCallId}`);
@@ -455,13 +601,15 @@ class InteractiveModeHandler implements ModeHandler {
 
 				// Permission response
 				if (this._pendingPermissionCallId !== null) {
-					const response = trimmed.toLowerCase();
-					if (response === "y" || response === "yes") {
-						await sessionRef.current.resolvePermission(this._pendingPermissionCallId, "allow_once");
-					} else {
-						await sessionRef.current.resolvePermission(this._pendingPermissionCallId, "deny");
+					const decision = parsePermissionDecision(trimmed);
+					if (!decision) {
+						sink.writeError("Permission: [y] once, [Y] session, [n] deny");
+						line = await inputLoop.nextLine();
+						continue;
 					}
+					await sessionRef.current.resolvePermission(this._pendingPermissionCallId, decision);
 					this._pendingPermissionCallId = null;
+					this._pendingPermissionDetails = null;
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -555,12 +703,16 @@ class InteractiveModeHandler implements ModeHandler {
 	private renderPromptLine(): void {
 		process.stdout.write(ansiClearLine());
 		const buffer = this._inputState.buffer;
-		process.stdout.write(this._prompt);
+		const prompt =
+			this._pendingPermissionCallId !== null
+				? `perm${this._pendingPermissionDetails ? `(${this._pendingPermissionDetails.riskLevel} ${this._pendingPermissionDetails.toolName})` : ""} [y/Y/n]> `
+				: this._prompt;
+		process.stdout.write(prompt);
 		if (buffer.length > 0) {
 			process.stdout.write(buffer);
 		}
 		process.stdout.write("\r");
-		process.stdout.write(ansiMoveRight(this._prompt.length + this._inputState.cursor));
+		process.stdout.write(ansiMoveRight(prompt.length + this._inputState.cursor));
 		process.stdout.write(ansiShowCursor());
 	}
 
@@ -709,4 +861,27 @@ class RpcModeHandler implements ModeHandler {
 			this.server = null;
 		}
 	}
+}
+
+function parsePermissionDecision(input: string): "allow_once" | "allow_for_session" | "deny" | null {
+	const trimmed = input.trim();
+	if (trimmed === "y" || trimmed.toLowerCase() === "yes") return "allow_once";
+	if (trimmed === "Y") return "allow_for_session";
+	if (trimmed === "n" || trimmed.toLowerCase() === "no") return "deny";
+	return null;
+}
+
+function runGit(
+	cwd: string,
+	args: readonly string[],
+): Promise<{ type: "ok"; stdout: string; stderr: string } | { type: "error" }> {
+	return new Promise((resolve) => {
+		execFile("git", [...args], { cwd }, (error, stdout, stderr) => {
+			if (error) {
+				resolve({ type: "error" });
+				return;
+			}
+			resolve({ type: "ok", stdout: String(stdout), stderr: String(stderr) });
+		});
+	});
 }

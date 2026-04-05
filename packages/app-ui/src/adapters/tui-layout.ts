@@ -41,7 +41,7 @@ export interface ConversationRegion {
 }
 
 /** A single line in the conversation area. */
-export type ConversationLine = TextLine | ToolCallLine | PermissionPromptLine | PlanStepLine | DividerLine;
+export type ConversationLine = TextLine | ToolCallLine | PermissionPromptLine | PermissionResultLine | PlanStepLine | DividerLine;
 
 export interface TextLine {
 	readonly type: "text";
@@ -65,6 +65,15 @@ export interface PermissionPromptLine {
 	readonly toolName: string;
 	readonly toolCallId: string;
 	readonly riskLevel: string;
+	readonly reason?: string;
+	readonly targetPath?: string;
+}
+
+export interface PermissionResultLine {
+	readonly type: "permission_result";
+	readonly toolName: string;
+	readonly toolCallId: string;
+	readonly decision: "allow" | "allow_for_session" | "allow_once" | "deny";
 }
 
 export interface PlanStepLine {

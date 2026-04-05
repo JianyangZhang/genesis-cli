@@ -140,7 +140,18 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 					payload:
 						decision.type === "deny"
 							? { toolName, toolCallId, reason: decision.reason }
-							: { toolName, toolCallId, riskLevel: decision.riskLevel },
+							: {
+									toolName,
+									toolCallId,
+									riskLevel: decision.riskLevel,
+									reason: decision.reason,
+									targetPath:
+										typeof parameters.file_path === "string"
+											? parameters.file_path
+											: typeof parameters.path === "string"
+												? parameters.path
+												: undefined,
+								},
 				};
 				if (decision.type === "deny") {
 					suppressedToolCalls.add(toolCallId);

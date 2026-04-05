@@ -156,6 +156,17 @@ function accumulateEvent(event: RuntimeEvent, lines: ConversationLine[], activeT
 					toolName: event.toolName,
 					toolCallId: event.toolCallId,
 					riskLevel: event.riskLevel,
+					reason: (event as { reason?: string }).reason,
+					targetPath: (event as { targetPath?: string }).targetPath,
+				});
+				break;
+			}
+			if (event.type === "permission_resolved") {
+				lines.push({
+					type: "permission_result",
+					toolName: event.toolName,
+					toolCallId: event.toolCallId,
+					decision: event.decision,
 				});
 			}
 			break;

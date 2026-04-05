@@ -198,6 +198,8 @@ export interface PermissionRequestedEvent extends BaseEvent {
 	readonly toolName: string;
 	readonly toolCallId: string;
 	readonly riskLevel: string;
+	readonly reason?: string;
+	readonly targetPath?: string;
 }
 
 export interface PermissionResolvedEvent extends BaseEvent {

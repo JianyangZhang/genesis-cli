@@ -87,6 +87,8 @@ function renderConversationLine(line: ConversationLine, width: number): string {
 			return renderToolCallLine(line);
 		case "permission_prompt":
 			return renderPermissionLine(line);
+		case "permission_result":
+			return renderPermissionResultLine(line);
 		case "plan_step":
 			return renderPlanStepLine(line);
 		case "divider":
@@ -112,8 +114,30 @@ function renderToolCallLine(line: {
 	return `  ${icon} ${name}${duration}${summary}`;
 }
 
-function renderPermissionLine(line: { readonly toolName: string; readonly riskLevel: string }): string {
-	return `${YELLOW}⚠ Permission required${RESET} (${line.riskLevel}): ${line.toolName}`;
+function renderPermissionLine(line: {
+	readonly toolName: string;
+	readonly riskLevel: string;
+	readonly reason?: string;
+	readonly targetPath?: string;
+}): string {
+	const path = line.targetPath ? ` ${DIM}${line.targetPath}${RESET}` : "";
+	const reason = line.reason ? ` — ${truncate(line.reason, 60)}` : "";
+	return `${YELLOW}⚠ Permission required${RESET} (${line.riskLevel}): ${line.toolName}${path}${reason}`;
+}
+
+function renderPermissionResultLine(line: {
+	readonly toolName: string;
+	readonly decision: "allow" | "allow_for_session" | "allow_once" | "deny";
+}): string {
+	const decision =
+		line.decision === "allow_for_session"
+			? "allowed (session)"
+			: line.decision === "allow_once"
+				? "allowed (once)"
+				: line.decision === "deny"
+					? "denied"
+					: "allowed";
+	return `${DIM}Permission ${decision}:${RESET} ${CYAN}${line.toolName}${RESET}`;
 }
 
 function renderPlanStepLine(line: { readonly description: string; readonly status: string }): string {
