@@ -6,6 +6,7 @@ import {
 	formatTranscriptAssistantLine,
 	formatTranscriptUserLine,
 	formatTurnNotice,
+	mergeStreamingText,
 	shouldRenderInteractiveTranscriptEvent,
 	wrapTranscriptContent,
 } from "../mode-dispatch.js";
@@ -39,17 +40,32 @@ describe("interactive transcript formatting", () => {
 		).toBe(false);
 	});
 
-	it("keeps non-session events visible in the transcript", () => {
+	it("suppresses internal tool transcript noise", () => {
+		expect(
+			shouldRenderInteractiveTranscriptEvent({
+				id: "evt-tool",
+				category: "tool",
+				type: "tool_denied",
+				timestamp: Date.now(),
+				sessionId: { value: "s1" },
+				toolName: "bash",
+				toolCallId: "call-1",
+				reason: "not allowed",
+			}),
+		).toBe(false);
+	});
+
+	it("keeps permission prompts visible in the transcript", () => {
 		expect(
 			shouldRenderInteractiveTranscriptEvent({
 				id: "evt-2",
-				category: "tool",
-				type: "tool_started",
+				category: "permission",
+				type: "permission_requested",
 				timestamp: Date.now(),
 				sessionId: { value: "s1" },
 				toolName: "read_file",
 				toolCallId: "call-1",
-				parameters: {},
+				riskLevel: "L2",
 			}),
 		).toBe(true);
 	});
@@ -62,6 +78,12 @@ describe("interactive transcript formatting", () => {
 	it("wraps transcript content for streaming redraw", () => {
 		expect(wrapTranscriptContent("abcdef", 3)).toEqual(["abc", "def"]);
 		expect(wrapTranscriptContent("你好吗", 4)).toEqual(["你好", "吗"]);
+	});
+
+	it("merges overlapping streaming chunks without duplicating text", () => {
+		expect(mergeStreamingText("你好", "好吗")).toBe("你好吗");
+		expect(mergeStreamingText("抱歉，当前可用", "当前可用的工具")).toBe("抱歉，当前可用的工具");
+		expect(mergeStreamingText("hello", "hello world")).toBe("hello world");
 	});
 });
 

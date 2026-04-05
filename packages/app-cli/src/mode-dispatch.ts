@@ -54,8 +54,6 @@ export function createModeHandler(mode: CliMode): ModeHandler {
 		case "rpc":
 			return new RpcModeHandler();
 	}
-
-	throw new Error(`Unsupported mode: ${mode}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -970,7 +968,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this._turnNotice = "responding";
 				this.writeTranscriptText(formatTurnNotice("responding"), true, false);
 			}
-			this._assistantBuffer += event.content;
+			this._assistantBuffer = mergeStreamingText(this._assistantBuffer, event.content);
 			this.renderStreamingAssistantBlock();
 			return;
 		}
@@ -1171,9 +1169,10 @@ export function computePromptCursorColumn(prompt: string, buffer: string, cursor
 }
 
 export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boolean {
-	if (event.category === "session") {
-		return false;
-	}
+	if (event.category === "session") return false;
+	if (event.category === "tool") return false;
+	if (event.category === "compaction") return false;
+	if (event.category === "permission" && event.type === "permission_resolved") return false;
 	return true;
 }
 
@@ -1237,6 +1236,21 @@ export function formatTurnNotice(kind: "thinking" | "responding"): string {
 	const CYAN = "\x1b[36m";
 	const RESET = "\x1b[0m";
 	return kind === "thinking" ? `${DIM}${CYAN}· Thinking…${RESET}` : `${DIM}${CYAN}· Responding…${RESET}`;
+}
+
+export function mergeStreamingText(existing: string, incoming: string): string {
+	if (incoming.length === 0) return existing;
+	if (existing.length === 0) return incoming;
+	if (incoming.startsWith(existing)) return incoming;
+	if (existing.endsWith(incoming)) return existing;
+
+	const maxOverlap = Math.min(existing.length, incoming.length);
+	for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+		if (existing.endsWith(incoming.slice(0, overlap))) {
+			return `${existing}${incoming.slice(overlap)}`;
+		}
+	}
+	return `${existing}${incoming}`;
 }
 
 export function wrapTranscriptContent(content: string, width: number): readonly string[] {
