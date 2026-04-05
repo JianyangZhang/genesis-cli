@@ -1201,7 +1201,12 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write(ansiResetScrollRegion());
 		process.stdout.write(ansiCursorHome());
 		process.stdout.write("\x1b[2J");
-		process.stdout.write(`${this._welcomeLines.join("\n")}\n`);
+		for (let index = 0; index < this._welcomeLines.length; index += 1) {
+			this.writeAbsoluteTerminalLine(
+				index + 1,
+				fitTerminalLine(this._welcomeLines[index] ?? "", this.terminalWidth()),
+			);
+		}
 		this._renderedFooterUi = null;
 		this._streamingReservedRows = 0;
 		this.renderTranscriptViewport();
@@ -1346,6 +1351,13 @@ function applyWelcomeBorderColor(text: string): string {
 	return `${INTERACTIVE_THEME.welcomeBorder}${text}${INTERACTIVE_THEME.reset}`;
 }
 
+function buildWelcomeHintLine(width: number): string {
+	if (width < 64) {
+		return "Start: Enter  Help: /help  Scroll: wheel/PageUp/PageDown";
+	}
+	return "Start: type a prompt and press Enter  Help: /help  Scroll: wheel/PageUp/PageDown";
+}
+
 export const WELCOME_BIBLE_GREETINGS = [
 	"Let there be light.",
 	"Seek, and ye shall find.",
@@ -1370,7 +1382,7 @@ export function buildWelcomeLines(input: {
 	provider: string;
 	greeting: string;
 }): readonly string[] {
-	const width = Math.max(60, Math.min(input.terminalWidth, 100));
+	const width = Math.max(24, Math.min(input.terminalWidth, 100));
 	const DIM = INTERACTIVE_THEME.muted;
 	const RESET = INTERACTIVE_THEME.reset;
 	const GREEN = INTERACTIVE_THEME.success;
@@ -1390,7 +1402,7 @@ export function buildWelcomeLines(input: {
 		fill(),
 		center(`${CYAN}${input.model}${RESET} ${DIM}via${RESET} ${input.provider}`),
 		formatWelcomeBottomBorder(width),
-		`${DIM}Start:${RESET} type a prompt and press Enter  ${DIM}Help:${RESET} /help  ${DIM}Scroll:${RESET} wheel/PageUp/PageDown`,
+		buildWelcomeHintLine(width),
 	];
 }
 
@@ -1871,7 +1883,7 @@ function ansiEnableAutoWrap(): string {
 	return "\x1b[?7h";
 }
 
-function fitTerminalLine(line: string, width: number): string {
+export function fitTerminalLine(line: string, width: number): string {
 	const safeWidth = Math.max(1, width);
 	const visibleWidth = measureTerminalDisplayWidth(stripAnsiWelcome(line));
 	if (visibleWidth <= safeWidth) {

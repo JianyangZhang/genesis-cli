@@ -12,6 +12,7 @@ import {
 	computeSlashSuggestions,
 	computeVisibleTranscriptLines,
 	countRenderedTerminalRows,
+	fitTerminalLine,
 	formatInteractiveFooter,
 	formatInteractiveInputSeparator,
 	formatInteractivePermissionBlock,
@@ -139,6 +140,22 @@ describe("interactive transcript formatting", () => {
 		expect(lines.some((line) => line.includes("/Users/"))).toBe(false);
 		expect(lines[7]).toContain("│");
 		expect(lines[8]).toContain("GLM 5.1");
+	});
+
+	it("keeps welcome lines within narrow terminal widths after fitting", () => {
+		const lines = buildWelcomeLines({
+			terminalWidth: 40,
+			version: "0.0.0",
+			model: "GLM 5.1",
+			provider: "zai",
+			greeting: "Iron sharpeneth iron.",
+		});
+		const fitted = lines.map((line) => fitTerminalLine(line, 40));
+		const visibleLengths = fitted.map(
+			(line) => line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "").length,
+		);
+		expect(Math.max(...visibleLengths)).toBeLessThanOrEqual(40);
+		expect(lines.at(-1)).toContain("Start: Enter");
 	});
 
 	it("exposes eight coding-friendly bible greetings and picks them deterministically", () => {
