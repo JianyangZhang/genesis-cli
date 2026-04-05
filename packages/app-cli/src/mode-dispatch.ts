@@ -7,7 +7,7 @@
 
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
 import type { InteractionState, OutputSink, SlashCommand } from "@genesis-cli/ui";
 import {
@@ -79,6 +79,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _assistantRendered = "";
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
+	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -141,6 +142,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._assistantRendered = "";
 			this._turnNotice = null;
 			this._commandSuggestions = [];
+			this._toolCalls.clear();
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -164,6 +166,7 @@ class InteractiveModeHandler implements ModeHandler {
 						reason: (event as { reason?: string }).reason,
 						targetPath: (event as { targetPath?: string }).targetPath,
 					};
+					this.writeTranscriptText(formatInteractivePermissionBlock(this._pendingPermissionDetails), true);
 				}
 				if (event.type === "permission_resolved") {
 					if (this._pendingPermissionDetails?.toolCallId === event.toolCallId) {
@@ -171,6 +174,7 @@ class InteractiveModeHandler implements ModeHandler {
 					}
 				}
 				if (event.type === "tool_started") {
+					this._toolCalls.set(event.toolCallId, { toolName: event.toolName, parameters: event.parameters });
 					const targetPath =
 						typeof event.parameters.file_path === "string"
 							? event.parameters.file_path
@@ -182,10 +186,15 @@ class InteractiveModeHandler implements ModeHandler {
 					}
 				}
 				if (event.type === "tool_denied") {
+					this._toolCalls.delete(event.toolCallId);
 					this._lastError = `${event.toolName}: ${event.reason}`;
 				}
 				if (event.type === "tool_completed" && event.status === "failure") {
+					this._toolCalls.delete(event.toolCallId);
 					this._lastError = `${event.toolName}: ${event.result ?? "failure"}`;
+				}
+				if (event.type === "tool_completed" && event.status === "success") {
+					this._toolCalls.delete(event.toolCallId);
 				}
 
 				interactionState = reduceInteractionState(interactionState, event);
@@ -740,7 +749,9 @@ class InteractiveModeHandler implements ModeHandler {
 			onInputStateChange: (state) => {
 				this._inputState = state;
 				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listAll());
-				this.renderPromptLine();
+				if (this.shouldShowPrompt()) {
+					this.renderPromptLine();
+				}
 			},
 			onTabComplete: (state) => {
 				const nextState = acceptFirstSlashSuggestion(state, this._commandSuggestions);
@@ -919,12 +930,12 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderPromptLine(): void {
+		if (!this.shouldShowPrompt()) {
+			return;
+		}
 		process.stdout.write(ansiClearLine());
 		const buffer = this._inputState.buffer;
-		const prompt =
-			this._pendingPermissionCallId !== null
-				? `perm${this._pendingPermissionDetails ? `(${this._pendingPermissionDetails.riskLevel} ${this._pendingPermissionDetails.toolName})` : ""} [y/Y/n]> `
-				: this._prompt;
+		const prompt = this._pendingPermissionCallId !== null ? "choice [1/2/3]> " : this._prompt;
 		process.stdout.write(prompt);
 		if (buffer.length > 0) {
 			process.stdout.write(buffer);
@@ -949,7 +960,21 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 	}
 
+	private shouldShowPrompt(): boolean {
+		return this._activeTurn === null || this._pendingPermissionCallId !== null;
+	}
+
 	private handleTranscriptEvent(event: RuntimeEvent): void {
+		if (event.category === "tool") {
+			const text = formatInteractiveToolEvent(event, this._toolCalls.get(event.toolCallId)?.parameters);
+			if (text.length > 0) {
+				this.flushAssistantBuffer(false);
+				this.writeTranscriptText(text, true);
+			} else {
+				this.renderPromptLine();
+			}
+			return;
+		}
 		if (!shouldRenderInteractiveTranscriptEvent(event)) {
 			this.renderPromptLine();
 			return;
@@ -1138,6 +1163,9 @@ function parsePermissionDecision(input: string): "allow_once" | "allow_for_sessi
 	if (trimmed === "y" || trimmed.toLowerCase() === "yes") return "allow_once";
 	if (trimmed === "Y") return "allow_for_session";
 	if (trimmed === "n" || trimmed.toLowerCase() === "no") return "deny";
+	if (trimmed === "1") return "allow_once";
+	if (trimmed === "2") return "allow_for_session";
+	if (trimmed === "3") return "deny";
 	return null;
 }
 
@@ -1168,8 +1196,144 @@ export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boo
 	if (event.category === "session") return false;
 	if (event.category === "tool") return false;
 	if (event.category === "compaction") return false;
-	if (event.category === "permission" && event.type === "permission_resolved") return false;
+	if (event.category === "permission") return false;
 	return true;
+}
+
+export function formatInteractiveToolEvent(
+	event: RuntimeEvent,
+	startedParameters?: Readonly<Record<string, unknown>>,
+): string {
+	if (event.category !== "tool") return "";
+	if (event.type === "tool_started") {
+		return formatInteractiveToolTitle(event.toolName, event.parameters);
+	}
+	if (event.type === "tool_completed") {
+		return formatInteractiveToolResult(event.toolName, event.result, startedParameters);
+	}
+	if (event.type === "tool_denied") {
+		return "";
+	}
+	return "";
+}
+
+export function formatInteractivePermissionBlock(details: {
+	toolName: string;
+	riskLevel: string;
+	reason?: string;
+	targetPath?: string;
+}): string {
+	const lines = [
+		formatInteractiveToolTitle(details.toolName, details.targetPath ? { file_path: details.targetPath } : {}),
+	];
+	lines.push("────────────────────────────────────────");
+	lines.push(formatPermissionQuestion(details));
+	lines.push("❯ 1. Yes");
+	lines.push("  2. Yes, allow during this session");
+	lines.push("  3. No");
+	return lines.join("\n");
+}
+
+function formatPermissionQuestion(details: {
+	toolName: string;
+	riskLevel: string;
+	reason?: string;
+	targetPath?: string;
+}): string {
+	if (details.toolName === "write" || details.toolName === "edit") {
+		const target = details.targetPath ? basename(details.targetPath) : "this file";
+		return `Do you want to make this edit to ${target}?`;
+	}
+	return `Allow ${details.toolName} (${details.riskLevel})${details.reason ? ` — ${details.reason}` : ""}?`;
+}
+
+export function formatInteractiveToolTitle(
+	toolName: string,
+	parameters: Readonly<Record<string, unknown>> | { file_path?: string; path?: string } = {},
+): string {
+	const name = interactiveToolDisplayName(toolName);
+	const summary = summarizeToolParameters(toolName, parameters);
+	return summary.length > 0 ? `⏺ ${name}(${summary})` : `⏺ ${name}`;
+}
+
+export function formatInteractiveToolResult(
+	toolName: string,
+	result?: string,
+	startedParameters?: Readonly<Record<string, unknown>>,
+): string {
+	const lines = normalizeToolResultLines(toolName, result, startedParameters);
+	if (lines.length === 0) return "";
+	return lines.map((line, index) => `${index === 0 ? "  ⎿" : "   "} ${line}`).join("\n");
+}
+
+function interactiveToolDisplayName(toolName: string): string {
+	switch (toolName) {
+		case "bash":
+			return "Bash";
+		case "write":
+			return "Write";
+		case "edit":
+			return "Edit";
+		case "read":
+			return "Read";
+		case "grep":
+			return "Grep";
+		case "find":
+			return "Find";
+		case "ls":
+			return "LS";
+		default:
+			return toolName;
+	}
+}
+
+function summarizeToolParameters(
+	toolName: string,
+	parameters: Readonly<Record<string, unknown>> | { file_path?: string; path?: string },
+): string {
+	if (toolName === "bash" && typeof (parameters as Record<string, unknown>).command === "string") {
+		return (parameters as Record<string, unknown>).command as string;
+	}
+	const filePath =
+		typeof parameters.file_path === "string"
+			? parameters.file_path
+			: typeof parameters.path === "string"
+				? parameters.path
+				: undefined;
+	if (filePath) {
+		return basename(filePath);
+	}
+	if (toolName === "grep" && typeof (parameters as Record<string, unknown>).pattern === "string") {
+		return (parameters as Record<string, unknown>).pattern as string;
+	}
+	return "";
+}
+
+function normalizeToolResultLines(
+	toolName: string,
+	result?: string,
+	startedParameters?: Readonly<Record<string, unknown>>,
+): readonly string[] {
+	if ((!result || result.trim().length === 0) && startedParameters) {
+		if (toolName === "write" || toolName === "edit") {
+			const target =
+				typeof startedParameters.file_path === "string"
+					? basename(startedParameters.file_path)
+					: typeof startedParameters.path === "string"
+						? basename(startedParameters.path)
+						: "file";
+			return [`Updated ${target}`];
+		}
+		if (toolName === "bash" && typeof startedParameters.command === "string") {
+			return [`Ran: ${startedParameters.command}`];
+		}
+	}
+	if (!result || result.trim().length === 0) return [];
+	if (toolName === "write" || toolName === "edit") {
+		const lines = result.trimEnd().split("\n");
+		return lines.slice(0, 4);
+	}
+	return result.trimEnd().split("\n").slice(0, 6);
 }
 
 export function computeSlashSuggestions(input: string, commands: readonly SlashCommand[]): readonly string[] {

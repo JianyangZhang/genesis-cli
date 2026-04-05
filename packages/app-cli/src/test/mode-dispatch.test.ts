@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
 	computeSlashSuggestions,
+	formatInteractivePermissionBlock,
+	formatInteractiveToolEvent,
+	formatInteractiveToolResult,
+	formatInteractiveToolTitle,
 	formatSlashSuggestionHint,
 	formatTranscriptAssistantLine,
 	formatTranscriptUserLine,
@@ -55,7 +59,7 @@ describe("interactive transcript formatting", () => {
 		).toBe(false);
 	});
 
-	it("keeps permission prompts visible in the transcript", () => {
+	it("suppresses permission events from the generic transcript formatter", () => {
 		expect(
 			shouldRenderInteractiveTranscriptEvent({
 				id: "evt-2",
@@ -67,7 +71,7 @@ describe("interactive transcript formatting", () => {
 				toolCallId: "call-1",
 				riskLevel: "L2",
 			}),
-		).toBe(true);
+		).toBe(false);
 	});
 
 	it("formats turn notices for thinking and responding", () => {
@@ -88,6 +92,41 @@ describe("interactive transcript formatting", () => {
 		expect(mergeStreamingText("看起来", "  看起来 `bash` 工具当前确实不可用")).toBe(
 			"看起来 `bash` 工具当前确实不可用",
 		);
+	});
+
+	it("formats interactive tool steps like Claude-style blocks", () => {
+		expect(formatInteractiveToolTitle("bash", { command: "pwd" })).toBe("⏺ Bash(pwd)");
+		expect(
+			formatInteractiveToolEvent(
+				{
+					id: "tool-1",
+					category: "tool",
+					type: "tool_completed",
+					timestamp: Date.now(),
+					sessionId: { value: "s1" },
+					toolName: "bash",
+					toolCallId: "call-1",
+					status: "success",
+					result: "/tmp",
+					durationMs: 10,
+				},
+				{ command: "pwd" },
+			),
+		).toContain("⎿");
+		expect(formatInteractiveToolResult("write", undefined, { file_path: "/tmp/test.txt" })).toContain(
+			"Updated test.txt",
+		);
+	});
+
+	it("formats a structured permission block", () => {
+		const block = formatInteractivePermissionBlock({
+			toolName: "write",
+			riskLevel: "L2",
+			targetPath: "/tmp/test.txt",
+		});
+		expect(block).toContain("⏺ Write(test.txt)");
+		expect(block).toContain("1. Yes");
+		expect(block).toContain("2. Yes, allow during this session");
 	});
 });
 
