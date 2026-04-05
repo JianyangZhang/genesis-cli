@@ -101,6 +101,42 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("handles fragmented escape sequences across input chunks", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onKey = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onKey });
+		try {
+			const pending = loop.nextLine();
+			input.write("\u001b[");
+			input.write("<64;");
+			input.write("10;10M");
+			input.write("\r");
+			await pending;
+			expect(onKey).toHaveBeenCalledWith("wheelup");
+		} finally {
+			loop.close();
+		}
+	});
+
+	it("emits page navigation keys in raw mode", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onKey = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onKey });
+		try {
+			const pending = loop.nextLine();
+			input.write("\u001b[5~");
+			input.write("\u001b[6~");
+			input.write("\r");
+			await pending;
+			expect(onKey).toHaveBeenNthCalledWith(1, "pageup");
+			expect(onKey).toHaveBeenNthCalledWith(2, "pagedown");
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("restores raw mode and pauses stdin on close", () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();

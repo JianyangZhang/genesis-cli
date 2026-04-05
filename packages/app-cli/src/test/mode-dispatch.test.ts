@@ -33,4 +33,19 @@ describe("interactive transcript formatting", () => {
 			}),
 		).toBe(false);
 	});
+
+	it("keeps non-session events visible in the transcript", () => {
+		expect(
+			shouldRenderInteractiveTranscriptEvent({
+				id: "evt-2",
+				category: "tool",
+				type: "tool_started",
+				timestamp: Date.now(),
+				sessionId: { value: "s1" },
+				toolName: "read_file",
+				toolCallId: "call-1",
+				parameters: {},
+			}),
+		).toBe(true);
+	});
 });
