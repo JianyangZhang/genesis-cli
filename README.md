@@ -1,30 +1,31 @@
 # Genesis CLI
 
-**An open-source coding CLI that combines a layered pi-agent kernel with a Claude-Code-inspired product runtime.**
+**An open-source coding CLI inspired by pi-mono and Claude Code, built around a vendored micro-kernel centered on `pi-agent-core`.**
 
-[中文版](README.zh.md)
+[Chinese README](README.zh.md)
 
 ---
 
-## What It Is
+## Overview
 
-Genesis is built for real repository work (not contrived examples): plan, review, change, verify.
+Genesis is built for real repository work: understand code, plan changes, execute safely, and verify results.
 
-The architecture is the point:
+The project combines two ideas:
 
-- a **vendored kernel** (pi-agent lineage) that stays small, explicit, and interface-agnostic
-- a **product runtime** that turns raw agent capability into a controlled user experience
+- learn from `pi-mono` for kernel shape, session primitives, and runtime discipline
+- learn from Claude Code for product experience, command UX, permission flow, and interactive workbench behavior
 
-Genesis is inspired by Claude Code’s product-layer design, but it is not a code clone. The goal is a maintainable system with clearer boundaries and stronger governance.
-The exact package layout is intentionally documented in the technical plan rather than overloaded into the project homepage.
+The implementation boundary is intentionally narrower than either upstream reference:
+
+- the repository owns its own vendored kernel and product runtime
+- the kernel is centered on a minimal `pi-agent-core`-based boundary rather than a full external coding-agent stack
+- product semantics such as permissions, tool governance, planning, and mode rendering stay in Genesis packages
 
 ---
 
 ## Quick Start
 
-### For Users (Interactive TUI)
-
-Clone and start the interactive TUI:
+### Interactive CLI
 
 ```bash
 git clone https://github.com/JianyangZhang/genesis-cli.git
@@ -38,36 +39,72 @@ npm run chat:live
 Requirements:
 
 - Node.js 20.0.0+
-- `GENESIS_API_KEY` is set in `.env.local`
+- a valid `GENESIS_API_KEY` in `.env.local`
 
 Startup success signal:
 
-- A `Genesis CLI` welcome card is rendered and the prompt `genesis> ` is shown.
+- the `Genesis CLI` welcome card appears and the prompt `❯ ` is shown
 
 Quick verification:
 
-- Type `/help` and confirm the command list is printed.
-- Exit by typing `/exit` (or `/quit`).
+- run `/help` and confirm that slash commands are listed
+- exit with `/exit` or `/quit`
 
 Keyboard and scrolling:
 
-- `↑` / `↓`: cycle local input history in the `genesis> ` prompt.
-- `←` / `→` / `Home` / `End`: move the cursor inside the current input line.
-- Mouse wheel / trackpad scroll: use your terminal's native scrollback to browse prior transcript output.
-- `PageUp` / `PageDown`: follow your terminal's native scrollback behavior.
-- Interactive mode stays on the primary terminal buffer, so the transcript remains visible after `/exit`.
+- `↑` / `↓`: cycle local input history
+- `←` / `→` / `Home` / `End`: move inside the current input line
+- `Tab`: accept the first slash-command suggestion when available
+- mouse wheel / touchpad: use native terminal scrollback for transcript history
+- `PageUp` / `PageDown`: follow native terminal scrollback behavior
+- interactive mode stays on the primary terminal buffer, so the transcript remains visible after `/exit`
 
-Exit flow:
+Exit behavior:
 
-- `/exit`, `/quit`, or idle `Ctrl+C` closes the TUI, restores mouse/raw-mode terminal state, and returns control to the shell immediately.
-- `Ctrl+C` aborts the active turn instead of exiting when a response is in progress.
-- `Ctrl+C` denies the current permission prompt when approval is pending.
+- `/exit`, `/quit`, or idle `Ctrl+C` closes the TUI and restores terminal state
+- `Ctrl+C` aborts the active turn when a response is streaming
+- `Ctrl+C` denies the current permission request when an approval menu is open
 
-### For Developers
+---
 
-#### Tests / 测试
+## Architecture
 
-Unit tests:
+Genesis is designed so the kernel stays small while the product layer evolves quickly.
+
+### Kernel Boundary
+
+The vendored kernel focuses on the execution surface Genesis must control directly:
+
+- session lifecycle and streaming event flow
+- provider and model registry boundaries
+- auth storage and built-in tool wiring
+
+### Product Runtime
+
+The product runtime turns raw agent capability into a stable user-facing contract:
+
+- normalized runtime events instead of leaking upstream wire formats
+- tool governance with permission decisions, audit trails, and mutation control
+- planning and subagent contracts with scoped execution rules
+- shared semantics across `Interactive`, `Print`, `JSON`, and `RPC`
+
+---
+
+## Current Capabilities
+
+- one runtime powering `Interactive`, `Print`, `JSON`, and `RPC` modes
+- Claude-like interactive TUI behavior on the primary terminal buffer
+- explicit permission prompts and structured tool-step rendering
+- OpenAI-compatible provider flow for live model integration
+- a repository-owned kernel boundary that can evolve without depending on a full upstream product stack
+
+---
+
+## Development
+
+### Tests
+
+Unit and workspace regression:
 
 ```bash
 npm test
@@ -79,32 +116,24 @@ Focused TUI regression suite:
 npm run test:tui
 ```
 
-Expected: Vitest prints a summary and exits with code 0.
-
 Type checks:
 
 ```bash
 npm run check:types
 ```
 
-Expected: exit code 0.
-
-Integration test (requires a valid API key in `.env.local`):
+Live integration test:
 
 ```bash
 npm run test:live:pi-mono
 ```
 
-Expected: Vitest prints a summary and exits with code 0.
-
-Lint and formatting:
+Lint and format checks:
 
 ```bash
 npm run check:lint
 npm run check:format
 ```
-
-Expected: exit code 0.
 
 All checks:
 
@@ -112,59 +141,12 @@ All checks:
 npm run check
 ```
 
-Expected: exit code 0.
+Notes:
 
-Test reports and coverage:
+- `test:live:pi-mono` requires a valid API key in `.env.local`
+- Vitest currently prints summaries to stdout; coverage reporting is still a TODO
 
-- Report: Vitest prints the result summary to stdout.
-- Coverage: TODO: add a Vitest coverage provider and a `test:coverage` script.
-
----
-## Why This Architecture Works
-
-Genesis is structured so the kernel can remain well-scoped while the product layer evolves quickly.
-
-### 1) A Well-Scoped, Vendored pi-agent Kernel
-
-The kernel is kept inside this repository (not hidden behind an external SDK boundary), and focuses on core primitives:
-
-- agent session lifecycle, streaming, and event emission
-- model/provider registries and auth storage
-- built-in tools and a stable session surface
-
-This makes the “agent core” reviewable, testable, and reusable across interfaces.
-
-### 2) A Product Runtime That Doesn’t Leak Internals
-
-The product runtime sits above the kernel and enforces a stable contract:
-
-- **normalized runtime events** (raw upstream events are never exposed)
-- **tool governance** as code: risk classification, permission decisions, audit logging, mutation queueing
-- **planning and subagent contracts**: scoped file access, verification requirements, stop conditions
-
-Different interfaces can render the same runtime semantics without re-implementing governance.
-
----
-
-## What You Get Today
-
-- one runtime powering multiple modes: `Interactive`, `Print`, `JSON`, `RPC`
-- explicit permission gating and audit trails for tool execution
-- OpenAI-compatible provider path for real model integration, plus a provider registry for expansion
-- a product-layer event pipeline designed for “workbench” UIs (terminal today, hosts later)
-
----
-
-## Extending Genesis
-
-- add a tool: define the contract, classify risk, enforce permission + audit
-- add a provider/model: register it once, consume it from any interface
-- add an interface: consume normalized events and render a mode without forking semantics
-- add product commands: keep UX logic out of the kernel
-
----
-
-## Local Development
+### Local Work
 
 Useful commands:
 
@@ -175,13 +157,14 @@ npm run chat:live -- --mode print
 npm run test:live:pi-mono
 ```
 
-Local secrets are intentionally kept out of version control. Copy `.env.example` to `.env.local` and fill `GENESIS_API_KEY` (and optionally endpoint overrides).
+Local secrets stay out of version control. Copy `.env.example` to `.env.local` and fill `GENESIS_API_KEY`.
 
 ---
 
+## Documentation
 
-- High-level package docs: `packages/*/README.md`
-- ADRs and runbooks: `docs/` (work in progress)
+- package-level docs: `packages/*/README.md`
+- ADRs and runbooks: `docs/`
 
 ---
 
@@ -189,16 +172,16 @@ Local secrets are intentionally kept out of version control. Copy `.env.example`
 
 Environment variables:
 
-- `GENESIS_API_KEY`: API key used by OpenAI-compatible providers.
-- `GENESIS_MODEL_PROVIDER`: provider key (e.g. `zai`). TODO: list supported providers.
-- `GENESIS_MODEL_ID`: model id (e.g. `glm-5.1`). TODO: list supported models.
+- `GENESIS_API_KEY`: API key used by OpenAI-compatible providers
+- `GENESIS_MODEL_PROVIDER`: provider key such as `zai`
+- `GENESIS_MODEL_ID`: model id such as `glm-5.1`
 
 CLI flags:
 
-- `--cwd <path>`: set the working directory.
-- `--agent-dir <path>`: set the agent directory (models/auth/session storage).
-- `--mode <interactive|print|json|rpc>`: select runtime mode.
-- `--provider <id>` / `--model <id>`: override the model selection.
-- `--tools <csv>`: override enabled tools.
+- `--cwd <path>`: set the working directory
+- `--agent-dir <path>`: set the agent directory for model and auth assets
+- `--mode <interactive|print|json|rpc>`: select the runtime mode
+- `--provider <id>` / `--model <id>`: override the model selection
+- `--tools <csv>`: override the enabled tool set
 
-TODO: document the complete configuration matrix (agent/project config files, env vars, CLI flags) and their precedence.
+The full configuration matrix and precedence rules remain to be documented.

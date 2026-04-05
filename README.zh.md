@@ -1,30 +1,31 @@
 # Genesis CLI
 
-**一个以分层清晰的 pi-agent 内核为底座，并借鉴 Claude Code 产品层运行时设计的开源 coding CLI。**
+**一个同时借鉴 `pi-mono` 与 Claude Code、并以 `pi-agent-core` 为中心收敛微内核边界的开源代码 CLI。**
 
-[English version](README.md)
+[查看英文版](README.md)
 
 ---
 
-## 它是什么
+## 项目简介
 
-Genesis 面向真实仓库工作（非演示性质示例）：计划、审阅、修改、验证。
+Genesis 面向真实仓库工作：理解代码、规划修改、安全执行、验证结果。
 
-这个项目的核心在于架构组合：
+它组合了两类经验：
 
-- 一个保持小而明确的 **vendored 内核**（pi-agent 血统），与界面形态解耦
-- 一个能快速演进的 **产品层运行时**，把 agent 能力变成可控、可审阅的体验
+- 从 `pi-mono` 借鉴内核边界、会话原语和运行时纪律
+- 从 Claude Code 借鉴产品体验、命令交互、权限确认和工作台式终端体验
 
-Genesis 借鉴了 Claude Code 产品层的关键设计要点，但目标不是照抄代码，而是做成更可维护、边界更清晰、治理更强的版本。
-更细的分层和包结构，放在技术方案文档中说明，而不在项目主页里展开实现细节。
+但它的实现边界比两者都更克制：
+
+- 仓库自己维护 vendored kernel 与产品层 runtime
+- 内核围绕最小化的 `pi-agent-core` 微内核边界构建，而不是直接依赖整套外部 coding-agent 产品栈
+- 权限、工具治理、计划执行、模式渲染等产品语义保留在 Genesis 自己的包内
 
 ---
 
 ## 快速开始
 
-### 体验交互式 TUI
-
-把项目下载到本地并启动交互式 TUI：
+### 交互式命令行
 
 ```bash
 git clone https://github.com/JianyangZhang/genesis-cli.git
@@ -35,39 +36,75 @@ cp .env.example .env.local
 npm run chat:live
 ```
 
-必需条件：
+运行前提：
 
 - Node.js 20.0.0+
-- 你已在 `.env.local` 中设置 `GENESIS_API_KEY`
+- `.env.local` 中已经配置可用的 `GENESIS_API_KEY`
 
 启动成功判定：
 
-- 终端渲染 `Genesis CLI` 欢迎卡片，并出现 `genesis> ` 提示符。
+- 终端出现 `Genesis CLI` 欢迎卡片，并显示 `❯ ` 提示符
 
 快速验证：
 
-- 输入 `/help`，确认命令列表被打印。
-- 退出方式：输入 `/exit`（或 `/quit`）。
+- 输入 `/help`，确认 slash 命令列表出现
+- 输入 `/exit` 或 `/quit` 退出
 
 快捷键与滚动：
 
-- `↑` / `↓`：切换 `genesis> ` 输入框的本地历史。
-- `←` / `→` / `Home` / `End`：在当前输入行内移动光标。
-- 鼠标滚轮 / 触摸板滚动：使用终端自身的 scrollback 浏览历史对话。
-- `PageUp` / `PageDown`：遵循终端自身的 scrollback 行为。
-- Interactive 模式保持在 terminal 主缓冲区中，执行 `/exit` 后仍可继续翻看对话历史。
+- `↑` / `↓`：切换本地输入历史
+- `←` / `→` / `Home` / `End`：在当前输入行内移动光标
+- `Tab`：在有候选时接受第一个 slash 命令提示
+- 鼠标滚轮 / 触摸板：使用终端原生 scrollback 浏览历史对话
+- `PageUp` / `PageDown`：遵循终端原生 scrollback 行为
+- Interactive 模式始终运行在 terminal 主缓冲区中，执行 `/exit` 后仍可翻看历史 transcript
 
-退出流程：
+退出行为：
 
-- `/exit`、`/quit`，或空闲时按 `Ctrl+C`，都会关闭 TUI、恢复鼠标与 raw mode 终端状态，并立即把控制权还给 shell。
-- 当助手正在回复时，`Ctrl+C` 会先中断当前回合，而不是直接退出。
-- 当界面正在等待权限确认时，`Ctrl+C` 会直接拒绝当前权限请求。
+- `/exit`、`/quit` 或空闲时按 `Ctrl+C` 会关闭 TUI 并恢复终端状态
+- 助手流式回复期间按 `Ctrl+C` 会先中断当前回合
+- 权限确认菜单打开时按 `Ctrl+C` 会拒绝当前请求
 
-### 开发者
+---
 
-#### 测试
+## 架构说明
 
-单元测试：
+Genesis 的核心设计是让内核保持小而清晰，同时让产品层可以快速演进。
+
+### 微内核边界
+
+vendored kernel 只负责必须直接掌控的执行面：
+
+- session 生命周期与流式事件主链
+- provider 与 model registry 边界
+- 鉴权存储与内建工具接线
+
+### 产品层运行时
+
+产品层运行时负责把原始 agent 能力整理成稳定的用户契约：
+
+- 标准化 runtime event，而不是把上游 wire format 直接暴露给界面
+- 工具治理，包括权限决策、审计轨迹和变更控制
+- 计划与 subagent 契约，包括路径范围、验证要求和停止条件
+- `Interactive`、`Print`、`JSON`、`RPC` 共享同一套语义主干
+
+---
+
+## 当前能力
+
+- 一套 runtime 同时支撑 `Interactive`、`Print`、`JSON`、`RPC`
+- 对齐 Claude 风格的交互式 TUI 主缓冲区体验
+- 明确的权限确认流程与结构化工具步骤展示
+- 可用于真实联调的 OpenAI-compatible provider 主链
+- 由仓库自己掌控、可持续演进的内核边界
+
+---
+
+## 开发
+
+### 测试
+
+单元测试与 workspace 回归：
 
 ```bash
 npm test
@@ -79,32 +116,24 @@ TUI 定向回归：
 npm run test:tui
 ```
 
-预期：Vitest 输出汇总信息，且进程退出码为 0。
-
 类型检查：
 
 ```bash
 npm run check:types
 ```
 
-预期：进程退出码为 0。
-
-集成测试（需要在 `.env.local` 中配置可用 API key）：
+在线集成测试：
 
 ```bash
 npm run test:live:pi-mono
 ```
 
-预期：Vitest 输出汇总信息，且进程退出码为 0。
-
-代码检查与格式化：
+Lint 与格式检查：
 
 ```bash
 npm run check:lint
 npm run check:format
 ```
-
-预期：进程退出码为 0。
 
 全量检查：
 
@@ -112,59 +141,12 @@ npm run check:format
 npm run check
 ```
 
-预期：进程退出码为 0。
+说明：
 
-测试报告与覆盖率：
+- `test:live:pi-mono` 需要 `.env.local` 中存在可用 API key
+- 当前 Vitest 仅输出结果汇总到标准输出，覆盖率脚本仍待补充
 
-- 报告：Vitest 将结果汇总输出到标准输出。
-- 覆盖率：TODO: 增加 Vitest 覆盖率能力，并提供 `test:coverage` 脚本。
-
----
-## 为什么这种架构有效
-
-Genesis 的组织方式是：内核保持边界明确，产品层快速迭代。
-
-### 1) 边界明确的 Vendored pi-agent 内核
-
-内核能力被保留在本仓库内部（而不是隐藏在外部 SDK 边界后），专注少而关键的原语：
-
-- agent session 生命周期、流式输出与事件发射
-- model/provider registry 与鉴权存储
-- 内建工具与稳定的 session 接口
-
-这样“agent 核心”更可审阅、可测试，也能被多种界面复用。
-
-### 2) 不泄露内核细节的产品层运行时
-
-产品层运行时在内核之上提供稳定契约：
-
-- **标准化 runtime events**（不会把上游/raw 事件直接暴露出去）
-- **工具治理** 作为一等能力：风险分级、权限决策、审计记录、变更队列
-- **计划与 subagent 契约**：路径范围、验证要求、停止条件
-
-不同界面只需要渲染同一套语义，而不是各自重写一套治理逻辑。
-
----
-
-## 你现在能得到什么
-
-- 一条 runtime 主干支撑多种模式：`Interactive` / `Print` / `JSON` / `RPC`
-- 工具执行有明确的权限 gate 与审计轨迹
-- OpenAI-compatible 的主集成路径 + 可扩展的 provider registry
-- 面向 “workbench” 体验的事件流水线（终端是现在，宿主/IDE 是后续形态）
-
----
-
-## 如何扩展
-
-- 新增工具：定义契约、风险分级、权限与审计策略
-- 新增模型/Provider：注册一次，多种界面复用
-- 新增界面：消费标准化事件即可，不需要分叉执行语义
-- 新增产品命令：UX 逻辑留在产品层，不侵入内核
-
----
-
-## 本地开发
+### 本地开发
 
 常用命令：
 
@@ -175,14 +157,14 @@ npm run chat:live -- --mode print
 npm run test:live:pi-mono
 ```
 
-本地密钥默认不进入版本控制。把 `.env.example` 复制为 `.env.local`，并填入 `GENESIS_API_KEY`（端点配置按需覆盖）。
+本地密钥默认不进入版本控制。把 `.env.example` 复制为 `.env.local` 后，填入 `GENESIS_API_KEY` 即可。
 
 ---
 
 ## 文档
 
-- 包级高层说明：`packages/*/README.md`
-- ADR 与 runbook：`docs/`（建设中）
+- 包级说明：`packages/*/README.md`
+- ADR 与 runbook：`docs/`
 
 ---
 
@@ -190,16 +172,16 @@ npm run test:live:pi-mono
 
 环境变量：
 
-- `GENESIS_API_KEY`：OpenAI-compatible provider 使用的 API key。
-- `GENESIS_MODEL_PROVIDER`：provider key（例如 `zai`）。TODO: 补充支持的 provider 列表。
-- `GENESIS_MODEL_ID`：model id（例如 `glm-5.1`）。TODO: 补充支持的 model 列表。
+- `GENESIS_API_KEY`：OpenAI-compatible provider 使用的 API key
+- `GENESIS_MODEL_PROVIDER`：provider 标识，例如 `zai`
+- `GENESIS_MODEL_ID`：model 标识，例如 `glm-5.1`
 
-CLI 参数：
+命令行参数：
 
-- `--cwd <path>`：设置工作目录。
-- `--agent-dir <path>`：设置 agent 目录（models/auth/session 存储）。
-- `--mode <interactive|print|json|rpc>`：选择运行模式。
-- `--provider <id>` / `--model <id>`：覆盖模型选择。
-- `--tools <csv>`：覆盖启用的工具集合。
+- `--cwd <path>`：设置工作目录
+- `--agent-dir <path>`：设置模型与鉴权资产目录
+- `--mode <interactive|print|json|rpc>`：选择运行模式
+- `--provider <id>` / `--model <id>`：覆盖模型选择
+- `--tools <csv>`：覆盖启用的工具集合
 
-TODO: 补齐完整配置矩阵（agent/project 配置文件、环境变量、CLI 参数）及其优先级规则。
+完整配置矩阵与优先级规则仍待补充。
