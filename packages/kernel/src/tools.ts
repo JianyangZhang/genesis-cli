@@ -2,13 +2,18 @@ import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { TSchema } from "@sinclair/typebox";
 import { type Static, Type } from "@sinclair/typebox";
 
 type TextContent = { type: "text"; text: string };
 type KernelToolResult<TDetails = unknown> = { content: TextContent[]; details: TDetails };
 type KernelToolCallback<TDetails = unknown> = (partialResult: KernelToolResult<TDetails>) => void;
 
-export type KernelTool = AgentTool<any, any>;
+export interface KernelTool extends AgentTool<any, any> {
+	readonly name: string;
+	readonly description: string;
+	readonly parameters: TSchema;
+}
 
 const readSchema = Type.Object({
 	path: Type.String({ description: "Path to the file to read." }),

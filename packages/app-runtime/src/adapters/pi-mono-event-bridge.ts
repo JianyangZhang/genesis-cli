@@ -204,14 +204,14 @@ export function bridgePiMonoEvent(event: PiMonoBridgeEvent, state: PiMonoBridgeS
 function extractMessageDelta(
 	event: Extract<PiMonoBridgeEvent, { type: "message_update" }>,
 ): { kind: "text" | "thinking"; content: string } | null {
-	if (event.assistantMessageEvent.type === "text_delta") {
+	if (event.assistantMessageEvent.type === "text_delta" && typeof event.assistantMessageEvent.delta === "string") {
 		return {
 			kind: "text",
 			content: event.assistantMessageEvent.delta,
 		};
 	}
 
-	if (event.assistantMessageEvent.type === "thinking_delta") {
+	if (event.assistantMessageEvent.type === "thinking_delta" && typeof event.assistantMessageEvent.delta === "string") {
 		return {
 			kind: "thinking",
 			content: event.assistantMessageEvent.delta,
