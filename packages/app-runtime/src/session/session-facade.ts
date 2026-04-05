@@ -8,6 +8,7 @@
  * Core principle: raw upstream events are NEVER exposed.
  */
 
+import { createHash } from "node:crypto";
 import type { KernelSessionAdapter, ToolExecutionGateDecision } from "../adapters/kernel-session-adapter.js";
 import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
@@ -79,7 +80,10 @@ export class SessionFacadeImpl implements SessionFacade {
 	private readonly _plan: PlanOrchestrator | null;
 	private readonly _usesAdapterGovernanceHook: boolean;
 	private readonly _stateListeners = new Set<(state: SessionState) => void>();
-	private readonly _pendingPermissions = new Map<string, { toolName: string; riskLevel: string }>();
+	private readonly _pendingPermissions = new Map<
+		string,
+		{ toolName: string; riskLevel: string; targetPath?: string; commandDigest?: string }
+	>();
 	private readonly _bufferedToolExecutions = new Map<
 		string,
 		{ startedEvent: ToolStartedEvent; bufferedEvents: RuntimeEvent[] }
@@ -261,7 +265,8 @@ export class SessionFacadeImpl implements SessionFacade {
 				sessionId: this._state.id.value,
 				toolName: pending.toolName,
 				riskLevel: pending.riskLevel as "L0" | "L1" | "L2" | "L3" | "L4",
-				targetPattern: "*",
+				targetPattern: pending.targetPath ?? "*",
+				commandDigest: pending.commandDigest,
 				verdict: "allow_for_session",
 				grantedAt: Date.now(),
 			});
@@ -305,6 +310,7 @@ export class SessionFacadeImpl implements SessionFacade {
 
 		this._adapter.setToolExecutionGate({
 			beforeToolExecution: ({ toolName, toolCallId, parameters }): ToolExecutionGateDecision => {
+				const targetPath = extractTargetPath(parameters);
 				const decision = this._governor!.beforeExecution({
 					sessionId: this._state.id.value,
 					toolName,
@@ -312,7 +318,7 @@ export class SessionFacadeImpl implements SessionFacade {
 					workingDirectory: this._context.workingDirectory,
 					sessionMode: this._context.mode,
 					isSubAgent: false,
-					targetPath: extractTargetPath(parameters),
+					targetPath,
 					parameters,
 				});
 
@@ -324,6 +330,8 @@ export class SessionFacadeImpl implements SessionFacade {
 					this._pendingPermissions.set(toolCallId, {
 						toolName,
 						riskLevel: decision.riskLevel,
+						targetPath,
+						commandDigest: extractCommandDigest(parameters),
 					});
 				}
 
@@ -395,6 +403,8 @@ export class SessionFacadeImpl implements SessionFacade {
 				this._pendingPermissions.set(normalized.toolCallId, {
 					toolName: normalized.toolName,
 					riskLevel: decision.riskLevel,
+					targetPath,
+					commandDigest: extractCommandDigest(normalized.parameters),
 				});
 				this._bufferedToolExecutions.set(normalized.toolCallId, {
 					startedEvent: normalized,
@@ -524,4 +534,12 @@ function extractTargetPath(parameters: Readonly<Record<string, unknown>> | undef
 	}
 
 	return undefined;
+}
+
+function extractCommandDigest(parameters: Readonly<Record<string, unknown>> | undefined): string | undefined {
+	const command = parameters?.command;
+	if (typeof command !== "string" || command.length === 0) {
+		return undefined;
+	}
+	return `sha256:${createHash("sha256").update(command).digest("hex")}`;
 }

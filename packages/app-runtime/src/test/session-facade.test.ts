@@ -556,6 +556,87 @@ describe("SessionFacade", () => {
 			"tool_denied",
 		]);
 	});
+
+	it("reuses allow_for_session approval for the same bash command within the session", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["bash"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["bash"]),
+		});
+		const governor = createToolGovernor();
+		governor.catalog.register({
+			identity: { name: "bash", category: "command-execution" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L3",
+				readOnly: false,
+				concurrency: "unlimited",
+				confirmation: "always",
+				subAgentAllowed: true,
+				timeoutMs: 60_000,
+			},
+			executorTag: "bash",
+		});
+		adapter.enqueueEventsForPrompt("run bash once", [
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "bash",
+					toolCallId: "bash_pwd_1",
+					parameters: { command: "pwd" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: { toolName: "bash", toolCallId: "bash_pwd_1", status: "success", durationMs: 20 },
+			},
+		]);
+		adapter.enqueueEventsForPrompt("run bash twice", [
+			{
+				type: "tool_execution_start",
+				timestamp: 3000,
+				payload: {
+					toolName: "bash",
+					toolCallId: "bash_pwd_2",
+					parameters: { command: "pwd" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 4000,
+				payload: { toolName: "bash", toolCallId: "bash_pwd_2", status: "success", durationMs: 20 },
+			},
+		]);
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+		const received: RuntimeEvent[] = [];
+		globalBus.onCategory("permission", (event) => received.push(event));
+		globalBus.onCategory("tool", (event) => received.push(event));
+
+		const firstPrompt = facade.prompt("run bash once");
+		await new Promise((r) => setTimeout(r, 0));
+		await facade.resolvePermission("bash_pwd_1", "allow_for_session");
+		await firstPrompt;
+
+		const eventsAfterFirstPrompt = received.length;
+		await facade.prompt("run bash twice");
+
+		expect(received.slice(eventsAfterFirstPrompt).map((event) => event.type)).toEqual([
+			"tool_started",
+			"tool_completed",
+		]);
+	});
 });
 
 // ---------------------------------------------------------------------------

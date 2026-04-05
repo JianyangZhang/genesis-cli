@@ -976,6 +976,10 @@ class InteractiveModeHandler implements ModeHandler {
 			}
 			return;
 		}
+		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
+		if (assistantBlock !== null) {
+			this.rememberTranscriptBlock(assistantBlock, true);
+		}
 		this._assistantBuffer = "";
 		this._streamingReservedRows = 0;
 		if (redrawPrompt) {
@@ -1787,7 +1791,7 @@ export function acceptFirstSlashSuggestion(
 }
 
 export function formatTranscriptUserLine(content: string): string {
-	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.promptFg} ${content} ${INTERACTIVE_THEME.reset}`;
+	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.userTranscriptFg} ${content} ${INTERACTIVE_THEME.reset}`;
 }
 
 export function formatTranscriptAssistantLine(content: string): string {
@@ -1991,6 +1995,13 @@ export function computeVisibleTranscriptLines(
 		return flattened;
 	}
 	return flattened.slice(flattened.length - maxRows);
+}
+
+export function materializeAssistantTranscriptBlock(buffer: string): string | null {
+	if (buffer.length === 0) {
+		return null;
+	}
+	return formatTranscriptAssistantLine(buffer);
 }
 
 export function computeFooterStartRow(

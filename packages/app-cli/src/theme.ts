@@ -9,6 +9,7 @@ export const INTERACTIVE_THEME = {
 	welcomeTitle: "\x1b[38;5;111m",
 	promptBg: "\x1b[48;5;250m",
 	promptFg: "\x1b[38;5;235m",
+	userTranscriptFg: "\x1b[38;5;15m",
 	selectedBg: "\x1b[48;5;111m",
 	selectedFg: "\x1b[38;5;16m",
 	assistantBullet: "\x1b[38;5;111m",
