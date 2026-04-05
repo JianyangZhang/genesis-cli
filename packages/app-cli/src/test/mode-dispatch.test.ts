@@ -28,6 +28,7 @@ import {
 	formatWelcomeCenteredLine,
 	formatWelcomeFilledLine,
 	formatWelcomeTopBorder,
+	materializeAssistantTranscriptBlock,
 	mergeStreamingText,
 	movePermissionSelection,
 	permissionDecisionFromSelection,
@@ -221,6 +222,11 @@ describe("interactive transcript formatting", () => {
 	it("wraps transcript content for streaming redraw", () => {
 		expect(wrapTranscriptContent("abcdef", 3)).toEqual(["abc", "def"]);
 		expect(wrapTranscriptContent("你好吗", 4)).toEqual(["你好", "吗"]);
+	});
+
+	it("materializes the final assistant transcript block before redraw clears the buffer", () => {
+		expect(materializeAssistantTranscriptBlock("hello")).toBe(formatTranscriptAssistantLine("hello"));
+		expect(materializeAssistantTranscriptBlock("")).toBeNull();
 	});
 
 	it("keeps only the visible transcript tail for full-screen redraw", () => {
