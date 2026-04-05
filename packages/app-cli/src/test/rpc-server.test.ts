@@ -53,12 +53,14 @@ function createMockSession(overrides?: Partial<SessionState>): SessionFacade {
 	} as unknown as SessionFacade;
 }
 
-function createMockRuntime(session: SessionFacade): AppRuntime {
+function createMockRuntime(sessionOrFactory: SessionFacade | (() => SessionFacade)): AppRuntime {
+	const create = typeof sessionOrFactory === "function" ? sessionOrFactory : () => sessionOrFactory;
 	return {
-		createSession: () => session,
-		recoverSession: () => session,
+		createSession: () => create(),
+		recoverSession: () => create(),
 		events: {
 			onCategory: () => () => {},
+			onAny: () => () => {},
 			emit: () => {},
 			on: () => () => {},
 			off: () => {},
@@ -259,6 +261,49 @@ describe("RPC server", () => {
 		expect(resp).toBeDefined();
 		const result = resp!.result as unknown[];
 		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("supports multiple sessions and explicit session selection", async () => {
+		const s1 = createMockSession({ id: { value: "s1" } as SessionId });
+		const s2 = createMockSession({ id: { value: "s2" } as SessionId });
+		let n = 0;
+		const multiRuntime = createMockRuntime(() => (n++ === 0 ? s1 : s2));
+
+		const responses = await runRpcTest(multiRuntime, [
+			{ method: RPC_METHODS.SESSION_CREATE, id: 1 },
+			{ method: RPC_METHODS.SESSION_CREATE, id: 2 },
+			{ method: RPC_METHODS.SESSION_LIST, id: 3 },
+			{ method: RPC_METHODS.SESSION_SELECT, id: 4, params: { sessionId: "s1" } },
+			{ method: RPC_METHODS.SESSION_CLOSE, id: 5, params: { sessionId: "s1" } },
+		]);
+
+		const list = responses.find((r) => r.id === 3)?.result as Array<Record<string, unknown>>;
+		expect(list.map((x) => x.sessionId).sort()).toEqual(["s1", "s2"]);
+		expect(responses.find((r) => r.id === 4)?.result).toEqual({ sessionId: "s1", status: "selected" });
+		expect(responses.find((r) => r.id === 5)?.result).toEqual({ sessionId: "s1", status: "closed" });
+	});
+
+	it("routes prompt to the requested sessionId", async () => {
+		const s1 = createMockSession({ id: { value: "s1" } as SessionId });
+		const s2 = createMockSession({ id: { value: "s2" } as SessionId });
+		const prompts: string[] = [];
+		s1.prompt = async () => {
+			prompts.push("s1");
+		};
+		s2.prompt = async () => {
+			prompts.push("s2");
+		};
+		let n = 0;
+		const multiRuntime = createMockRuntime(() => (n++ === 0 ? s1 : s2));
+
+		const responses = await runRpcTest(multiRuntime, [
+			{ method: RPC_METHODS.SESSION_CREATE, id: 1 },
+			{ method: RPC_METHODS.SESSION_CREATE, id: 2 },
+			{ method: RPC_METHODS.SESSION_PROMPT, id: 3, params: { sessionId: "s1", text: "hi" } },
+		]);
+
+		expect(responses.find((r) => r.id === 3)?.result).toEqual({ status: "prompt_sent" });
+		expect(prompts).toEqual(["s1"]);
 	});
 
 	it("returns PARSE_ERROR for invalid JSON", async () => {

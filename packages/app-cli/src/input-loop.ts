@@ -264,6 +264,11 @@ function createRawInputLoop(options: {
 	const close = (): void => {
 		if (closed) return;
 		closed = true;
+		if (pendingResolve) {
+			const resolve = pendingResolve;
+			pendingResolve = null;
+			resolve(null);
+		}
 		try {
 			input.setRawMode?.(false);
 		} catch {}

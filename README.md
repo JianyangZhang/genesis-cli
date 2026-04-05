@@ -47,6 +47,7 @@ Startup success signal:
 Quick verification:
 
 - Type `/help` and confirm the command list is printed.
+- Exit by typing `/exit` (or `/quit`).
 
 ### For Developers
 

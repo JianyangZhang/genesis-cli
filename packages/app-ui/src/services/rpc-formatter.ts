@@ -77,9 +77,13 @@ export const RPC_METHODS = {
 	SESSION_ABORT: "session/abort",
 	SESSION_CLOSE: "session/close",
 	SESSION_LIST: "session/list",
+	SESSION_SELECT: "session/select",
 	PLAN_STATUS: "plan/status",
 	TOOLS_LIST: "tools/list",
 	PERMISSION_RESOLVE: "permission/resolve",
+	EVENTS_SUBSCRIBE: "events/subscribe",
+	EVENTS_UNSUBSCRIBE: "events/unsubscribe",
+	EVENTS_STATUS: "events/status",
 } as const;
 
 /** Standard RPC error codes. */

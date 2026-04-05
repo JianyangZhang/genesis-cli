@@ -123,6 +123,8 @@ class InteractiveModeHandler implements ModeHandler {
 		const accumulator = createLayoutAccumulator(() => sessionRef.current.state);
 		let interactionState: InteractionState = initialInteractionState();
 		let sessionTitle: string | undefined;
+		let exitRequested = false;
+		let inputLoop: InputLoop | null = null;
 		const onResize = (): void => {
 			this._terminalRows = process.stdout.rows ?? 24;
 			this.renderScreenUpdate(accumulator.snapshot());
@@ -241,6 +243,30 @@ class InteractiveModeHandler implements ModeHandler {
 				for (const cmd of all) {
 					ctx.output.writeLine(`  /${cmd.name} — ${cmd.description}`);
 				}
+				return undefined;
+			},
+		});
+
+		register({
+			name: "exit",
+			description: "Exit the interactive session",
+			type: "local",
+			async execute(ctx) {
+				exitRequested = true;
+				ctx.output.writeLine("Bye.");
+				inputLoop?.close();
+				return undefined;
+			},
+		});
+
+		register({
+			name: "quit",
+			description: "Exit the interactive session (alias of /exit)",
+			type: "local",
+			async execute(ctx) {
+				exitRequested = true;
+				ctx.output.writeLine("Bye.");
+				inputLoop?.close();
 				return undefined;
 			},
 		});
@@ -596,7 +622,7 @@ class InteractiveModeHandler implements ModeHandler {
 		attachSession(sessionRef.current);
 
 		// Input loop
-		const inputLoop: InputLoop = createInputLoop({
+		inputLoop = createInputLoop({
 			prompt: "",
 			rawMode: true,
 			onInputStateChange: (state) => {
@@ -646,6 +672,9 @@ class InteractiveModeHandler implements ModeHandler {
 						session: sessionRef.current,
 						output: sink,
 					});
+					if (exitRequested) {
+						break;
+					}
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -820,7 +849,7 @@ class PrintModeHandler implements ModeHandler {
 		const session = runtime.createSession();
 
 		// Subscribe to events and format as text
-		session.events.onCategory("*", (event: RuntimeEvent) => {
+		session.events.onAny((event: RuntimeEvent) => {
 			const text = formatEventAsText(event);
 			if (text.length > 0) {
 				process.stdout.write(`${text}\n`);
@@ -850,13 +879,13 @@ class JsonModeHandler implements ModeHandler {
 		const session = runtime.createSession();
 
 		// Subscribe to events and emit JSON envelopes
-		session.events.onCategory("*", (event: RuntimeEvent) => {
+		session.events.onAny((event: RuntimeEvent) => {
 			const envelope = eventToJsonEnvelope(event);
 			process.stdout.write(`${JSON.stringify(envelope)}\n`);
 		});
 
 		// Also forward global events
-		runtime.events.onCategory("*", (event: RuntimeEvent) => {
+		runtime.events.onAny((event: RuntimeEvent) => {
 			const envelope = eventToJsonEnvelope(event);
 			process.stdout.write(`${JSON.stringify(envelope)}\n`);
 		});

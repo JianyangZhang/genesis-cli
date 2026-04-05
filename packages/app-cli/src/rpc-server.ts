@@ -39,90 +39,148 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 	const input = options.input ?? process.stdin;
 	const output = options.output ?? process.stdout;
 	let running = false;
-	let session: SessionFacade | null = null;
-	let activePrompt: Promise<void> | null = null;
+	const sessions = new Map<string, SessionFacade>();
+	const activePrompts = new Map<string, Promise<void>>();
+	let activeSessionId: string | null = null;
+	let unsubscribeRuntime: (() => void) | null = null;
+	const eventFilters: {
+		all: boolean;
+		sessionIds: Set<string>;
+		categories: Set<string>;
+	} = { all: true, sessionIds: new Set(), categories: new Set() };
 	const PERMISSION_DECISIONS = new Set(["allow", "allow_for_session", "allow_once", "deny"]);
 
 	function send(envelope: RpcEnvelope): void {
 		output.write(`${JSON.stringify(envelope)}\n`);
 	}
 
+	function asParams(value: unknown): Record<string, unknown> | null {
+		if (typeof value !== "object" || value === null) return null;
+		return value as Record<string, unknown>;
+	}
+
+	function getSessionFromParams(params: Record<string, unknown> | null): { session: SessionFacade; sessionId: string } | null {
+		const sid = typeof params?.sessionId === "string" ? params.sessionId : activeSessionId;
+		if (!sid) return null;
+		const session = sessions.get(sid) ?? null;
+		if (!session) return null;
+		return { session, sessionId: sid };
+	}
+
+	function shouldForwardEvent(event: { sessionId: { value: string }; category: string }): boolean {
+		if (eventFilters.all) return true;
+		if (eventFilters.sessionIds.size > 0 && !eventFilters.sessionIds.has(event.sessionId.value)) return false;
+		if (eventFilters.categories.size > 0 && !eventFilters.categories.has(event.category)) return false;
+		return true;
+	}
+
 	async function handleRequest(req: RpcEnvelope, runtime: AppRuntime): Promise<void> {
-		const id = req.id ?? null;
+		const id = typeof req.id === "string" || typeof req.id === "number" ? req.id : req.id === null ? null : null;
+		if (typeof req.method !== "string") {
+			send(createRpcError(id, RPC_ERRORS.INVALID_REQUEST, "Invalid JSON-RPC request"));
+			return;
+		}
+		const params = asParams(req.params);
 
 		switch (req.method) {
 			case RPC_METHODS.SESSION_CREATE: {
-				session = runtime.createSession();
-				activePrompt = null;
-				// Subscribe to all events and forward as notifications
-				session.events.onCategory("*", (event) => {
-					send(eventToRpcNotification(event));
-				});
-				send(createRpcResponse(id ?? 0, { sessionId: session.id.value, status: "created" }));
+				const created = runtime.createSession();
+				sessions.set(created.id.value, created);
+				activeSessionId = created.id.value;
+				send(createRpcResponse(id ?? 0, { sessionId: created.id.value, status: "created" }));
+				break;
+			}
+
+			case RPC_METHODS.SESSION_SELECT: {
+				const target = typeof params?.sessionId === "string" ? params.sessionId : null;
+				if (!target) {
+					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'sessionId' parameter"));
+					break;
+				}
+				if (!sessions.has(target)) {
+					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, `Session not found: ${target}`));
+					break;
+				}
+				activeSessionId = target;
+				send(createRpcResponse(id ?? 0, { sessionId: target, status: "selected" }));
 				break;
 			}
 
 			case RPC_METHODS.SESSION_PROMPT: {
-				if (!session) {
+				const resolved = getSessionFromParams(params);
+				if (!resolved) {
 					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, "No active session"));
 					break;
 				}
-				if (activePrompt) {
+				const { session, sessionId } = resolved;
+				if (activePrompts.has(sessionId)) {
 					send(createRpcError(id, RPC_ERRORS.SESSION_BUSY, "Session is already processing a prompt"));
 					break;
 				}
-				const text = (req.params as Record<string, unknown>)?.text;
+				const text = params?.text;
 				if (typeof text !== "string") {
 					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'text' parameter"));
 					break;
 				}
-				activePrompt = session
+				const runningPrompt = session
 					.prompt(text)
 					.catch(() => {
 						// Prompt failures are surfaced through session events; keep the RPC loop responsive.
 					})
 					.finally(() => {
-						activePrompt = null;
+						activePrompts.delete(sessionId);
 					});
+				activePrompts.set(sessionId, runningPrompt);
 				send(createRpcResponse(id ?? 0, { status: "prompt_sent" }));
 				break;
 			}
 
 			case RPC_METHODS.SESSION_ABORT: {
-				if (!session) {
+				const resolved = getSessionFromParams(params);
+				if (!resolved) {
 					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, "No active session"));
 					break;
 				}
+				const { session } = resolved;
 				session.abort();
 				send(createRpcResponse(id ?? 0, { status: "aborted" }));
 				break;
 			}
 
 			case RPC_METHODS.SESSION_CLOSE: {
-				if (!session) {
+				const resolved = getSessionFromParams(params);
+				if (!resolved) {
 					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, "No active session"));
 					break;
 				}
+				const { session, sessionId } = resolved;
 				await session.close();
-				session = null;
-				activePrompt = null;
-				send(createRpcResponse(id ?? 0, { status: "closed" }));
+				sessions.delete(sessionId);
+				activePrompts.delete(sessionId);
+				if (activeSessionId === sessionId) {
+					activeSessionId = null;
+				}
+				send(createRpcResponse(id ?? 0, { sessionId, status: "closed" }));
 				break;
 			}
 
 			case RPC_METHODS.SESSION_LIST: {
-				// Single-session for now; list the active session if any.
-				const result = session ? [{ sessionId: session.id.value, status: session.state.status }] : [];
+				const result = [...sessions.values()].map((s) => ({
+					sessionId: s.id.value,
+					status: s.state.status,
+					model: s.state.model,
+				}));
 				send(createRpcResponse(id ?? 0, result));
 				break;
 			}
 
 			case RPC_METHODS.PLAN_STATUS: {
-				if (!session?.plan) {
+				const resolved = getSessionFromParams(params);
+				if (!resolved || !resolved.session.plan) {
 					send(createRpcResponse(id ?? 0, { active: false, plan: null }));
 					break;
 				}
-				const summary = session.plan.summarize();
+				const summary = resolved.session.plan.summarize();
 				if (summary) {
 					send(
 						createRpcResponse(id ?? 0, {
@@ -155,19 +213,87 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 			}
 
 			case RPC_METHODS.PERMISSION_RESOLVE: {
-				if (!session) {
+				const resolved = getSessionFromParams(params);
+				if (!resolved) {
 					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, "No active session"));
 					break;
 				}
-				const permParams = req.params as Record<string, unknown> | undefined;
-				const callId = permParams?.callId;
-				const decision = permParams?.decision;
+				const callId = params?.callId;
+				const decision = params?.decision;
 				if (typeof callId !== "string" || typeof decision !== "string" || !PERMISSION_DECISIONS.has(decision)) {
 					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'callId' or 'decision'"));
 					break;
 				}
-				await session.resolvePermission(callId, decision as "allow" | "allow_for_session" | "allow_once" | "deny");
+				await resolved.session.resolvePermission(
+					callId,
+					decision as "allow" | "allow_for_session" | "allow_once" | "deny",
+				);
 				send(createRpcResponse(id ?? 0, { status: "resolved" }));
+				break;
+			}
+
+			case RPC_METHODS.EVENTS_STATUS: {
+				send(
+					createRpcResponse(id ?? 0, {
+						all: eventFilters.all,
+						sessionIds: [...eventFilters.sessionIds],
+						categories: [...eventFilters.categories],
+					}),
+				);
+				break;
+			}
+
+			case RPC_METHODS.EVENTS_SUBSCRIBE: {
+				const sessionIds = params?.sessionIds;
+				const categories = params?.categories;
+				if (sessionIds !== undefined && !Array.isArray(sessionIds)) {
+					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Invalid 'sessionIds' parameter"));
+					break;
+				}
+				if (categories !== undefined && !Array.isArray(categories)) {
+					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Invalid 'categories' parameter"));
+					break;
+				}
+				eventFilters.all = false;
+				if (Array.isArray(sessionIds)) {
+					for (const sid of sessionIds) {
+						if (typeof sid === "string") eventFilters.sessionIds.add(sid);
+					}
+				}
+				if (Array.isArray(categories)) {
+					for (const c of categories) {
+						if (typeof c === "string") eventFilters.categories.add(c);
+					}
+				}
+				send(createRpcResponse(id ?? 0, { status: "subscribed" }));
+				break;
+			}
+
+			case RPC_METHODS.EVENTS_UNSUBSCRIBE: {
+				const sessionIds = params?.sessionIds;
+				const categories = params?.categories;
+				if (sessionIds !== undefined && !Array.isArray(sessionIds)) {
+					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Invalid 'sessionIds' parameter"));
+					break;
+				}
+				if (categories !== undefined && !Array.isArray(categories)) {
+					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Invalid 'categories' parameter"));
+					break;
+				}
+				if (Array.isArray(sessionIds)) {
+					for (const sid of sessionIds) {
+						if (typeof sid === "string") eventFilters.sessionIds.delete(sid);
+					}
+				}
+				if (Array.isArray(categories)) {
+					for (const c of categories) {
+						if (typeof c === "string") eventFilters.categories.delete(c);
+					}
+				}
+				if (eventFilters.sessionIds.size === 0 && eventFilters.categories.size === 0) {
+					eventFilters.all = true;
+				}
+				send(createRpcResponse(id ?? 0, { status: "unsubscribed" }));
 				break;
 			}
 
@@ -183,13 +309,11 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 			running = true;
 			const rl = readline.createInterface({ input: input as NodeJS.ReadableStream });
 
-			// Also forward global runtime events
-			runtime.events.onCategory("*", (event) => {
-				// Only forward global events that aren't session-scoped
-				// (session-scoped events are forwarded by the session listener)
-				if (event.category === "session") {
-					send(eventToRpcNotification(event));
-				}
+			unsubscribeRuntime?.();
+			unsubscribeRuntime = runtime.events.onAny((event) => {
+				if (!running) return;
+				if (!shouldForwardEvent(event)) return;
+				send(eventToRpcNotification(event));
 			});
 
 			for await (const line of rl) {
@@ -206,10 +330,16 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 
 		async stop(): Promise<void> {
 			running = false;
-			if (session) {
-				await session.close();
-				session = null;
+			unsubscribeRuntime?.();
+			unsubscribeRuntime = null;
+			for (const [sid, s] of sessions) {
+				try {
+					await s.close();
+				} catch {}
+				activePrompts.delete(sid);
 			}
+			sessions.clear();
+			activeSessionId = null;
 		},
 	};
 }
