@@ -4,6 +4,7 @@ import {
 	computeFooterCursorColumn,
 	computeFooterCursorRowsFromEnd,
 	computeFooterCursorRowsUp,
+	computeInteractiveEphemeralRows,
 	computeInteractiveFooterSeparatorWidth,
 	computePromptCursorRowsUp,
 	computeSlashSuggestions,
@@ -180,6 +181,21 @@ describe("interactive transcript formatting", () => {
 		expect(computeFooterCursorRowsUp(["· Thinking…", "──────────", "❯ hello", "──────────"], 4, 2, 6)).toBe(7);
 		expect(computeFooterCursorRowsFromEnd(["· Thinking…", "──────────", "❯ hello", "──────────"], 4, 2, 6)).toBe(3);
 		expect(computeFooterCursorColumn(4, 6)).toBe(2);
+		expect(
+			computeInteractiveEphemeralRows(
+				{
+					lines: ["⏺ hello", "world"],
+					renderedWidth: 4,
+				},
+				{
+					block: "──────────\n❯ hi\n──────────",
+					lines: ["──────────", "❯ hi", "──────────"],
+					cursorLineIndex: 1,
+					cursorColumn: 4,
+					renderedWidth: 4,
+				},
+			),
+		).toBe(8);
 	});
 
 	it("merges overlapping streaming chunks without duplicating text", () => {

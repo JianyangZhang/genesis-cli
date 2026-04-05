@@ -79,7 +79,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private _assistantBuffer = "";
-	private _streamRenderLineCount = 0;
+	private _renderedStreaming: InteractiveStreamingRenderResult | null = null;
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
@@ -118,13 +118,13 @@ class InteractiveModeHandler implements ModeHandler {
 		let inputLoop: InputLoop | null = null;
 		const ttySession = createTtySession({
 			onResume: () => {
-				this.renderPermissionUi();
+				this.rerenderInteractiveRegions();
 			},
 			useAlternateScreen: false,
 			enableMouseTracking: false,
 		});
 		const onResize = (): void => {
-			this.renderPermissionUi();
+			this.rerenderInteractiveRegions();
 		};
 		process.stdout.on("resize", onResize);
 
@@ -145,7 +145,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._lastError = null;
 			this._changedPaths.clear();
 			this._assistantBuffer = "";
-			this._streamRenderLineCount = 0;
+			this._renderedStreaming = null;
 			this._turnNotice = null;
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
@@ -803,7 +803,7 @@ class InteractiveModeHandler implements ModeHandler {
 			onTerminalEvent: (event) => {
 				if (event === "focusin") {
 					ttySession.refresh();
-					this.renderPermissionUi();
+					this.rerenderInteractiveRegions();
 				}
 			},
 		});
@@ -1004,7 +1004,7 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this._assistantBuffer = "";
-		this._streamRenderLineCount = 0;
+		this._renderedStreaming = null;
 		if (redrawPrompt) {
 			this.renderPromptLine();
 		}
@@ -1021,21 +1021,19 @@ class InteractiveModeHandler implements ModeHandler {
 	private renderStreamingAssistantBlock(): void {
 		const rendered = formatTranscriptAssistantLine(this._assistantBuffer);
 		const lines = wrapTranscriptContent(rendered, process.stdout.columns ?? 80);
-		const linesUp = this._streamRenderLineCount + (this._renderedFooterUi !== null ? 1 : 0);
-		process.stdout.write("\r");
-		if (linesUp > 0) {
-			process.stdout.write(ansiMoveUp(linesUp));
-		}
-		process.stdout.write(ansiClearBelow());
+		this.clearInteractiveEphemeralUi();
 		process.stdout.write(lines.join("\n"));
 		process.stdout.write("\n");
-		this._streamRenderLineCount = lines.length;
-		this.renderPromptLine();
+		this._renderedStreaming = {
+			lines,
+			renderedWidth: Math.max(1, process.stdout.columns ?? 80),
+		};
+		this.writeFooterUi(this.buildFooterUi());
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
-		if (this._renderedFooterUi !== null) {
-			this.clearFooterUi();
+		if (this._renderedFooterUi !== null || this._renderedStreaming !== null) {
+			this.clearInteractiveEphemeralUi();
 		} else {
 			process.stdout.write(ansiClearLine());
 		}
@@ -1130,13 +1128,12 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private clearFooterUi(): void {
-		const width = Math.max(1, process.stdout.columns ?? 80);
 		const rowsUp =
 			this._renderedFooterUi === null
 				? 0
 				: computeFooterCursorRowsUp(
 						this._renderedFooterUi.lines,
-						width,
+						this._renderedFooterUi.renderedWidth,
 						this._renderedFooterUi.cursorLineIndex,
 						this._renderedFooterUi.cursorColumn,
 					);
@@ -1145,6 +1142,25 @@ class InteractiveModeHandler implements ModeHandler {
 			process.stdout.write(ansiClearBelow());
 		}
 		this._renderedFooterUi = null;
+	}
+
+	private clearInteractiveEphemeralUi(): void {
+		const rowsUp = computeInteractiveEphemeralRows(this._renderedStreaming, this._renderedFooterUi);
+		if (rowsUp > 0) {
+			process.stdout.write("\r");
+			process.stdout.write(ansiMoveUp(rowsUp));
+			process.stdout.write(ansiClearBelow());
+		}
+		this._renderedFooterUi = null;
+		this._renderedStreaming = null;
+	}
+
+	private rerenderInteractiveRegions(): void {
+		if (this._assistantBuffer.length > 0) {
+			this.renderStreamingAssistantBlock();
+			return;
+		}
+		this.renderPromptLine();
 	}
 }
 
@@ -1340,6 +1356,12 @@ export interface InteractiveFooterRenderResult {
 	readonly lines: readonly string[];
 	readonly cursorLineIndex: number;
 	readonly cursorColumn: number;
+	readonly renderedWidth: number;
+}
+
+export interface InteractiveStreamingRenderResult {
+	readonly lines: readonly string[];
+	readonly renderedWidth: number;
 }
 
 export function formatInteractiveFooter(state: {
@@ -1375,6 +1397,7 @@ export function formatInteractiveFooter(state: {
 			lines,
 			cursorLineIndex: lines.length - 2,
 			cursorColumn: computePromptCursorColumn(prompt, state.buffer, state.cursor),
+			renderedWidth: Math.max(1, state.terminalWidth),
 		};
 	}
 	const hint = formatSlashSuggestionHint(
@@ -1388,6 +1411,7 @@ export function formatInteractiveFooter(state: {
 		lines,
 		cursorLineIndex: lines.length - 2,
 		cursorColumn: computePromptCursorColumn(state.prompt, state.buffer, state.cursor),
+		renderedWidth: Math.max(1, state.terminalWidth),
 	};
 }
 
@@ -1696,6 +1720,18 @@ export function computeFooterCursorRowsFromEnd(
 	const totalRows = countRenderedTerminalRows(lines, width);
 	const rowsUp = computeFooterCursorRowsUp(lines, width, cursorLineIndex, cursorColumn);
 	return Math.max(0, totalRows - rowsUp - 1);
+}
+
+export function computeInteractiveEphemeralRows(
+	streaming: InteractiveStreamingRenderResult | null,
+	footer: InteractiveFooterRenderResult | null,
+): number {
+	const footerRowsUp =
+		footer === null
+			? 0
+			: computeFooterCursorRowsUp(footer.lines, footer.renderedWidth, footer.cursorLineIndex, footer.cursorColumn);
+	const streamingRows = streaming === null ? 0 : countRenderedTerminalRows(streaming.lines, streaming.renderedWidth);
+	return footerRowsUp + streamingRows;
 }
 
 export function formatTurnNotice(kind: "thinking" | "responding"): string {
