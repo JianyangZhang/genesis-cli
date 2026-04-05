@@ -1,11 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { formatTranscriptSpeakerLine } from "../mode-dispatch.js";
+import {
+	formatTranscriptAssistantLine,
+	formatTranscriptUserLine,
+	shouldRenderInteractiveTranscriptEvent,
+} from "../mode-dispatch.js";
 
-describe("formatTranscriptSpeakerLine", () => {
-	it("formats a transcript entry with timestamp and author", () => {
-		const line = formatTranscriptSpeakerLine("Assistant", "Hello", 1000);
-		expect(line).toContain("Assistant");
+describe("interactive transcript formatting", () => {
+	it("formats user lines as a compact highlighted block", () => {
+		const line = formatTranscriptUserLine("Hello");
 		expect(line).toContain("Hello");
-		expect(line).toMatch(/^\d{2}:\d{2}:\d{2} Assistant Hello$/);
+		expect(line).toContain("\x1b[48;5;238m");
+	});
+
+	it("formats assistant lines without author prefixes", () => {
+		expect(formatTranscriptAssistantLine("Hello")).toBe("Hello");
+	});
+
+	it("suppresses session lifecycle events", () => {
+		expect(
+			shouldRenderInteractiveTranscriptEvent({
+				id: "evt-1",
+				category: "session",
+				type: "session_created",
+				timestamp: Date.now(),
+				sessionId: { value: "s1" },
+				model: {
+					id: "glm-5.1",
+					displayName: "GLM 5.1",
+					provider: "zhipu",
+				},
+				toolSet: [],
+			}),
+		).toBe(false);
 	});
 });

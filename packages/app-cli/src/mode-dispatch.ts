@@ -78,7 +78,6 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private _assistantBuffer = "";
-	private _assistantTimestamp: number | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -138,7 +137,6 @@ class InteractiveModeHandler implements ModeHandler {
 			this._lastError = null;
 			this._changedPaths.clear();
 			this._assistantBuffer = "";
-			this._assistantTimestamp = null;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -829,7 +827,7 @@ class InteractiveModeHandler implements ModeHandler {
 					continue;
 				}
 				this.flushAssistantBuffer(false);
-				this.writeTranscriptText(formatTranscriptSpeakerLine(process.env.USER ?? "You", trimmed, Date.now()), true);
+				this.writeTranscriptText(formatTranscriptUserLine(trimmed), true);
 				this.rememberHistory(trimmed);
 				this._activeTurn = sessionRef.current
 					.prompt(trimmed)
@@ -886,13 +884,15 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("\n");
 		process.stdout.write(fill());
 		process.stdout.write("\n");
-		process.stdout.write(center(`${GREEN}▗ ▗   ▖ ▖${RESET}`));
+		process.stdout.write(center(`${GREEN}███████${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(fill());
+		process.stdout.write(center(`${GREEN}   ▄▄  ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${GREEN}▘▘ ▝▝${RESET}`));
+		process.stdout.write(center(`${GREEN}  ▄▀   ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(fill());
+		process.stdout.write(center(`${GREEN} ▄▀▄▄▄ ${RESET}`));
+		process.stdout.write("\n");
+		process.stdout.write(center(`${GREEN} ▀▀▀▀▀ ${RESET}`));
 		process.stdout.write("\n");
 		process.stdout.write(center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`));
 		process.stdout.write("\n");
@@ -931,10 +931,11 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private handleTranscriptEvent(event: RuntimeEvent): void {
+		if (!shouldRenderInteractiveTranscriptEvent(event)) {
+			this.renderPromptLine();
+			return;
+		}
 		if (event.category === "text" && event.type === "text_delta") {
-			if (this._assistantBuffer.length === 0) {
-				this._assistantTimestamp = event.timestamp;
-			}
 			this._assistantBuffer += event.content;
 			return;
 		}
@@ -954,13 +955,8 @@ class InteractiveModeHandler implements ModeHandler {
 			}
 			return;
 		}
-		const text = formatTranscriptSpeakerLine(
-			"Assistant",
-			this._assistantBuffer,
-			this._assistantTimestamp ?? Date.now(),
-		);
+		const text = formatTranscriptAssistantLine(this._assistantBuffer);
 		this._assistantBuffer = "";
-		this._assistantTimestamp = null;
 		this.writeTranscriptText(text, true, redrawPrompt);
 	}
 
@@ -1114,14 +1110,20 @@ export function computePromptCursorColumn(prompt: string, buffer: string, cursor
 	return measureTerminalDisplayWidth(prompt) + measureTerminalDisplayWidth(buffer.slice(0, cursor));
 }
 
-export function formatTranscriptSpeakerLine(author: string, content: string, timestamp: number): string {
-	return `${formatTranscriptTimestamp(timestamp)} ${author} ${content}`;
+export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boolean {
+	if (event.category === "session") {
+		return false;
+	}
+	return true;
 }
 
-function formatTranscriptTimestamp(timestamp: number): string {
-	const date = new Date(timestamp);
-	const hours = `${date.getHours()}`.padStart(2, "0");
-	const minutes = `${date.getMinutes()}`.padStart(2, "0");
-	const seconds = `${date.getSeconds()}`.padStart(2, "0");
-	return `${hours}:${minutes}:${seconds}`;
+export function formatTranscriptUserLine(content: string): string {
+	const BG = "\x1b[48;5;238m";
+	const FG = "\x1b[97m";
+	const RESET = "\x1b[0m";
+	return `${BG}${FG} ${content} ${RESET}`;
+}
+
+export function formatTranscriptAssistantLine(content: string): string {
+	return content;
 }
