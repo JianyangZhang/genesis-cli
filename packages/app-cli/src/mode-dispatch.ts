@@ -12,6 +12,7 @@ import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFaca
 import type { InteractionState, OutputSink, SlashCommand } from "@genesis-cli/ui";
 import {
 	ansiClearLine,
+	ansiCursorHome,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createSlashCommandRegistry,
@@ -75,8 +76,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private _suppressPersistOnce = false;
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
+	private readonly _transcriptBlocks: string[] = [];
 	private _assistantBuffer = "";
-	private _renderedStreaming: InteractiveStreamingRenderResult | null = null;
 	private _streamingReservedRows = 0;
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
@@ -84,6 +85,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _queuedInputs: string[] = [];
 	private _pendingPermissionSelection = 0;
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
+	private _welcomeLines: readonly string[] = [];
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -142,8 +144,8 @@ class InteractiveModeHandler implements ModeHandler {
 			this._historyIndex = null;
 			this._lastError = null;
 			this._changedPaths.clear();
+			this._transcriptBlocks.length = 0;
 			this._assistantBuffer = "";
-			this._renderedStreaming = null;
 			this._streamingReservedRows = 0;
 			this._turnNotice = null;
 			this._commandSuggestions = [];
@@ -879,41 +881,8 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderWelcome(session: SessionFacade): void {
-		const width = Math.max(60, Math.min(process.stdout.columns ?? 80, 100));
-		const DIM = INTERACTIVE_THEME.muted;
-		const RESET = INTERACTIVE_THEME.reset;
-		const GREEN = INTERACTIVE_THEME.success;
-		const CYAN = INTERACTIVE_THEME.brand;
-		const BOLD = INTERACTIVE_THEME.bold;
-		const model = session.state.model.displayName ?? session.state.model.id;
-		const provider = session.state.model.provider;
-		const version = process.env.npm_package_version ?? "dev";
-		const contentWidth = width - 2;
-		const center = (text: string): string => formatWelcomeCenteredLine(contentWidth, text);
-		const fill = (text = ""): string => formatWelcomeFilledLine(contentWidth, text);
-		process.stdout.write(formatWelcomeTopBorder(width, version));
-		process.stdout.write("\n");
-		process.stdout.write(fill());
-		process.stdout.write("\n");
-		process.stdout.write(center(`${BOLD}Welcome back!${RESET}`));
-		process.stdout.write("\n");
-		process.stdout.write(fill());
-		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}        ${GREEN}✦${RESET}        ${RESET}`));
-		process.stdout.write("\n");
-		process.stdout.write(center(`${CYAN}      ──╂──      ${RESET}`));
-		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}        ${CYAN}│${RESET}        ${RESET}`));
-		process.stdout.write("\n");
-		process.stdout.write(fill());
-		process.stdout.write("\n");
-		process.stdout.write(center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`));
-		process.stdout.write("\n");
-		process.stdout.write(formatWelcomeBottomBorder(width));
-		process.stdout.write("\n");
-		process.stdout.write(
-			`${DIM}Start:${RESET} type a prompt and press Enter  ${DIM}Help:${RESET} /help  ${DIM}Scroll:${RESET} wheel/PageUp/PageDown\n`,
-		);
+		this._welcomeLines = buildWelcomeLines(session, process.stdout.columns ?? 80);
+		process.stdout.write(`${this._welcomeLines.join("\n")}\n`);
 	}
 
 	private renderPromptLine(): void {
@@ -1001,7 +970,6 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this._assistantBuffer = "";
-		this._renderedStreaming = null;
 		this._streamingReservedRows = 0;
 		if (redrawPrompt) {
 			this.renderPromptLine();
@@ -1026,17 +994,12 @@ class InteractiveModeHandler implements ModeHandler {
 		const startRow = this.transcriptBottomRow() - this._streamingReservedRows + 1;
 		this.clearTranscriptRows(startRow, this.transcriptBottomRow());
 		this.writeLinesAtRow(startRow, lines, renderedWidth);
-		this._renderedStreaming = {
-			lines,
-			renderedWidth,
-			startRow,
-			reservedRows: this._streamingReservedRows,
-		};
 		this.renderFooterRegion();
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
 		this.flushAssistantBuffer(false);
+		this.rememberTranscriptBlock(text, newline);
 		const logicalLines = text.split("\n");
 		const outputLines = newline ? logicalLines : logicalLines.slice(0, -1).concat(logicalLines.at(-1) ?? "");
 		if (outputLines.length > 0) {
@@ -1112,10 +1075,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private rerenderInteractiveRegions(): void {
-		this.renderFooterRegion();
-		if (this._renderedStreaming !== null || this._assistantBuffer.length > 0) {
-			this.renderStreamingAssistantBlock();
-		}
+		this.fullRedrawInteractiveScreen();
 	}
 
 	private terminalWidth(): number {
@@ -1207,6 +1167,43 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write(ansiClearLine());
 		process.stdout.write(line);
 		process.stdout.write(ansiEnableAutoWrap());
+	}
+
+	private rememberTranscriptBlock(text: string, newline: boolean): void {
+		const block = newline ? text : text.replace(/\n$/, "");
+		if (block.length === 0) {
+			return;
+		}
+		this._transcriptBlocks.push(block);
+	}
+
+	private fullRedrawInteractiveScreen(): void {
+		if (this._welcomeLines.length === 0) {
+			return;
+		}
+		process.stdout.write(ansiResetScrollRegion());
+		process.stdout.write(ansiCursorHome());
+		process.stdout.write("\x1b[2J");
+		process.stdout.write(`${this._welcomeLines.join("\n")}\n`);
+		this._renderedFooterUi = null;
+		this._streamingReservedRows = 0;
+		this.renderTranscriptViewport();
+		this.renderFooterRegion();
+		if (this._assistantBuffer.length > 0) {
+			this.renderStreamingAssistantBlock();
+		}
+	}
+
+	private renderTranscriptViewport(): void {
+		const footerUi = this.buildFooterUi();
+		const transcriptTopRow = this._welcomeLines.length + 1;
+		const transcriptBottomRow = this.transcriptBottomRow(footerUi.lines.length);
+		const availableRows = Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
+		const visibleLines = computeVisibleTranscriptLines(this._transcriptBlocks, this.terminalWidth(), availableRows);
+		for (let row = transcriptTopRow; row <= transcriptBottomRow; row += 1) {
+			const index = row - transcriptTopRow;
+			this.writeAbsoluteTerminalLine(row, fitTerminalLine(visibleLines[index] ?? "", this.terminalWidth()));
+		}
 	}
 }
 
@@ -1323,6 +1320,34 @@ function runGit(
 
 function stripAnsiWelcome(text: string): string {
 	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+}
+
+function buildWelcomeLines(session: SessionFacade, terminalWidth: number): readonly string[] {
+	const width = Math.max(60, Math.min(terminalWidth, 100));
+	const DIM = INTERACTIVE_THEME.muted;
+	const RESET = INTERACTIVE_THEME.reset;
+	const GREEN = INTERACTIVE_THEME.success;
+	const CYAN = INTERACTIVE_THEME.brand;
+	const BOLD = INTERACTIVE_THEME.bold;
+	const model = session.state.model.displayName ?? session.state.model.id;
+	const provider = session.state.model.provider;
+	const version = process.env.npm_package_version ?? "dev";
+	const contentWidth = width - 2;
+	const center = (text: string): string => formatWelcomeCenteredLine(contentWidth, text);
+	const fill = (text = ""): string => formatWelcomeFilledLine(contentWidth, text);
+	return [
+		formatWelcomeTopBorder(width, version),
+		fill(),
+		center(`${BOLD}Welcome back!${RESET}`),
+		fill(),
+		center(`${DIM}        ${GREEN}✦${RESET}        ${RESET}`),
+		center(`${CYAN}      ──╂──      ${RESET}`),
+		center(`${DIM}        ${CYAN}│${RESET}        ${RESET}`),
+		fill(),
+		center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`),
+		formatWelcomeBottomBorder(width),
+		`${DIM}Start:${RESET} type a prompt and press Enter  ${DIM}Help:${RESET} /help  ${DIM}Scroll:${RESET} wheel/PageUp/PageDown`,
+	];
 }
 
 export function formatWelcomeTopBorder(width: number, version: string): string {
@@ -1888,4 +1913,24 @@ export function wrapTranscriptContent(content: string, width: number): readonly 
 	}
 	lines.push(current);
 	return lines;
+}
+
+export function computeVisibleTranscriptLines(
+	blocks: readonly string[],
+	width: number,
+	maxRows: number,
+): readonly string[] {
+	if (maxRows <= 0 || blocks.length === 0) {
+		return [];
+	}
+	const flattened: string[] = [];
+	for (const block of blocks) {
+		for (const logicalLine of block.split("\n")) {
+			flattened.push(...wrapTranscriptContent(logicalLine, width));
+		}
+	}
+	if (flattened.length <= maxRows) {
+		return flattened;
+	}
+	return flattened.slice(flattened.length - maxRows);
 }
