@@ -22,6 +22,12 @@ import {
 	safeParseJson,
 } from "./shared.js";
 
+// TODO(genesis-product): keep this provider as a compatibility placeholder with
+// clear comments and basic tests only. The current product milestone is to
+// harden the OpenAI-compatible chain for BigModel Coding PaaS v4 first, so
+// Anthropic-specific feature work is intentionally paused unless required to
+// preserve build health or shared abstractions.
+
 type KernelAnthropicToolChoice = "auto" | "any" | "none" | { type: "tool"; name: string };
 
 type KernelAnthropicStreamOptions = SimpleStreamOptions & {

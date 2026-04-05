@@ -25,6 +25,11 @@ const builtinProviderHandlers = new Map<string, KernelProviderHandler>([
 	],
 	[
 		"anthropic-messages",
+		// TODO(genesis-product): Anthropic-compatible path is intentionally kept as
+		// a parked compatibility branch for now. Product hardening should focus on
+		// the OpenAI-compatible mainline against BigModel Coding PaaS v4 first.
+		// Do not expand Anthropic-specific behavior unless the OpenAI mainline and
+		// user-facing product layer milestones are already stable.
 		(model, context, options) =>
 			streamAnthropicMessages(
 				model as Model<"anthropic-messages">,
