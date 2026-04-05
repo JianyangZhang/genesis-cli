@@ -89,9 +89,6 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _changedPaths = new Set<string>();
 	private readonly _transcriptBlocks: string[] = [];
 	private _assistantBuffer = "";
-	private _streamingReservedRows = 0;
-	private _streamingDisplayRows = 0;
-	private _renderedStreamingStartRow: number | null = null;
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
@@ -145,7 +142,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this.rerenderInteractiveRegions();
 			},
 			useAlternateScreen: true,
-			enableMouseTracking: false,
+			enableMouseTracking: true,
 		});
 		const debouncedResizeRedraw = createDebouncedCallback(() => {
 			this.rerenderInteractiveRegions();
@@ -173,9 +170,6 @@ class InteractiveModeHandler implements ModeHandler {
 			this._changedPaths.clear();
 			this._transcriptBlocks.length = 0;
 			this._assistantBuffer = "";
-			this._streamingReservedRows = 0;
-			this._streamingDisplayRows = 0;
-			this._renderedStreamingStartRow = null;
 			this.stopTurnNoticeAnimation();
 			this._turnNotice = null;
 			this._turnNoticeAnimationFrame = 0;
@@ -1022,7 +1016,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this.startTurnNoticeAnimation();
 			}
 			this._assistantBuffer = mergeStreamingText(this._assistantBuffer, event.content);
-			this.renderStreamingAssistantBlock();
+			this.fullRedrawInteractiveScreen();
 			return;
 		}
 		this.flushAssistantBuffer(false);
@@ -1046,9 +1040,6 @@ class InteractiveModeHandler implements ModeHandler {
 			this.rememberAssistantTranscriptBlock(assistantBlock);
 		}
 		this._assistantBuffer = "";
-		this._streamingReservedRows = 0;
-		this._streamingDisplayRows = 0;
-		this._renderedStreamingStartRow = null;
 		if (redrawPrompt) {
 			this.renderPromptLine();
 		}
@@ -1084,41 +1075,6 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		clearInterval(this._turnNoticeTimer);
 		this._turnNoticeTimer = null;
-	}
-
-	private renderStreamingAssistantBlock(): void {
-		const rendered = formatTranscriptAssistantLine(this._assistantBuffer);
-		const lines = wrapTranscriptContent(rendered, process.stdout.columns ?? 80);
-		const renderedWidth = this.terminalWidth();
-		const rows = countRenderedTerminalRows(lines, renderedWidth);
-		const previousStartRow = this._renderedStreamingStartRow;
-		const previousRows = this._streamingReservedRows;
-		this._streamingDisplayRows = rows;
-		this.renderFooterRegion();
-		const footerStartRow =
-			this._renderedFooterStartRow ??
-			computeFooterStartRow(
-				this._welcomeLines.length,
-				this.terminalHeight(),
-				this.currentFooterHeight(),
-				this.currentTranscriptDisplayRows(),
-			);
-		if (isFooterBottomAnchored(footerStartRow, this.terminalHeight(), this.currentFooterHeight())) {
-			this.reserveStreamingRows(rows);
-		} else {
-			this._streamingReservedRows = rows;
-		}
-		const startRow = footerStartRow - rows;
-		const transcriptBottomRow = footerStartRow - 1;
-		const clearStartRow = previousStartRow === null ? startRow : Math.min(startRow, previousStartRow);
-		const clearEndRow =
-			previousStartRow === null
-				? transcriptBottomRow
-				: Math.max(transcriptBottomRow, previousStartRow + previousRows - 1);
-		this.clearTranscriptRows(clearStartRow, clearEndRow);
-		this.writeLinesAtRow(startRow, lines, renderedWidth);
-		this._renderedStreamingStartRow = startRow;
-		this.renderFooterRegion();
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
@@ -1272,6 +1228,7 @@ class InteractiveModeHandler implements ModeHandler {
 			lastTurnUsage: this._lastTurnUsage,
 			sessionUsage: this._sessionUsageTotals,
 			activeToolLabel,
+			showPendingOutputIndicator: this.shouldShowPendingOutputIndicator(activeToolLabel),
 			detailPanelExpanded: this._detailPanelExpanded,
 			detailPanelLines: detailPanel.lines,
 			detailPanelSummary: detailPanel.summary,
@@ -1291,6 +1248,21 @@ class InteractiveModeHandler implements ModeHandler {
 			return [];
 		}
 		return wrapTranscriptContent(this._thinkingBuffer.trim(), this.terminalWidth());
+	}
+
+	private shouldShowPendingOutputIndicator(activeToolLabel: string | null): boolean {
+		if (this._assistantBuffer.length > 0) {
+			return true;
+		}
+		if (activeToolLabel === null) {
+			return false;
+		}
+		const lastNonEmptyIndex = findLastNonEmptyBlockIndex(this._transcriptBlocks);
+		if (lastNonEmptyIndex === -1) {
+			return false;
+		}
+		const lastBlock = this._transcriptBlocks[lastNonEmptyIndex] ?? "";
+		return !isTranscriptUserBlock(lastBlock) && !lastBlock.startsWith("⏺ ") && !lastBlock.startsWith("  ⎿ ");
 	}
 
 	private currentDetailPanelViewport(): {
@@ -1380,6 +1352,7 @@ class InteractiveModeHandler implements ModeHandler {
 		);
 		const oldStartRow = this._renderedFooterStartRow;
 		const oldHeight = this._renderedFooterUi?.lines.length ?? 0;
+		const footerMoved = oldStartRow !== null && oldStartRow !== startRow;
 		if (oldStartRow !== null && oldStartRow !== startRow) {
 			for (let index = 0; index < oldHeight; index += 1) {
 				this.writeAbsoluteTerminalLine(oldStartRow + index, "");
@@ -1405,6 +1378,9 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write(ansiShowCursor());
 		this._renderedFooterUi = { ...ui, renderedWidth: this.terminalWidth() };
 		this._renderedFooterStartRow = startRow;
+		if (footerMoved) {
+			this.renderTranscriptViewport();
+		}
 	}
 
 	private applyTranscriptViewport(footerHeight: number): void {
@@ -1416,30 +1392,6 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this.fullRedrawInteractiveScreen();
-	}
-
-	private reserveStreamingRows(rows: number): void {
-		if (rows <= this._streamingReservedRows) {
-			return;
-		}
-		this.applyTranscriptViewport(this.currentFooterHeight());
-		for (let index = this._streamingReservedRows; index < rows; index += 1) {
-			process.stdout.write(ansiCursorTo(this.transcriptBottomRow(), 1));
-			process.stdout.write("\n");
-		}
-		this._streamingReservedRows = rows;
-	}
-
-	private clearTranscriptRows(startRow: number, endRow: number): void {
-		for (let row = startRow; row <= endRow; row += 1) {
-			this.writeAbsoluteTerminalLine(row, "");
-		}
-	}
-
-	private writeLinesAtRow(startRow: number, lines: readonly string[], width: number): void {
-		for (let index = 0; index < lines.length; index += 1) {
-			this.writeAbsoluteTerminalLine(startRow + index, fitTerminalLine(lines[index] ?? "", width));
-		}
 	}
 
 	private writeAbsoluteTerminalLine(row: number, line: string): void {
@@ -1487,20 +1439,8 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		this._renderedFooterUi = null;
 		this._renderedFooterStartRow = null;
-		this._streamingReservedRows = 0;
-		this._renderedStreamingStartRow = null;
-		this._streamingDisplayRows =
-			this._assistantBuffer.length > 0
-				? countRenderedTerminalRows(
-						wrapTranscriptContent(formatTranscriptAssistantLine(this._assistantBuffer), this.terminalWidth()),
-						this.terminalWidth(),
-					)
-				: 0;
 		this.renderTranscriptViewport();
 		this.renderFooterRegion();
-		if (this._assistantBuffer.length > 0) {
-			this.renderStreamingAssistantBlock();
-		}
 	}
 
 	private renderTranscriptViewport(): void {
@@ -1514,7 +1454,11 @@ class InteractiveModeHandler implements ModeHandler {
 				this.currentTranscriptDisplayRows(),
 			) - 1;
 		const availableRows = Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
-		const visibleLines = computeVisibleTranscriptLines(this._transcriptBlocks, this.terminalWidth(), availableRows);
+		const visibleLines = computeVisibleTranscriptLines(
+			this.currentRenderedTranscriptBlocks(),
+			this.terminalWidth(),
+			availableRows,
+		);
 		for (let row = transcriptTopRow; row <= transcriptBottomRow; row += 1) {
 			const index = row - transcriptTopRow;
 			this.writeAbsoluteTerminalLine(row, fitTerminalLine(visibleLines[index] ?? "", this.terminalWidth()));
@@ -1522,7 +1466,18 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentTranscriptDisplayRows(): number {
-		return computeTranscriptDisplayRows(this._transcriptBlocks, this.terminalWidth()) + this._streamingDisplayRows;
+		return computeTranscriptDisplayRows(this.currentRenderedTranscriptBlocks(), this.terminalWidth());
+	}
+
+	private currentRenderedTranscriptBlocks(): readonly string[] {
+		if (this._assistantBuffer.length === 0) {
+			return this._transcriptBlocks;
+		}
+		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
+		if (assistantBlock === null) {
+			return this._transcriptBlocks;
+		}
+		return appendAssistantTranscriptBlock(this._transcriptBlocks, assistantBlock);
 	}
 }
 
@@ -1647,9 +1602,9 @@ function applyWelcomeBorderColor(text: string): string {
 
 function buildWelcomeHintLine(width: number): string {
 	if (width < 64) {
-		return "Start: Enter  Help: /help  Scroll: arrows";
+		return "Start: Enter  Help: /help  Exit: /exit";
 	}
-	return "Start: type a prompt and press Enter  Help: /help  Scroll: arrows";
+	return "Start: type a prompt and press Enter  Help: /help  Exit: /exit";
 }
 
 export const WELCOME_BIBLE_GREETINGS = [
@@ -1697,6 +1652,7 @@ export function buildWelcomeLines(input: {
 		center(`${CYAN}${input.model}${RESET} ${DIM}via${RESET} ${input.provider}`),
 		formatWelcomeBottomBorder(width),
 		buildWelcomeHintLine(width),
+		"",
 	];
 }
 
@@ -1800,6 +1756,7 @@ export function formatInteractiveFooter(state: {
 	readonly lastTurnUsage?: UsageSnapshot | null;
 	readonly sessionUsage?: UsageSnapshot | null;
 	readonly activeToolLabel?: string | null;
+	readonly showPendingOutputIndicator?: boolean;
 	readonly detailPanelExpanded?: boolean;
 	readonly detailPanelSummary?: string | null;
 	readonly detailPanelLines?: readonly string[];
@@ -1822,6 +1779,7 @@ export function formatInteractiveFooter(state: {
 				animationFrame: state.turnNoticeAnimationFrame ?? 0,
 				elapsedMs: state.elapsedMs ?? null,
 				usage: state.currentTurnUsage ?? null,
+				showPendingOutputIndicator: state.showPendingOutputIndicator ?? false,
 				queuedCount: state.queuedInputs?.length ?? 0,
 				toolLabel: state.activeToolLabel ?? null,
 			}),
@@ -2324,6 +2282,7 @@ export function formatTurnNotice(
 		readonly animationFrame?: number;
 		readonly queuedCount?: number;
 		readonly usage?: UsageSnapshot | null;
+		readonly showPendingOutputIndicator?: boolean;
 		readonly elapsedMs?: number | null;
 		readonly toolLabel?: string | null;
 	} = {},
@@ -2342,7 +2301,7 @@ export function formatTurnNotice(
 	if ((options.elapsedMs ?? 0) >= TURN_NOTICE_ELAPSED_THRESHOLD_MS) {
 		meta.push(formatElapsedLabel(options.elapsedMs ?? 0));
 	}
-	const usageLabel = formatUsageCompact(options.usage ?? null);
+	const usageLabel = formatUsageCompact(options.usage ?? null, options.showPendingOutputIndicator ?? false);
 	if (usageLabel.length > 0) {
 		meta.push(usageLabel);
 	}
@@ -2359,12 +2318,12 @@ function formatUsageSummaryLine(label: string, usage: UsageSnapshot): string {
 	return `${DIM}${CYAN}· ${label}: ${formatUsageCompact(usage)}${RESET}`;
 }
 
-function formatUsageCompact(usage: UsageSnapshot | null): string {
-	if (!hasUsageSnapshot(usage)) {
-		return "";
-	}
-	if (usage.output > 0) {
+function formatUsageCompact(usage: UsageSnapshot | null, showPendingOutputIndicator = false): string {
+	if (usage && usage.output > 0) {
 		return `↓ ${formatTokenCount(usage.output)} tokens`;
+	}
+	if (showPendingOutputIndicator) {
+		return "↓";
 	}
 	return "";
 }
@@ -2537,10 +2496,6 @@ export function computeFooterStartRow(
 	const naturalStartRow = welcomeLineCount + 1 + Math.max(0, transcriptRows);
 	const bottomAnchoredStartRow = Math.max(1, terminalHeight - footerHeight + 1);
 	return Math.min(naturalStartRow, bottomAnchoredStartRow);
-}
-
-function isFooterBottomAnchored(startRow: number, terminalHeight: number, footerHeight: number): boolean {
-	return startRow === Math.max(1, terminalHeight - footerHeight + 1);
 }
 
 function flattenTranscriptLines(blocks: readonly string[], width: number): string[] {

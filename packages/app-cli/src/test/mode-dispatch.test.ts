@@ -160,7 +160,11 @@ describe("interactive transcript formatting", () => {
 			(line) => line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "").length,
 		);
 		expect(Math.max(...visibleLengths)).toBeLessThanOrEqual(40);
-		expect(lines.at(-1)).toContain("Start: Enter");
+		expect(lines.at(-2)).toContain("Start: Enter");
+		expect(lines.at(-2)).toContain("Help: /help");
+		expect(lines.at(-2)).toContain("Exit: /exit");
+		expect(lines.at(-2)).not.toContain("Scroll:");
+		expect(lines.at(-1)).toBe("");
 	});
 
 	it("exposes eight coding-friendly bible greetings and picks them deterministically", () => {
@@ -234,6 +238,7 @@ describe("interactive transcript formatting", () => {
 		expect(formatTurnNotice("responding", { animationFrame: 1 })).toContain("Responding..");
 		expect(formatTurnNotice("responding", { animationFrame: 2 })).toContain("Responding...");
 		expect(formatTurnNotice("responding", { elapsedMs: 2500 })).toContain("2s");
+		expect(formatTurnNotice("responding", { showPendingOutputIndicator: true })).toContain("↓");
 		expect(
 			formatTurnNotice("tool", {
 				animationFrame: 0,

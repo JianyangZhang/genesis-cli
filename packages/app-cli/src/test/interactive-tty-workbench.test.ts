@@ -282,6 +282,27 @@ class FakeInteractiveSession implements SessionFacade {
 			return;
 		}
 
+		if (input === "respond without usage") {
+			this.emit({
+				id: "text-respond-no-usage-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "Reply without usage yet",
+			} as RuntimeEvent);
+			await sleep(1800);
+			this.emit({
+				id: "text-respond-no-usage-2",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "Reply without usage yet finished",
+			} as RuntimeEvent);
+			return;
+		}
+
 		if (input === "expand thinking") {
 			this.emit({
 				id: "thinking-expand-1",
@@ -802,6 +823,53 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
+	it("keeps one blank line before the streaming assistant reply", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("slow respond\r");
+			await waitFor(() => screen.snapshot().includes("Draft reply"));
+
+			const snapshot = screen.snapshot();
+			const userLine = findLineIndexContaining(snapshot, "slow respond");
+			const assistantLine = findLineIndexContaining(snapshot, "Draft reply");
+			expect(assistantLine - userLine).toBe(2);
+
+			await waitFor(() => screen.snapshot().includes("Draft reply finished"), 3000);
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("shows a pending down-arrow once assistant text is visible even before usage arrives", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("respond without usage\r");
+			await waitFor(() => screen.snapshot().includes("Reply without usage yet"));
+			const snapshot = screen.snapshot();
+			expect(snapshot).toContain("Responding");
+			expect(snapshot).toContain("↓");
+			expect(snapshot).not.toContain("tokens");
+
+			await waitFor(() => screen.snapshot().includes("Reply without usage yet finished"), 3000);
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
 	it("keeps thinking visible when queued backlog appears after responding has started", async () => {
 		const session = new FakeInteractiveSession();
 		const runtime = createFakeRuntime(session);
@@ -971,9 +1039,9 @@ describe("interactive workbench TTY", () => {
 			const startPromise = createModeHandler("interactive").start(runtime);
 			await waitFor(() => output.getRawOutput().includes("\x1b[?1049h"));
 			await waitFor(() => screen.snapshot().includes("Genesis CLI"));
-			expect(output.getRawOutput()).not.toContain("\x1b[?1000h");
-			expect(output.getRawOutput()).not.toContain("\x1b[?1002h");
-			expect(output.getRawOutput()).not.toContain("\x1b[?1006h");
+			expect(output.getRawOutput()).toContain("\x1b[?1000h");
+			expect(output.getRawOutput()).toContain("\x1b[?1002h");
+			expect(output.getRawOutput()).toContain("\x1b[?1006h");
 
 			input.write("/exit\r");
 			await startPromise;
