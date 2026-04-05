@@ -11,10 +11,8 @@ import { join } from "node:path";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
 import type { InteractionState, OutputSink, SlashCommand } from "@genesis-cli/ui";
 import {
-	ansiClearBelow,
 	ansiClearLine,
 	ansiMoveRight,
-	ansiMoveUp,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createSlashCommandRegistry,
@@ -78,7 +76,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private _assistantBuffer = "";
-	private _streamRenderLineCount = 0;
+	private _assistantRendered = "";
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
 
@@ -140,7 +138,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._lastError = null;
 			this._changedPaths.clear();
 			this._assistantBuffer = "";
-			this._streamRenderLineCount = 0;
+			this._assistantRendered = "";
 			this._turnNotice = null;
 			this._commandSuggestions = [];
 			sessionTitle = undefined;
@@ -988,8 +986,11 @@ class InteractiveModeHandler implements ModeHandler {
 			}
 			return;
 		}
+		if (this._assistantRendered.length > 0) {
+			process.stdout.write("\n");
+		}
 		this._assistantBuffer = "";
-		this._streamRenderLineCount = 0;
+		this._assistantRendered = "";
 		if (redrawPrompt) {
 			this.renderPromptLine();
 		}
@@ -1004,18 +1005,13 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderStreamingAssistantBlock(): void {
-		const lines = wrapTranscriptContent(
-			formatTranscriptAssistantLine(this._assistantBuffer),
-			process.stdout.columns ?? 80,
-		);
-		if (this._streamRenderLineCount > 0) {
-			process.stdout.write(ansiMoveUp(this._streamRenderLineCount));
-			process.stdout.write(ansiClearBelow());
+		const rendered = formatTranscriptAssistantLine(this._assistantBuffer);
+		const suffix = rendered.slice(this._assistantRendered.length);
+		if (suffix.length === 0) {
+			return;
 		}
-		process.stdout.write(lines.join("\n"));
-		process.stdout.write("\n");
-		this._streamRenderLineCount = lines.length;
-		this.renderPromptLine();
+		process.stdout.write(suffix);
+		this._assistantRendered = rendered;
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
@@ -1242,12 +1238,25 @@ export function mergeStreamingText(existing: string, incoming: string): string {
 	if (incoming.length === 0) return existing;
 	if (existing.length === 0) return incoming;
 	if (incoming.startsWith(existing)) return incoming;
+	const embeddedExistingIndex = incoming.indexOf(existing);
+	if (embeddedExistingIndex >= 0 && embeddedExistingIndex <= 8) {
+		return incoming.slice(embeddedExistingIndex);
+	}
 	if (existing.endsWith(incoming)) return existing;
+
+	const trimmedIncoming = incoming.trimStart();
+	if (trimmedIncoming.startsWith(existing)) return trimmedIncoming;
 
 	const maxOverlap = Math.min(existing.length, incoming.length);
 	for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
 		if (existing.endsWith(incoming.slice(0, overlap))) {
 			return `${existing}${incoming.slice(overlap)}`;
+		}
+	}
+	const trimmedMaxOverlap = Math.min(existing.length, trimmedIncoming.length);
+	for (let overlap = trimmedMaxOverlap; overlap > 0; overlap -= 1) {
+		if (existing.endsWith(trimmedIncoming.slice(0, overlap))) {
+			return `${existing}${trimmedIncoming.slice(overlap)}`;
 		}
 	}
 	return `${existing}${incoming}`;

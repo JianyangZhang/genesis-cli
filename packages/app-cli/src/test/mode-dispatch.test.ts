@@ -84,6 +84,10 @@ describe("interactive transcript formatting", () => {
 		expect(mergeStreamingText("你好", "好吗")).toBe("你好吗");
 		expect(mergeStreamingText("抱歉，当前可用", "当前可用的工具")).toBe("抱歉，当前可用的工具");
 		expect(mergeStreamingText("hello", "hello world")).toBe("hello world");
+		expect(mergeStreamingText("抱歉", "     抱歉，当前环境中")).toBe("抱歉，当前环境中");
+		expect(mergeStreamingText("看起来", "  看起来 `bash` 工具当前确实不可用")).toBe(
+			"看起来 `bash` 工具当前确实不可用",
+		);
 	});
 });
 

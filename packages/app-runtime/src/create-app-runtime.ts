@@ -6,6 +6,7 @@
  * print, json, rpc) use the same factory and the same AppRuntime interface.
  */
 
+import type { ToolDefinition } from "@genesis-cli/tools";
 import type { KernelSessionAdapter } from "./adapters/kernel-session-adapter.js";
 import type { EventBus } from "./events/event-bus.js";
 import { createEventBus } from "./events/event-bus.js";
@@ -86,6 +87,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 	const governor = createToolGovernor();
 	const planEngine = createPlanEngine();
 	const toolSet = new Set(config.toolSet ?? []);
+	registerBuiltinToolDefinitions(governor, toolSet);
 	const sessions = new Set<SessionFacade>();
 	let shutdown = false;
 	let staticAdapterClaimed = false;
@@ -198,5 +200,61 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			sessions.clear();
 			globalBus.removeAllListeners();
 		},
+	};
+}
+
+function registerBuiltinToolDefinitions(governor: ToolGovernor, toolSet: ReadonlySet<string>): void {
+	for (const toolName of toolSet) {
+		const definition = builtinToolDefinition(toolName);
+		if (definition && !governor.catalog.has(toolName)) {
+			governor.catalog.register(definition);
+		}
+	}
+}
+
+function builtinToolDefinition(toolName: string): ToolDefinition | null {
+	switch (toolName) {
+		case "read":
+			return makeBuiltinToolDefinition("read", "file-read", "L0", true, "never", "unlimited", 30_000);
+		case "grep":
+		case "find":
+		case "ls":
+			return makeBuiltinToolDefinition(toolName, "file-read", "L0", true, "never", "unlimited", 30_000);
+		case "write":
+			return makeBuiltinToolDefinition("write", "file-mutation", "L1", false, "always", "per_target", 30_000);
+		case "edit":
+			return makeBuiltinToolDefinition("edit", "file-mutation", "L2", false, "on_write", "per_target", 30_000);
+		case "bash":
+			return makeBuiltinToolDefinition("bash", "command-execution", "L3", false, "always", "unlimited", 120_000);
+		default:
+			return null;
+	}
+}
+
+function makeBuiltinToolDefinition(
+	name: string,
+	category: string,
+	riskLevel: "L0" | "L1" | "L2" | "L3" | "L4",
+	readOnly: boolean,
+	confirmation: "never" | "always" | "on_write",
+	concurrency: "unlimited" | "serial" | "per_target",
+	timeoutMs: number,
+): ToolDefinition {
+	return {
+		identity: { name, category },
+		contract: {
+			parameterSchema: { type: "object", properties: {} },
+			output: { type: "text" },
+			errorTypes: [],
+		},
+		policy: {
+			riskLevel,
+			readOnly,
+			concurrency,
+			confirmation,
+			subAgentAllowed: true,
+			timeoutMs,
+		},
+		executorTag: name,
 	};
 }

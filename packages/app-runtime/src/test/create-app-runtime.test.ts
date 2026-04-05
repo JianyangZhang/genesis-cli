@@ -220,6 +220,68 @@ describe("createAppRuntime", () => {
 		expect(runtime.governor.audit).toBeDefined();
 	});
 
+	it("registers builtin tool definitions for the configured tool set", () => {
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+			toolSet: ["read", "bash", "write"],
+		});
+
+		expect(runtime.governor.catalog.has("read")).toBe(true);
+		expect(runtime.governor.catalog.has("bash")).toBe(true);
+		expect(runtime.governor.catalog.has("write")).toBe(true);
+	});
+
+	it("routes registered bash tools through permission flow instead of catalog denial", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		adapter.enqueueDefaultEvents([
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "bash",
+					toolCallId: "bash_1",
+					parameters: { command: "pwd" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: {
+					toolName: "bash",
+					toolCallId: "bash_1",
+					status: "success",
+					result: "/tmp",
+					durationMs: 20,
+				},
+			},
+		]);
+
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "interactive",
+			model: stubModel,
+			adapter,
+			toolSet: ["bash"],
+		});
+
+		const session = runtime.createSession();
+		const events: RuntimeEvent[] = [];
+		session.events.onAny((event) => events.push(event));
+
+		const pending = session.prompt("run pwd");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(events.map((event) => event.type)).toContain("permission_requested");
+
+		await session.resolvePermission("bash_1", "allow_once");
+		await pending;
+
+		expect(events.map((event) => event.type)).toContain("tool_started");
+		expect(events.map((event) => event.type)).toContain("tool_completed");
+	});
+
 	it("exposes planEngine that can create plans", () => {
 		const adapter = new StubKernelSessionAdapter();
 		const runtime = createAppRuntime({
