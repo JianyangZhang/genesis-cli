@@ -191,6 +191,10 @@ export function ansiMoveUp(lines: number): string {
 	return `${ESC}${lines}A`;
 }
 
+export function ansiCursorHome(): string {
+	return `${ESC}H`;
+}
+
 export function ansiMoveRight(columns: number): string {
 	return `${ESC}${columns}C`;
 }
@@ -248,6 +252,14 @@ export function ansiEnableMouseTracking(): string {
 
 export function ansiDisableMouseTracking(): string {
 	return `${ESC}?1006l${ESC}?1000l`;
+}
+
+export function ansiEnableFocusReporting(): string {
+	return `${ESC}?1004h`;
+}
+
+export function ansiDisableFocusReporting(): string {
+	return `${ESC}?1004l`;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,42 +337,74 @@ function planStepIcon(status: string): string {
 // ---------------------------------------------------------------------------
 
 function truncateToWidth(text: string, maxWidth: number): string {
-	// Strip ANSI for length calculation — approximate, good enough for P5.
-	// Using String.fromCharCode(27) to avoid control character in regex literal.
-	const ESC = String.fromCharCode(27);
-	const ansiPattern = new RegExp(`${ESC}\\[[0-9;]*[a-zA-Z]`, "g");
-	const stripped = text.replace(ansiPattern, "");
-	if (stripped.length <= maxWidth) return text;
-	// For simplicity, just return the text — truncation with ANSI is complex.
-	return text;
+	if (measureDisplayWidth(stripAnsi(text)) <= maxWidth) return text;
+	const ellipsis = "…";
+	const result: string[] = [];
+	let width = 0;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i]!;
+		if (ch === "\x1b") {
+			const seq = matchAnsiSequence(text, i);
+			if (seq) {
+				result.push(seq.value);
+				i = seq.end - 1;
+				continue;
+			}
+		}
+		const charWidth = charDisplayWidth(ch);
+		if (width + charWidth + 1 > maxWidth) {
+			result.push(ellipsis);
+			break;
+		}
+		result.push(ch);
+		width += charWidth;
+	}
+	if (!result[result.length - 1]?.endsWith(RESET)) {
+		result.push(RESET);
+	}
+	return result.join("");
 }
 
 function truncate(str: string, max: number): string {
-	if (str.length <= max) return str;
-	return `${str.slice(0, max - 1)}…`;
+	if (measureDisplayWidth(str) <= max) return str;
+	let width = 0;
+	let out = "";
+	for (const ch of str) {
+		const charWidth = charDisplayWidth(ch);
+		if (width + charWidth + 1 > max) {
+			return `${out}…`;
+		}
+		out += ch;
+		width += charWidth;
+	}
+	return out;
 }
 
 function wrapPlainText(text: string, width: number): string[] {
 	const lines: string[] = [];
-	const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
-	if (words.length === 0) return [""];
-
 	let current = "";
-	for (const w of words) {
-		if (current.length === 0) {
-			current = w;
+	let currentWidth = 0;
+	const normalized = text.replace(/\r\n/g, "\n");
+	if (normalized.length === 0) return [""];
+	for (const ch of normalized) {
+		if (ch === "\n") {
+			lines.push(current.trimEnd());
+			current = "";
+			currentWidth = 0;
 			continue;
 		}
-		if (current.length + 1 + w.length <= width) {
-			current = `${current} ${w}`;
+		const charWidth = charDisplayWidth(ch);
+		if (currentWidth + charWidth > width && current.length > 0) {
+			lines.push(current.trimEnd());
+			current = ch === " " ? "" : ch;
+			currentWidth = ch === " " ? 0 : charWidth;
 			continue;
 		}
-		lines.push(current);
-		current = w;
+		current += ch;
+		currentWidth += charWidth;
 	}
-	if (current.length > 0) lines.push(current);
-
-	return lines;
+	lines.push(current.trimEnd());
+	return lines.length > 0 ? lines : [""];
 }
 
 function renderRule(width: number): string {
@@ -374,4 +418,48 @@ function formatTimestamp(timestamp: number): string {
 	const minutes = `${date.getMinutes()}`.padStart(2, "0");
 	const seconds = `${date.getSeconds()}`.padStart(2, "0");
 	return `${hours}:${minutes}:${seconds}`;
+}
+
+function stripAnsi(text: string): string {
+	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+}
+
+function matchAnsiSequence(text: string, start: number): { value: string; end: number } | null {
+	const remainder = text.slice(start);
+	const match = new RegExp(`^${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`).exec(remainder);
+	if (!match) return null;
+	return {
+		value: match[0],
+		end: start + match[0].length,
+	};
+}
+
+function measureDisplayWidth(text: string): number {
+	let width = 0;
+	for (const ch of text) {
+		width += charDisplayWidth(ch);
+	}
+	return width;
+}
+
+function charDisplayWidth(ch: string): number {
+	if (ch === "\t") return 4;
+	if (ch <= "\u001f" || ch === "\u007f") return 0;
+	const codePoint = ch.codePointAt(0) ?? 0;
+	if (codePoint >= 0x300 && codePoint <= 0x36f) return 0;
+	if (
+		(codePoint >= 0x1100 && codePoint <= 0x115f) ||
+		(codePoint >= 0x2329 && codePoint <= 0x232a) ||
+		(codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
+		(codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+		(codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+		(codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+		(codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+		(codePoint >= 0xff00 && codePoint <= 0xff60) ||
+		(codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+		(codePoint >= 0x1f300 && codePoint <= 0x1faff)
+	) {
+		return 2;
+	}
+	return 1;
 }

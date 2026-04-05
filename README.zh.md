@@ -42,7 +42,7 @@ npm run chat:live
 
 启动成功判定：
 
-- 终端输出 `Genesis CLI — model:` 横幅，并出现 `genesis> ` 提示符。
+- 终端渲染 `Genesis CLI` 欢迎卡片，并出现 `genesis> ` 提示符。
 
 快速验证：
 

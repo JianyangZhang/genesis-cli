@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import {
+	ansiDisableFocusReporting,
 	ansiDisableMouseTracking,
+	ansiEnableFocusReporting,
 	ansiEnableMouseTracking,
 	ansiEnterAlternateScreen,
 	ansiExitAlternateScreen,
@@ -23,10 +25,12 @@ interface TtySessionOptions {
 	readonly input?: TtyInput;
 	readonly output?: TtyOutput;
 	readonly restoreTermios?: () => void;
+	readonly onResume?: () => void;
 }
 
 export interface TtySession {
 	enter(): void;
+	refresh(options?: { readonly reenterAlternateScreen?: boolean }): void;
 	restore(): void;
 }
 
@@ -34,6 +38,7 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 	const input = options.input ?? (process.stdin as TtyInput);
 	const output = options.output ?? (process.stdout as TtyOutput);
 	const restoreTermios = options.restoreTermios ?? defaultRestoreTermios;
+	const onResume = options.onResume;
 	let active = false;
 	let restored = false;
 
@@ -46,6 +51,15 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 		signalHandlers.clear();
 	};
 
+	const writeActiveModes = (reenterAlternateScreen: boolean): void => {
+		if (reenterAlternateScreen) {
+			output.write(ansiEnterAlternateScreen());
+		}
+		output.write(ansiEnableFocusReporting());
+		output.write(ansiEnableMouseTracking());
+		output.write(ansiHideCursor());
+	};
+
 	return {
 		enter(): void {
 			if (active || restored) {
@@ -53,16 +67,38 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 			}
 			active = true;
 			output.write(ansiEnterAlternateScreen());
-			output.write(ansiEnableMouseTracking());
-			output.write(ansiHideCursor());
+			writeActiveModes(false);
 
-			for (const signal of ["SIGINT", "SIGTERM"] as const) {
+			for (const signal of ["SIGINT", "SIGTERM", "SIGCONT"] as const) {
 				const listener = () => {
+					if (signal === "SIGCONT") {
+						this.refresh({ reenterAlternateScreen: true });
+						onResume?.();
+						return;
+					}
 					this.restore();
 				};
 				signalHandlers.set(signal, listener);
-				process.once(signal, listener);
+				if (signal === "SIGCONT") {
+					process.on(signal, listener);
+				} else {
+					process.once(signal, listener);
+				}
 			}
+		},
+
+		refresh({ reenterAlternateScreen = false }: { readonly reenterAlternateScreen?: boolean } = {}): void {
+			if (restored) {
+				return;
+			}
+			active = true;
+			try {
+				input.resume?.();
+			} catch {}
+			try {
+				input.setRawMode?.(true);
+			} catch {}
+			writeActiveModes(reenterAlternateScreen);
 		},
 
 		restore(): void {
@@ -80,6 +116,7 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 			} catch {}
 			try {
 				output.write(ansiShowCursor());
+				output.write(ansiDisableFocusReporting());
 				output.write(ansiDisableMouseTracking());
 				output.write(ansiExitAlternateScreen());
 			} catch {}

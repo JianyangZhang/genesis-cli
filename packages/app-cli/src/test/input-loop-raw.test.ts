@@ -67,6 +67,24 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("emits terminal focus events", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onTerminalEvent = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onTerminalEvent });
+		try {
+			const pending = loop.nextLine();
+			input.write("\u001b[O");
+			input.write("\u001b[I");
+			input.write("\r");
+			await pending;
+			expect(onTerminalEvent).toHaveBeenNthCalledWith(1, "focusout");
+			expect(onTerminalEvent).toHaveBeenNthCalledWith(2, "focusin");
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("restores raw mode and pauses stdin on close", () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();

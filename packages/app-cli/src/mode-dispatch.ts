@@ -13,9 +13,9 @@ import type { InteractionState, OutputSink, SlashCommand, TuiScreenLayout } from
 import {
 	ansiClearBelow,
 	ansiClearLine,
+	ansiCursorHome,
 	ansiHideCursor,
 	ansiMoveRight,
-	ansiMoveUp,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createLayoutAccumulator,
@@ -83,7 +83,6 @@ function createStdoutSink(): OutputSink {
 // ---------------------------------------------------------------------------
 
 class InteractiveModeHandler implements ModeHandler {
-	private _lastRenderedLines = 0;
 	private _pendingPermissionCallId: string | null = null;
 	private _pendingPermissionDetails: {
 		toolName: string;
@@ -124,7 +123,11 @@ class InteractiveModeHandler implements ModeHandler {
 		let sessionTitle: string | undefined;
 		let exitRequested = false;
 		let inputLoop: InputLoop | null = null;
-		const ttySession = createTtySession();
+		const ttySession = createTtySession({
+			onResume: () => {
+				this.renderScreenUpdate(accumulator.snapshot());
+			},
+		});
 		const onResize = (): void => {
 			this._terminalRows = process.stdout.rows ?? 24;
 			this.renderScreenUpdate(accumulator.snapshot());
@@ -779,11 +782,21 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				this.handleSpecialKey(key, snapshot);
 			},
+			onTerminalEvent: (event) => {
+				if (event === "focusin") {
+					ttySession.refresh();
+					if (accumulator.snapshot().conversation.lines.length > 0) {
+						this.renderScreenUpdate(accumulator.snapshot());
+					} else {
+						this.renderPromptLine();
+					}
+				}
+			},
 		});
 
 		ttySession.enter();
 		this.renderWelcome(sessionRef.current);
-		this.renderScreenUpdate(accumulator.snapshot());
+		this.renderPromptLine();
 
 		try {
 			let line = await inputLoop.nextLine();
@@ -866,41 +879,75 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderWelcome(session: SessionFacade): void {
+		const width = Math.max(60, Math.min(process.stdout.columns ?? 80, 100));
 		const DIM = "\x1b[2m";
 		const RESET = "\x1b[0m";
+		const GREEN = "\x1b[32m";
+		const CYAN = "\x1b[36m";
+		const BOLD = "\x1b[1m";
 		const model = session.state.model.displayName ?? session.state.model.id;
 		const provider = session.state.model.provider;
 		const cwd = session.context.workingDirectory;
-		const agentDir = session.context.agentDir ?? "(default)";
+		const version = process.env.npm_package_version ?? "dev";
+		const contentWidth = width - 2;
+		const center = (text: string): string => {
+			const plain = stripAnsiWelcome(text);
+			const padding = Math.max(0, contentWidth - plain.length);
+			const left = Math.floor(padding / 2);
+			const right = padding - left;
+			return `│${" ".repeat(left)}${text}${" ".repeat(right)}│`;
+		};
+		const fill = (text = ""): string => {
+			const plain = stripAnsiWelcome(text);
+			const padding = Math.max(0, contentWidth - plain.length);
+			return `│${text}${" ".repeat(padding)}│`;
+		};
 		process.stdout.write(ansiHideCursor());
+		process.stdout.write(ansiCursorHome());
 		process.stdout.write(ansiClearBelow());
-		process.stdout.write(`Genesis CLI — model: ${model} (${provider})\n`);
-		process.stdout.write(`${DIM}Session:${RESET} ${session.id.value}  ${DIM}CWD:${RESET} ${cwd}\n`);
-		process.stdout.write(`${DIM}Agent dir:${RESET} ${agentDir}\n`);
-		process.stdout.write("\n");
-		process.stdout.write(`${DIM}Start:${RESET} type a prompt and press Enter\n`);
 		process.stdout.write(
-			`${DIM}Help:${RESET} /help    ${DIM}Exit:${RESET} /exit    ${DIM}Abort/Exit:${RESET} Ctrl+C    ${DIM}History:${RESET} ↑/↓    ${DIM}Scroll:${RESET} wheel PageUp/PageDown\n`,
+			`╭─── ${BOLD}${GREEN}Genesis CLI${RESET} ${DIM}v${version}${RESET} ${"─".repeat(Math.max(0, width - 23 - version.length))}╮\n`,
+		);
+		process.stdout.write(fill());
+		process.stdout.write("\n");
+		process.stdout.write(center(`${BOLD}Welcome back!${RESET}`));
+		process.stdout.write("\n");
+		process.stdout.write(fill());
+		process.stdout.write("\n");
+		process.stdout.write(center(`${GREEN}▗ ▗   ▖ ▖${RESET}`));
+		process.stdout.write("\n");
+		process.stdout.write(fill());
+		process.stdout.write("\n");
+		process.stdout.write(center(`${GREEN}▘▘ ▝▝${RESET}`));
+		process.stdout.write("\n");
+		process.stdout.write(fill());
+		process.stdout.write("\n");
+		process.stdout.write(center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`));
+		process.stdout.write("\n");
+		process.stdout.write(center(`${DIM}${cwd}${RESET}`));
+		process.stdout.write("\n");
+		process.stdout.write("╰");
+		process.stdout.write("─".repeat(contentWidth));
+		process.stdout.write("╯\n");
+		process.stdout.write(
+			`${DIM}Start:${RESET} type a prompt and press Enter  ${DIM}Help:${RESET} /help  ${DIM}Scroll:${RESET} wheel/PageUp/PageDown\n`,
 		);
 	}
 
 	private renderScreenUpdate(snapshot: TuiScreenLayout): void {
 		const width = process.stdout.columns ?? 80;
-		if (this._lastRenderedLines > 0) {
-			process.stdout.write(ansiMoveUp(this._lastRenderedLines));
-		}
+		process.stdout.write(ansiCursorHome());
 		process.stdout.write(ansiClearBelow());
 		const rendered = renderScreen(this.applyViewport(snapshot), width);
 		process.stdout.write(ansiHideCursor());
 		process.stdout.write(`${rendered}\n`);
-		this._lastRenderedLines = rendered.split("\n").length + 1;
 		this.renderPromptLine();
 	}
 
 	private applyViewport(snapshot: TuiScreenLayout): TuiScreenLayout {
-		const maxConversationLines = Math.max(0, this._terminalRows - 3);
 		const lines = snapshot.conversation.lines;
-		if (lines.length <= maxConversationLines) {
+		const viewport = computeConversationViewport(lines.length, this._terminalRows, this._viewportOffsetFromBottom);
+		if (lines.length <= viewport.maxConversationLines) {
 			return {
 				...snapshot,
 				statusLine: {
@@ -909,19 +956,15 @@ class InteractiveModeHandler implements ModeHandler {
 				},
 			};
 		}
-		const maxOffset = Math.max(0, lines.length - maxConversationLines);
-		const offset = Math.max(0, Math.min(this._viewportOffsetFromBottom, maxOffset));
-		const start = Math.max(0, lines.length - maxConversationLines - offset);
-		const end = Math.min(lines.length, start + maxConversationLines);
 		return {
 			...snapshot,
 			conversation: {
 				...snapshot.conversation,
-				lines: lines.slice(start, end),
+				lines: lines.slice(viewport.start, viewport.end),
 			},
 			statusLine: {
 				...snapshot.statusLine,
-				scrollPosition: `Lines ${start + 1}-${end}/${lines.length}`,
+				scrollPosition: `Lines ${viewport.start + 1}-${viewport.end}/${lines.length}`,
 			},
 		};
 	}
@@ -946,8 +989,11 @@ class InteractiveModeHandler implements ModeHandler {
 		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc",
 		snapshot: TuiScreenLayout,
 	): void {
-		const maxConversationLines = Math.max(0, this._terminalRows - 3);
-		const maxOffset = Math.max(0, snapshot.conversation.lines.length - maxConversationLines);
+		const maxOffset = computeConversationViewport(
+			snapshot.conversation.lines.length,
+			this._terminalRows,
+			this._viewportOffsetFromBottom,
+		).maxOffset;
 
 		if (key === "up" || key === "down") {
 			this.navigateHistory(key === "up" ? -1 : 1);
@@ -966,7 +1012,8 @@ class InteractiveModeHandler implements ModeHandler {
 		if (key === "pageup") {
 			this._viewportOffsetFromBottom = Math.min(
 				maxOffset,
-				this._viewportOffsetFromBottom + Math.max(1, Math.floor(maxConversationLines / 2)),
+				this._viewportOffsetFromBottom +
+					Math.max(1, Math.floor(conversationViewportHeight(this._terminalRows) / 2)),
 			);
 			this.renderScreenUpdate(snapshot);
 			return;
@@ -974,7 +1021,8 @@ class InteractiveModeHandler implements ModeHandler {
 		if (key === "pagedown") {
 			this._viewportOffsetFromBottom = Math.max(
 				0,
-				this._viewportOffsetFromBottom - Math.max(1, Math.floor(maxConversationLines / 2)),
+				this._viewportOffsetFromBottom -
+					Math.max(1, Math.floor(conversationViewportHeight(this._terminalRows) / 2)),
 			);
 			this.renderScreenUpdate(snapshot);
 			return;
@@ -1110,4 +1158,38 @@ function runGit(
 			resolve({ type: "ok", stdout: String(stdout), stderr: String(stderr) });
 		});
 	});
+}
+
+export function computeConversationViewport(
+	totalLines: number,
+	terminalRows: number,
+	offsetFromBottom: number,
+): {
+	readonly maxConversationLines: number;
+	readonly maxOffset: number;
+	readonly offset: number;
+	readonly start: number;
+	readonly end: number;
+} {
+	const maxConversationLines = conversationViewportHeight(terminalRows);
+	const maxOffset = Math.max(0, totalLines - maxConversationLines);
+	const offset = Math.max(0, Math.min(offsetFromBottom, maxOffset));
+	const start = Math.max(0, totalLines - maxConversationLines - offset);
+	const end = Math.min(totalLines, start + maxConversationLines);
+	return {
+		maxConversationLines,
+		maxOffset,
+		offset,
+		start,
+		end,
+	};
+}
+
+function conversationViewportHeight(terminalRows: number): number {
+	// Reserve rows for header, divider, status line, and the prompt line.
+	return Math.max(0, terminalRows - 4);
+}
+
+function stripAnsiWelcome(text: string): string {
+	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
 }

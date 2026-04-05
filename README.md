@@ -42,7 +42,7 @@ Requirements:
 
 Startup success signal:
 
-- The banner `Genesis CLI — model:` is printed and the prompt `genesis> ` is shown.
+- A `Genesis CLI` welcome card is rendered and the prompt `genesis> ` is shown.
 
 Quick verification:
 

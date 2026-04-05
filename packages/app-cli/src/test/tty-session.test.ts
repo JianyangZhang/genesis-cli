@@ -39,8 +39,10 @@ describe("createTtySession", () => {
 		session.restore();
 
 		expect(written).toContain("\x1b[?1049h");
+		expect(written).toContain("\x1b[?1004h");
 		expect(written).toContain("\x1b[?1000h");
 		expect(written).toContain("\x1b[?1006h");
+		expect(written).toContain("\x1b[?1004l");
 		expect(written).toContain("\x1b[?1006l");
 		expect(written).toContain("\x1b[?1000l");
 		expect(written).toContain("\x1b[?1049l");
@@ -60,5 +62,21 @@ describe("createTtySession", () => {
 		session.restore();
 
 		expect(restoreTermios).toHaveBeenCalledTimes(1);
+	});
+
+	it("refresh re-enables raw mode and focus reporting", () => {
+		const input = createTtyInput();
+		const output = createTtyOutput();
+		let written = "";
+		output.on("data", (chunk) => {
+			written += chunk.toString("utf8");
+		});
+		const session = createTtySession({ input, output, restoreTermios: vi.fn() });
+
+		session.enter();
+		session.refresh();
+
+		expect(input.setRawMode).toHaveBeenCalledWith(true);
+		expect(written.match(new RegExp(`${String.fromCharCode(27)}\\[\\?1004h`, "g"))?.length).toBeGreaterThanOrEqual(2);
 	});
 });

@@ -24,6 +24,8 @@ export interface InputLoopOptions {
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
 	/** Called for special keys (rawMode only). */
 	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc" | "ctrlc") => void;
+	/** Called for terminal focus changes (rawMode only). */
+	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
 }
 
 export interface InputLoop {
@@ -47,6 +49,7 @@ export function createInputLoop(options: InputLoopOptions = {}): InputLoop {
 			output,
 			onInputStateChange: options.onInputStateChange,
 			onKey: options.onKey,
+			onTerminalEvent: options.onTerminalEvent,
 		});
 	}
 
@@ -111,8 +114,9 @@ function createRawInputLoop(options: {
 	readonly output: NodeJS.WritableStream & { isTTY?: boolean };
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
 	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc" | "ctrlc") => void;
+	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
 }): InputLoop {
-	const { prompt, input, output, onInputStateChange, onKey } = options;
+	const { prompt, input, output, onInputStateChange, onKey, onTerminalEvent } = options;
 	const sgrMousePattern = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`);
 
 	let closed = false;
@@ -193,6 +197,14 @@ function createRawInputLoop(options: {
 		}
 		if (seq === "\u001b[6~") {
 			onKey?.("pagedown");
+			return;
+		}
+		if (seq === "\u001b[I") {
+			onTerminalEvent?.("focusin");
+			return;
+		}
+		if (seq === "\u001b[O") {
+			onTerminalEvent?.("focusout");
 			return;
 		}
 		const sgrMouse = sgrMousePattern.exec(seq);

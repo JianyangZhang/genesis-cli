@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
 import type { ConversationLine, HeaderRegion, StatusLineRegion, TuiScreenLayout } from "../adapters/tui-layout.js";
 import {
 	ansiClearLine,
+	ansiCursorHome,
+	ansiDisableFocusReporting,
+	ansiEnableFocusReporting,
 	ansiMoveUp,
 	ansiResetCursor,
 	renderHeader,
@@ -122,6 +125,26 @@ describe("renderScreen", () => {
 		expect(result).toContain("read_file");
 		expect(result).toContain("Ready");
 	});
+
+	it("wraps wide CJK transcript lines without relying on terminal auto-wrap", () => {
+		const lines: ConversationLine[] = [
+			{
+				type: "text",
+				role: "assistant",
+				content: "你好你好你好你好你好你好你好你好",
+				timestamp: 1000,
+				authorName: "Assistant",
+			},
+		];
+		const layout: TuiScreenLayout = {
+			mode: "interactive",
+			header: { modelName: "Test", sessionStatus: "active", planStatus: null },
+			conversation: { lines },
+			statusLine: { phase: "idle", activeTool: null, planProgress: null, scrollPosition: "Lines 1-2/2" },
+		};
+		const result = renderScreen(layout, 20);
+		expect(result.split("\n").length).toBeGreaterThan(4);
+	});
 });
 
 describe("ANSI helpers", () => {
@@ -135,5 +158,14 @@ describe("ANSI helpers", () => {
 
 	it("ansiResetCursor produces carriage return", () => {
 		expect(ansiResetCursor()).toBe("\r");
+	});
+
+	it("ansiCursorHome produces correct sequence", () => {
+		expect(ansiCursorHome()).toBe("\x1b[H");
+	});
+
+	it("focus reporting helpers produce correct sequences", () => {
+		expect(ansiEnableFocusReporting()).toBe("\x1b[?1004h");
+		expect(ansiDisableFocusReporting()).toBe("\x1b[?1004l");
 	});
 });
