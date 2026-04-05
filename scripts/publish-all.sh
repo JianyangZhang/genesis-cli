@@ -39,6 +39,29 @@ require_npm_login() {
   npm whoami >/dev/null
 }
 
+smoke_check_runtime_adapter() {
+  local adapter_path="$1"
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+
+  (
+    cd "$tmp_dir"
+    node --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+
+      const adapterPath = process.argv[1];
+      const adapterModule = await import(pathToFileURL(adapterPath).href);
+      const sdk = await adapterModule.loadPiMonoSdk();
+
+      if (typeof sdk.createAgentSession !== "function") {
+        throw new Error("Resolved kernel sdk is missing createAgentSession()");
+      }
+
+      console.log(`runtime adapter smoke passed: ${adapterPath}`);
+    ' "$adapter_path"
+  )
+}
+
 package_version() {
   local package_name="$1"
   npm pkg get version -w "$package_name" | tr -d '"'
@@ -64,6 +87,8 @@ run_check() {
     npm run check
     npm run build
   )
+
+  smoke_check_runtime_adapter "$ROOT_DIR/packages/app-runtime/dist/adapters/pi-mono-session-adapter.js"
 
   for package_name in "${PACKAGES[@]}"; do
     (
@@ -97,6 +122,7 @@ run_verify() {
     npm install -g @pickle-pee/genesis-cli
   )
 
+  smoke_check_runtime_adapter "$(npm root -g)/@pickle-pee/runtime/dist/adapters/pi-mono-session-adapter.js"
   genesis -v
   genesis --version
 }

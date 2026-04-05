@@ -221,6 +221,7 @@ Notes:
 
 - `bump-version.mjs` bumps every published workspace package from its own current version and rewrites internal `@pickle-pee/*` dependency versions to match
 - the script enforces a clean git worktree before `check` and `publish`
+- `publish:check` now includes a runtime-adapter smoke test from a temporary directory, so vendored kernel resolution must work outside the monorepo root before release
 - the script stops if any package version has already been published
 - npm may still require a browser confirmation because the account uses 2FA for writes
 
@@ -235,11 +236,40 @@ Notes:
 
 ## Configuration
 
+User settings file:
+
+- macOS / Linux: `~/.genesis-cli/settings.json`
+- Windows: `%USERPROFILE%/.genesis-cli/settings.json`
+- currently the CLI reads the `env` object from this file and uses it as default environment configuration
+
+Example:
+
+```json
+{
+  "env": {
+    "GENESIS_API_KEY": "your_zhipu_api_key",
+    "GENESIS_BOOTSTRAP_BASE_URL": "https://open.bigmodel.cn/api/coding/paas/v4/",
+    "GENESIS_BOOTSTRAP_API": "openai-completions",
+    "GENESIS_MODEL_PROVIDER": "zai",
+    "GENESIS_MODEL_ID": "glm-5.1",
+    "GENESIS_MODEL_DISPLAY_NAME": "GLM-5.1"
+  }
+}
+```
+
 Environment variables:
 
 - `GENESIS_API_KEY`: API key used by OpenAI-compatible providers
+- `GENESIS_BOOTSTRAP_BASE_URL`: bootstrap base URL used when Genesis writes provider config into the local agent directory
+- `GENESIS_BOOTSTRAP_API`: bootstrap transport, typically `openai-completions`
 - `GENESIS_MODEL_PROVIDER`: provider key such as `zai`
 - `GENESIS_MODEL_ID`: model id such as `glm-5.1`
+- `GENESIS_MODEL_DISPLAY_NAME`: optional model display name shown in UI and stored in bootstrap config
+
+Project and agent files:
+
+- `.genesis/config.json`: repository-level overrides for mode, model, tools, and bootstrap fields
+- `.genesis-local/pi-agent/models.json`: local generated provider/model registry used by the vendored kernel
 
 CLI flags:
 
@@ -249,4 +279,10 @@ CLI flags:
 - `--provider <id>` / `--model <id>`: override the model selection
 - `--tools <csv>`: override the enabled tool set
 
-The full configuration matrix and precedence rules remain to be documented.
+Precedence:
+
+- CLI flags
+- shell environment variables
+- `~/.genesis-cli/settings.json` `env`
+- project `.genesis/config.json`
+- local agent config under `--agent-dir`

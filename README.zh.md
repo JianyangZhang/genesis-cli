@@ -221,6 +221,7 @@ npm run publish:all
 
 - `bump-version.mjs` 会按各包当前版本分别递增，并同步回写内部 `@pickle-pee/*` 依赖版本
 - 脚本会在 `check` 和 `publish` 前强制要求 git 工作区干净
+- `publish:check` 现在会额外在临时目录里做一次 runtime adapter 冒烟，确保离开 monorepo 根目录后 vendored kernel 仍然能被正确解析
 - 若任一包版本已经发布过，脚本会直接停止，避免 npm 拒绝覆盖版本
 - 如果 npm 账号开启了写操作 2FA，发布时仍可能需要浏览器确认一次
 
@@ -235,11 +236,40 @@ npm run publish:all
 
 ## 配置
 
+用户级配置文件：
+
+- macOS / Linux：`~/.genesis-cli/settings.json`
+- Windows：`%USERPROFILE%/.genesis-cli/settings.json`
+- 当前版本会读取该文件中的 `env` 对象，并把它作为 Genesis 的默认环境配置来源
+
+示例：
+
+```json
+{
+  "env": {
+    "GENESIS_API_KEY": "your_zhipu_api_key",
+    "GENESIS_BOOTSTRAP_BASE_URL": "https://open.bigmodel.cn/api/coding/paas/v4/",
+    "GENESIS_BOOTSTRAP_API": "openai-completions",
+    "GENESIS_MODEL_PROVIDER": "zai",
+    "GENESIS_MODEL_ID": "glm-5.1",
+    "GENESIS_MODEL_DISPLAY_NAME": "GLM-5.1"
+  }
+}
+```
+
 环境变量：
 
 - `GENESIS_API_KEY`：OpenAI-compatible provider 使用的 API key
+- `GENESIS_BOOTSTRAP_BASE_URL`：Genesis 初始化本地 agent provider 配置时使用的基地址
+- `GENESIS_BOOTSTRAP_API`：初始化时使用的 API 协议，通常为 `openai-completions`
 - `GENESIS_MODEL_PROVIDER`：provider 标识，例如 `zai`
 - `GENESIS_MODEL_ID`：model 标识，例如 `glm-5.1`
+- `GENESIS_MODEL_DISPLAY_NAME`：可选的模型展示名，会写入 UI 与 bootstrap 配置
+
+项目与本地 agent 文件：
+
+- `.genesis/config.json`：仓库级覆盖配置，可定义 mode、model、tools 与 bootstrap 字段
+- `.genesis-local/pi-agent/models.json`：vendored kernel 使用的本地 provider/model registry 文件
 
 命令行参数：
 
@@ -249,4 +279,10 @@ npm run publish:all
 - `--provider <id>` / `--model <id>`：覆盖模型选择
 - `--tools <csv>`：覆盖启用的工具集合
 
-完整配置矩阵与优先级规则仍待补充。
+优先级：
+
+- CLI flags
+- shell 环境变量
+- `~/.genesis-cli/settings.json` 的 `env`
+- 项目级 `.genesis/config.json`
+- `--agent-dir` 下的本地 agent 配置

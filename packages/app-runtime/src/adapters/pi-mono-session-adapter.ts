@@ -74,6 +74,11 @@ interface Deferred<T> {
 	promise: Promise<T>;
 }
 
+interface LoadPiMonoSdkOptions {
+	readonly importModule?: (specifier: string) => Promise<unknown>;
+	readonly fileCandidates?: readonly string[];
+}
+
 interface ExtendedRecoveryData extends SessionRecoveryData {
 	readonly workingDirectory?: string;
 	readonly sessionFile?: string;
@@ -602,17 +607,32 @@ function extractTargetPath(parameters: Readonly<Record<string, unknown>> | undef
 	return undefined;
 }
 
-async function loadPiMonoSdk(): Promise<PiMonoSdk> {
-	const candidates = [
-		resolvePath(process.cwd(), "packages/kernel/dist/index.js"),
-		resolvePath(process.cwd(), "packages/kernel/src/index.ts"),
-	];
+export async function loadPiMonoSdk(options: LoadPiMonoSdkOptions = {}): Promise<PiMonoSdk> {
+	const importModule = options.importModule ?? defaultImportModule;
+	try {
+		return (await importModule("@pickle-pee/kernel")) as PiMonoSdk;
+	} catch {}
+
+	const candidates = options.fileCandidates ?? resolvePiMonoSdkCandidates();
 	for (const candidate of candidates) {
 		if (existsSync(candidate)) {
-			return (await import(pathToFileURL(candidate).href)) as unknown as PiMonoSdk;
+			return (await importModule(pathToFileURL(candidate).href)) as PiMonoSdk;
 		}
 	}
 	throw new Error("Unable to resolve the vendored Genesis kernel module");
+}
+
+async function defaultImportModule(specifier: string): Promise<unknown> {
+	return await import(specifier);
+}
+
+function resolvePiMonoSdkCandidates(): readonly string[] {
+	return [
+		resolvePath(__dirname, "../../../kernel/dist/index.js"),
+		resolvePath(__dirname, "../../../kernel/src/index.ts"),
+		resolvePath(process.cwd(), "packages/kernel/dist/index.js"),
+		resolvePath(process.cwd(), "packages/kernel/src/index.ts"),
+	];
 }
 
 class AsyncPushQueue<T> {

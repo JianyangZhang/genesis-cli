@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
-import { PiMonoSessionAdapter } from "../adapters/pi-mono-session-adapter.js";
+import { loadPiMonoSdk, PiMonoSessionAdapter } from "../adapters/pi-mono-session-adapter.js";
 
 type TestTool = {
 	name: string;
@@ -15,6 +15,66 @@ type TestCreateSessionOptions = {
 };
 
 describe("PiMonoSessionAdapter", () => {
+	it("prefers the installed kernel package when resolving the vendored sdk", async () => {
+		const packageSdk = {
+			AuthStorage: { create: () => ({}) },
+			ModelRegistry: { create: () => ({ find: () => undefined }) },
+			SessionManager: { create: () => ({}), open: () => ({}) },
+			createAgentSession: async () => ({ session: {} }),
+			createBashTool: () => ({ name: "bash", execute: async () => ({}) }),
+			createEditTool: () => ({ name: "edit", execute: async () => ({}) }),
+			createFindTool: () => ({ name: "find", execute: async () => ({}) }),
+			createGrepTool: () => ({ name: "grep", execute: async () => ({}) }),
+			createLsTool: () => ({ name: "ls", execute: async () => ({}) }),
+			createReadTool: () => ({ name: "read", execute: async () => ({}) }),
+			createWriteTool: () => ({ name: "write", execute: async () => ({}) }),
+		};
+
+		const sdk = await loadPiMonoSdk({
+			importModule: async (specifier) => {
+				expect(specifier).toBe("@pickle-pee/kernel");
+				return packageSdk;
+			},
+			fileCandidates: [],
+		});
+
+		expect(sdk).toBe(packageSdk);
+	});
+
+	it("falls back to a file candidate when package resolution fails", async () => {
+		const agentDir = await createAgentDir();
+		const fallbackModulePath = join(agentDir, "kernel-fallback.mjs");
+		await writeFile(
+			fallbackModulePath,
+			[
+				"export const AuthStorage = { create: () => ({}) };",
+				"export const ModelRegistry = { create: () => ({ find: () => undefined }) };",
+				"export const SessionManager = { create: () => ({}), open: () => ({}) };",
+				"export async function createAgentSession() { return { session: {} }; }",
+				"export function createBashTool() { return { name: 'bash', execute: async () => ({}) }; }",
+				"export function createEditTool() { return { name: 'edit', execute: async () => ({}) }; }",
+				"export function createFindTool() { return { name: 'find', execute: async () => ({}) }; }",
+				"export function createGrepTool() { return { name: 'grep', execute: async () => ({}) }; }",
+				"export function createLsTool() { return { name: 'ls', execute: async () => ({}) }; }",
+				"export function createReadTool() { return { name: 'read', execute: async () => ({}) }; }",
+				"export function createWriteTool() { return { name: 'write', execute: async () => ({}) }; }",
+			].join("\n"),
+			"utf8",
+		);
+
+		const sdk = await loadPiMonoSdk({
+			importModule: async (specifier) => {
+				if (specifier === "@pickle-pee/kernel") {
+					throw new Error("package not available");
+				}
+				return await import(specifier);
+			},
+			fileCandidates: [fallbackModulePath],
+		});
+
+		expect(typeof sdk.createAgentSession).toBe("function");
+	});
+
 	it("streams raw events from a prompt", async () => {
 		const agentDir = await createAgentDir();
 		const session = new FakeAgentSession(async (input) => {

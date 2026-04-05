@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@pickle-pee/runtime";
 import { ensureAgentDirBootstrapped } from "./bootstrap.js";
@@ -134,11 +135,18 @@ interface FileConfig {
 	};
 }
 
-type SourceLayer = "default" | "agent" | "project" | "env" | "cli";
+interface SettingsFile {
+	readonly env?: Readonly<Record<string, unknown>>;
+}
 
-async function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): Promise<CliOptions> {
+type SourceLayer = "default" | "agent" | "project" | "settings" | "env" | "cli";
+
+export async function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): Promise<CliOptions> {
 	const workingDirectory = resolve(readStringFlag(flags, "cwd", process.cwd()));
 	const agentDir = resolve(readStringFlag(flags, "agent-dir", resolve(".genesis-local/pi-agent")));
+	const settingsPath = resolve(homedir(), ".genesis-cli", "settings.json");
+	const settingsEnv = await readSettingsEnv(settingsPath);
+	applySettingsEnv(settingsEnv);
 
 	const agentConfigPath = resolve(agentDir, "config.json");
 	const projectConfigPath = resolve(workingDirectory, ".genesis/config.json");
@@ -159,6 +167,11 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 		[
 			{ value: asOptionalString(flags.provider), layer: "cli", detail: "--provider" },
 			{ value: process.env.GENESIS_MODEL_PROVIDER, layer: "env", detail: "GENESIS_MODEL_PROVIDER" },
+			{
+				value: readSettingsEnvValue(settingsEnv, "GENESIS_MODEL_PROVIDER"),
+				layer: "settings",
+				detail: `${settingsPath} env.GENESIS_MODEL_PROVIDER`,
+			},
 			{ value: projectConfig?.provider, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.provider, layer: "agent", detail: agentConfigPath },
 		],
@@ -174,6 +187,11 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 		[
 			{ value: asOptionalString(flags.model), layer: "cli", detail: "--model" },
 			{ value: process.env.GENESIS_MODEL_ID, layer: "env", detail: "GENESIS_MODEL_ID" },
+			{
+				value: readSettingsEnvValue(settingsEnv, "GENESIS_MODEL_ID"),
+				layer: "settings",
+				detail: `${settingsPath} env.GENESIS_MODEL_ID`,
+			},
 			{ value: projectConfig?.model, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.model, layer: "agent", detail: agentConfigPath },
 		],
@@ -189,6 +207,11 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 		[
 			{ value: asOptionalString(flags["display-name"]), layer: "cli", detail: "--display-name" },
 			{ value: process.env.GENESIS_MODEL_DISPLAY_NAME, layer: "env", detail: "GENESIS_MODEL_DISPLAY_NAME" },
+			{
+				value: readSettingsEnvValue(settingsEnv, "GENESIS_MODEL_DISPLAY_NAME"),
+				layer: "settings",
+				detail: `${settingsPath} env.GENESIS_MODEL_DISPLAY_NAME`,
+			},
 			{ value: projectConfig?.displayName, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.displayName, layer: "agent", detail: agentConfigPath },
 		],
@@ -202,6 +225,11 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 		[
 			{ value: asOptionalString(flags.tools), layer: "cli", detail: "--tools" },
 			{ value: process.env.GENESIS_TOOL_SET, layer: "env", detail: "GENESIS_TOOL_SET" },
+			{
+				value: readSettingsEnvValue(settingsEnv, "GENESIS_TOOL_SET"),
+				layer: "settings",
+				detail: `${settingsPath} env.GENESIS_TOOL_SET`,
+			},
 			{ value: projectConfig?.tools, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.tools, layer: "agent", detail: agentConfigPath },
 		],
@@ -218,6 +246,11 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 		[
 			{ value: asOptionalString(flags.thinking), layer: "cli", detail: "--thinking" },
 			{ value: process.env.GENESIS_THINKING_LEVEL, layer: "env", detail: "GENESIS_THINKING_LEVEL" },
+			{
+				value: readSettingsEnvValue(settingsEnv, "GENESIS_THINKING_LEVEL"),
+				layer: "settings",
+				detail: `${settingsPath} env.GENESIS_THINKING_LEVEL`,
+			},
 			{ value: projectConfig?.thinking, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.thinking, layer: "agent", detail: agentConfigPath },
 		],
@@ -231,6 +264,11 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 		[
 			{ value: asOptionalString(flags["bootstrap-base-url"]), layer: "cli", detail: "--bootstrap-base-url" },
 			{ value: process.env.GENESIS_BOOTSTRAP_BASE_URL, layer: "env", detail: "GENESIS_BOOTSTRAP_BASE_URL" },
+			{
+				value: readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_BASE_URL"),
+				layer: "settings",
+				detail: `${settingsPath} env.GENESIS_BOOTSTRAP_BASE_URL`,
+			},
 			{ value: projectConfig?.bootstrap?.baseUrl, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.bootstrap?.baseUrl, layer: "agent", detail: agentConfigPath },
 		],
@@ -243,6 +281,11 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 		[
 			{ value: asOptionalString(flags["bootstrap-api"]), layer: "cli", detail: "--bootstrap-api" },
 			{ value: process.env.GENESIS_BOOTSTRAP_API, layer: "env", detail: "GENESIS_BOOTSTRAP_API" },
+			{
+				value: readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_API"),
+				layer: "settings",
+				detail: `${settingsPath} env.GENESIS_BOOTSTRAP_API`,
+			},
 			{ value: projectConfig?.bootstrap?.api, layer: "project", detail: projectConfigPath },
 			{ value: agentConfig?.bootstrap?.api, layer: "agent", detail: agentConfigPath },
 		],
@@ -266,19 +309,35 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 		bootstrapOverrides: {
 			...(bootstrapBaseUrl !== undefined ? { baseUrl: bootstrapBaseUrl } : {}),
 			...(bootstrapApi !== undefined ? { api: bootstrapApi } : {}),
-			apiKeyEnv: readOptionalStringFlag(flags, "bootstrap-api-key-env", process.env.GENESIS_BOOTSTRAP_API_KEY_ENV),
-			authHeader: readOptionalBooleanFlag(flags, "bootstrap-auth-header", process.env.GENESIS_BOOTSTRAP_AUTH_HEADER),
-			reasoning: readOptionalBooleanFlag(flags, "bootstrap-reasoning", process.env.GENESIS_BOOTSTRAP_REASONING),
+			apiKeyEnv: readOptionalStringFlag(
+				flags,
+				"bootstrap-api-key-env",
+				process.env.GENESIS_BOOTSTRAP_API_KEY_ENV ??
+					readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_API_KEY_ENV"),
+			),
+			authHeader: readOptionalBooleanFlag(
+				flags,
+				"bootstrap-auth-header",
+				process.env.GENESIS_BOOTSTRAP_AUTH_HEADER ??
+					readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_AUTH_HEADER"),
+			),
+			reasoning: readOptionalBooleanFlag(
+				flags,
+				"bootstrap-reasoning",
+				process.env.GENESIS_BOOTSTRAP_REASONING ?? readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_REASONING"),
+			),
 			compat: {
 				supportsDeveloperRole: readOptionalBooleanFlag(
 					flags,
 					"bootstrap-supports-developer-role",
-					process.env.GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE,
+					process.env.GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE ??
+						readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE"),
 				),
 				supportsReasoningEffort: readOptionalBooleanFlag(
 					flags,
 					"bootstrap-supports-reasoning-effort",
-					process.env.GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT,
+					process.env.GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT ??
+						readSettingsEnvValue(settingsEnv, "GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT"),
 				),
 			},
 		},
@@ -358,6 +417,47 @@ async function readOptionalJson(filePath: string): Promise<FileConfig | null> {
 	} catch {
 		return null;
 	}
+}
+
+async function readSettingsEnv(settingsPath: string): Promise<Readonly<Record<string, string>>> {
+	try {
+		const parsed = JSON.parse(await readFile(settingsPath, "utf8")) as SettingsFile;
+		if (!parsed || typeof parsed !== "object" || !parsed.env || typeof parsed.env !== "object") {
+			return {};
+		}
+
+		const env: Record<string, string> = {};
+		for (const [key, value] of Object.entries(parsed.env)) {
+			if (typeof value === "string") {
+				const trimmed = value.trim();
+				if (trimmed.length > 0) {
+					env[key] = trimmed;
+				}
+				continue;
+			}
+			if (typeof value === "number" || typeof value === "boolean") {
+				env[key] = String(value);
+			}
+		}
+		return env;
+	} catch {
+		return {};
+	}
+}
+
+function applySettingsEnv(
+	settingsEnv: Readonly<Record<string, string>>,
+	targetEnv: NodeJS.ProcessEnv = process.env,
+): void {
+	for (const [key, value] of Object.entries(settingsEnv)) {
+		if (targetEnv[key] === undefined) {
+			targetEnv[key] = value;
+		}
+	}
+}
+
+function readSettingsEnvValue(settingsEnv: Readonly<Record<string, string>>, key: string): string | undefined {
+	return settingsEnv[key];
 }
 
 function readModeFlag(flags: Readonly<Record<string, string | boolean>>, key: string, fallback: CliMode): CliMode {
