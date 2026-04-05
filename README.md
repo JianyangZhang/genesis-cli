@@ -1,6 +1,6 @@
 # Genesis CLI
 
-**An open-source coding CLI that combines a clean, layered pi-agent kernel with a Claude-Code-inspired product runtime.**
+**An open-source coding CLI that combines a layered pi-agent kernel with a Claude-Code-inspired product runtime.**
 
 [中文版](README.zh.md)
 
@@ -8,22 +8,109 @@
 
 ## What It Is
 
-Genesis is built for real repository work (not toy demos): plan, review, change, verify.
+Genesis is built for real repository work (not contrived examples): plan, review, change, verify.
 
 The architecture is the point:
 
 - a **vendored kernel** (pi-agent lineage) that stays small, explicit, and interface-agnostic
-- a **product runtime** that turns raw agent capability into a controllable user experience
+- a **product runtime** that turns raw agent capability into a controlled user experience
 
-Genesis is inspired by the best of Claude Code’s product layer, but it is not a code clone. The goal is a maintainable system with sharper boundaries and stronger governance.
+Genesis is inspired by Claude Code’s product-layer design, but it is not a code clone. The goal is a maintainable system with clearer boundaries and stronger governance.
 The exact package layout is intentionally documented in the technical plan rather than overloaded into the project homepage.
+
+---
+
+## Quick Start / 快速开始
+
+### Requirements / 环境要求
+
+- Operating system: macOS 13+ or Linux (x86_64/arm64). Windows requires WSL2.
+- Node.js: 20.0.0+ (`node -v`)
+- npm: 9.0.0+ (`npm -v`)
+- Git: 2.31.0+ (`git --version`)
+
+### Clone / 克隆
+
+```bash
+git clone https://github.com/JianyangZhang/genesis-cli.git
+cd genesis-cli
+```
+
+### Install Dependencies / 安装依赖
+
+```bash
+npm ci
+```
+
+Expected: a line matching `added <number> packages` and exit code 0.
+
+### Build / 构建
+
+```bash
+npm run build
+```
+
+Expected: exit code 0 and no TypeScript diagnostics (no `error TS` lines).
+
+### Run Locally / 本地运行
+
+This project is a CLI. It does not start an HTTP server.
+
+- Default port: N/A
+- Access address: N/A
+- Startup success signal: the banner `Genesis CLI — model:` is printed and the prompt `genesis> ` is shown.
+
+Configure secrets:
+
+```bash
+cp .env.example .env.local
+```
+
+Expected: no output and `.env.local` is created.
+
+Start interactive mode:
+
+```bash
+npm run chat:live
+```
+
+### Tests / 测试
+
+Unit tests:
+
+```bash
+npm test
+```
+
+Expected: Vitest prints a summary and exits with code 0.
+
+Type checks:
+
+```bash
+npm run check:types
+```
+
+Expected: exit code 0.
+
+Integration test (requires a valid API key in `.env.local`):
+
+```bash
+npm run test:live:pi-mono
+```
+
+Expected: Vitest prints a summary and exits with code 0.
+
+Test reports and coverage:
+
+- Report: Vitest prints the result summary to stdout.
+- Coverage: TODO: add a Vitest coverage provider and a `test:coverage` script.
 
 ---
 ## Why This Architecture Works
 
-Genesis is structured so the kernel can stay clean while the product layer moves fast.
+Genesis is structured so the kernel can remain well-scoped while the product layer evolves quickly.
 
-### 1) A Clean, Vendored pi-agent Kernel
+### 1) A Well-Scoped, Vendored pi-agent Kernel
 
 The kernel is kept inside this repository (not hidden behind an external SDK boundary), and focuses on core primitives:
 
@@ -78,7 +165,26 @@ Local secrets are intentionally kept out of version control. Copy `.env.example`
 
 ---
 
-## Documentation
 
 - High-level package docs: `packages/*/README.md`
 - ADRs and runbooks: `docs/` (work in progress)
+
+---
+
+## Configuration
+
+Environment variables:
+
+- `GENESIS_API_KEY`: API key used by OpenAI-compatible providers.
+- `GENESIS_MODEL_PROVIDER`: provider key (e.g. `zai`). TODO: list supported providers.
+- `GENESIS_MODEL_ID`: model id (e.g. `glm-5.1`). TODO: list supported models.
+
+CLI flags:
+
+- `--cwd <path>`: set the working directory.
+- `--agent-dir <path>`: set the agent directory (models/auth/session storage).
+- `--mode <interactive|print|json|rpc>`: select runtime mode.
+- `--provider <id>` / `--model <id>`: override the model selection.
+- `--tools <csv>`: override enabled tools.
+
+TODO: document the complete configuration matrix (agent/project config files, env vars, CLI flags) and their precedence.
