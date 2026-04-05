@@ -96,6 +96,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
 	private _turnStartedAt: number | null = null;
 	private _detailPanelExpanded = false;
+	private _detailPanelScroll = 0;
 	private _thinkingBuffer = "";
 	private _activeTurnUsageTotals: UsageSnapshot = emptyUsageSnapshot();
 	private _currentMessageUsage: UsageSnapshot = emptyUsageSnapshot();
@@ -176,6 +177,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._turnNoticeAnimationFrame = 0;
 			this._turnStartedAt = null;
 			this._detailPanelExpanded = false;
+			this._detailPanelScroll = 0;
 			this._thinkingBuffer = "";
 			this._activeTurnUsageTotals = emptyUsageSnapshot();
 			this._currentMessageUsage = emptyUsageSnapshot();
@@ -942,6 +944,13 @@ class InteractiveModeHandler implements ModeHandler {
 			this.renderFooterRegion();
 			return;
 		}
+		if (this._detailPanelExpanded) {
+			const detailScrollDelta = detailPanelScrollDeltaForKey(key, this.currentDetailPanelViewport().viewportSize);
+			if (detailScrollDelta !== 0) {
+				this.scrollDetailPanel(detailScrollDelta);
+				return;
+			}
+		}
 		if (this._pendingPermissionCallId !== null) {
 			if (key === "up" || key === "shifttab") {
 				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, -1);
@@ -1156,6 +1165,7 @@ class InteractiveModeHandler implements ModeHandler {
 		this.writeTranscriptText(formatTranscriptUserLine(input), true, false);
 		this._turnStartedAt = Date.now();
 		this._detailPanelExpanded = false;
+		this._detailPanelScroll = 0;
 		this._thinkingBuffer = "";
 		this._activeTurnUsageTotals = emptyUsageSnapshot();
 		this._currentMessageUsage = emptyUsageSnapshot();
@@ -1176,6 +1186,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this._turnNoticeAnimationFrame = 0;
 				this._turnStartedAt = null;
 				this._detailPanelExpanded = false;
+				this._detailPanelScroll = 0;
 				this._thinkingBuffer = "";
 				if (hasUsageSnapshot(completedTurnUsage)) {
 					this._lastTurnUsage = completedTurnUsage;
@@ -1216,15 +1227,33 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private toggleDetailPanel(): void {
-		if (this.currentDetailPanelLines().length === 0) {
+		if (this.currentDetailPanelContentLines().length === 0) {
 			return;
 		}
 		this._detailPanelExpanded = !this._detailPanelExpanded;
+		if (this._detailPanelExpanded) {
+			this._detailPanelScroll = 0;
+		}
+		this.renderFooterRegion();
+	}
+
+	private scrollDetailPanel(delta: number): void {
+		const viewport = this.currentDetailPanelViewport();
+		if (viewport.totalLines <= viewport.viewportSize) {
+			return;
+		}
+		const maxScroll = Math.max(0, viewport.totalLines - viewport.viewportSize);
+		const next = Math.max(0, Math.min(maxScroll, this._detailPanelScroll + delta));
+		if (next === this._detailPanelScroll) {
+			return;
+		}
+		this._detailPanelScroll = next;
 		this.renderFooterRegion();
 	}
 
 	private buildFooterUi(): InteractiveFooterRenderResult {
 		const activeToolLabel = summarizeActiveToolNotice(this._toolCalls);
+		const detailPanel = this.currentDetailPanelViewport();
 		return formatInteractiveFooter({
 			terminalWidth: process.stdout.columns ?? 80,
 			prompt: this._prompt,
@@ -1239,7 +1268,8 @@ class InteractiveModeHandler implements ModeHandler {
 			sessionUsage: this._sessionUsageTotals,
 			activeToolLabel,
 			detailPanelExpanded: this._detailPanelExpanded,
-			detailPanelLines: this.currentDetailPanelLines(),
+			detailPanelLines: detailPanel.lines,
+			detailPanelSummary: detailPanel.summary,
 			queuedInputs: this._queuedInputs,
 			permission:
 				this._pendingPermissionCallId !== null && this._pendingPermissionDetails !== null
@@ -1251,15 +1281,45 @@ class InteractiveModeHandler implements ModeHandler {
 		});
 	}
 
-	private currentDetailPanelLines(): readonly string[] {
+	private currentDetailPanelContentLines(): readonly string[] {
 		if (this._thinkingBuffer.trim().length === 0) {
 			return [];
 		}
-		const lines = wrapTranscriptContent(this._thinkingBuffer.trim(), this.terminalWidth()).slice(0, 8);
-		if (lines.length === 8 && measureTerminalDisplayWidth(this._thinkingBuffer.trim()) > 0) {
-			return [...lines, "…"];
+		return wrapTranscriptContent(this._thinkingBuffer.trim(), this.terminalWidth());
+	}
+
+	private currentDetailPanelViewport(): {
+		readonly lines: readonly string[];
+		readonly summary: string | null;
+		readonly viewportSize: number;
+		readonly totalLines: number;
+	} {
+		const lines = this.currentDetailPanelContentLines();
+		if (lines.length === 0) {
+			return { lines: [], summary: null, viewportSize: 0, totalLines: 0 };
 		}
-		return lines;
+		if (!this._detailPanelExpanded) {
+			return {
+				lines: [],
+				summary: "ctrl+o to expand",
+				viewportSize: 0,
+				totalLines: lines.length,
+			};
+		}
+		const viewportSize = Math.max(3, this.terminalHeight() - 8);
+		const maxScroll = Math.max(0, lines.length - viewportSize);
+		const start = Math.max(0, Math.min(this._detailPanelScroll, maxScroll));
+		const end = Math.min(lines.length, start + viewportSize);
+		const summary =
+			lines.length <= viewportSize
+				? "esc to collapse · wheel/↑↓"
+				: `esc to collapse · wheel/↑↓ · ${start + 1}-${end}/${lines.length}`;
+		return {
+			lines: lines.slice(start, end),
+			summary,
+			viewportSize,
+			totalLines: lines.length,
+		};
 	}
 
 	private rerenderInteractiveRegions(): void {
@@ -1580,9 +1640,9 @@ function applyWelcomeBorderColor(text: string): string {
 
 function buildWelcomeHintLine(width: number): string {
 	if (width < 64) {
-		return "Start: Enter  Help: /help  Scroll: wheel/PageUp/PageDown";
+		return "Start: Enter  Help: /help  Scroll: wheel/arrows";
 	}
-	return "Start: type a prompt and press Enter  Help: /help  Scroll: wheel/PageUp/PageDown";
+	return "Start: type a prompt and press Enter  Help: /help  Scroll: wheel/arrows";
 }
 
 export const WELCOME_BIBLE_GREETINGS = [
@@ -1734,6 +1794,7 @@ export function formatInteractiveFooter(state: {
 	readonly sessionUsage?: UsageSnapshot | null;
 	readonly activeToolLabel?: string | null;
 	readonly detailPanelExpanded?: boolean;
+	readonly detailPanelSummary?: string | null;
 	readonly detailPanelLines?: readonly string[];
 	readonly queuedInputs?: readonly string[];
 	readonly permission: {
@@ -1766,12 +1827,8 @@ export function formatInteractiveFooter(state: {
 			lines.push(formatUsageSummaryLine("Session", state.sessionUsage!));
 		}
 	}
-	if ((state.detailPanelLines?.length ?? 0) > 0) {
-		lines.push(
-			state.detailPanelExpanded
-				? `${INTERACTIVE_THEME.muted}↳ esc to collapse${INTERACTIVE_THEME.reset}`
-				: `${INTERACTIVE_THEME.muted}↳ ctrl+o to expand${INTERACTIVE_THEME.reset}`,
-		);
+	if ((state.detailPanelSummary?.length ?? 0) > 0) {
+		lines.push(`${INTERACTIVE_THEME.muted}↳ ${state.detailPanelSummary}${INTERACTIVE_THEME.reset}`);
 		if (state.detailPanelExpanded) {
 			lines.push(...(state.detailPanelLines ?? []));
 		}
@@ -1954,6 +2011,26 @@ function summarizeActiveToolNotice(
 		return `Running ${title}`;
 	}
 	return `Running ${toolCalls.size} tools`;
+}
+
+function detailPanelScrollDeltaForKey(
+	key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc" | "ctrlo",
+	viewportSize: number,
+): number {
+	switch (key) {
+		case "up":
+		case "wheelup":
+			return -1;
+		case "down":
+		case "wheeldown":
+			return 1;
+		case "pageup":
+			return -Math.max(1, viewportSize - 1);
+		case "pagedown":
+			return Math.max(1, viewportSize - 1);
+		default:
+			return 0;
+	}
 }
 
 function normalizeToolResultLines(

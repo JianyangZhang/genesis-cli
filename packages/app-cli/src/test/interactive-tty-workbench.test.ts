@@ -312,6 +312,28 @@ class FakeInteractiveSession implements SessionFacade {
 			return;
 		}
 
+		if (input === "long thinking") {
+			const lines = Array.from({ length: 24 }, (_, index) => `Thinking line ${index + 1}`);
+			this.emit({
+				id: "thinking-long-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "thinking_delta",
+				content: lines.join("\n"),
+			} as RuntimeEvent);
+			await sleep(1800);
+			this.emit({
+				id: "text-long-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "Long thinking complete.",
+			} as RuntimeEvent);
+			return;
+		}
+
 		if (input === "queued part one\n\nqueued part two") {
 			this.emit({
 				id: "text-queued-batch-1",
@@ -901,6 +923,39 @@ describe("interactive workbench TTY", () => {
 			expect(screen.snapshot()).not.toContain("Let me plan this carefully");
 
 			await waitFor(() => screen.snapshot().includes("Planned the demo."), 4000);
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("shows a full scrollable thinking panel with page navigation", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("long thinking\r");
+			await waitFor(() => screen.snapshot().includes("ctrl+o to expand"));
+
+			input.write(Buffer.from([0x0f]));
+			await waitFor(() => screen.snapshot().includes("esc to collapse"));
+			await waitFor(() => screen.snapshot().includes("Thinking line 1"));
+			expect(screen.snapshot()).not.toContain("Thinking line 24");
+
+			input.write("\x1b[6~");
+			await waitFor(() => screen.snapshot().includes("Thinking line 24"));
+
+			input.write("\x1b[5~");
+			await waitFor(() => screen.snapshot().includes("Thinking line 1"));
+
+			input.write("\x1b");
+			await waitFor(() => screen.snapshot().includes("ctrl+o to expand"));
+			await waitFor(() => screen.snapshot().includes("Long thinking complete."), 4000);
+
 			input.write("/exit\r");
 			await startPromise;
 		});

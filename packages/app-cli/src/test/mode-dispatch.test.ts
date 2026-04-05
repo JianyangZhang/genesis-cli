@@ -304,6 +304,7 @@ describe("interactive transcript formatting", () => {
 			turnNotice: "thinking",
 			turnNoticeAnimationFrame: 0,
 			detailPanelExpanded: false,
+			detailPanelSummary: "ctrl+o to expand",
 			detailPanelLines: ["Let me plan this carefully."],
 			permission: null,
 		});
@@ -319,11 +320,30 @@ describe("interactive transcript formatting", () => {
 			turnNotice: "thinking",
 			turnNoticeAnimationFrame: 0,
 			detailPanelExpanded: true,
+			detailPanelSummary: "esc to collapse · wheel/↑↓",
 			detailPanelLines: ["Let me plan this carefully."],
 			permission: null,
 		});
 		expect(expanded.block).toContain("esc to collapse");
+		expect(expanded.block).toContain("wheel/↑↓");
 		expect(expanded.block).toContain("Let me plan this carefully.");
+	});
+
+	it("renders detail panel scroll summary", () => {
+		const expanded = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "",
+			cursor: 0,
+			suggestions: [],
+			turnNotice: "thinking",
+			turnNoticeAnimationFrame: 0,
+			detailPanelExpanded: true,
+			detailPanelSummary: "esc to collapse · wheel/↑↓ · 1-16/24",
+			detailPanelLines: ["Thinking line 1", "Thinking line 2"],
+			permission: null,
+		});
+		expect(expanded.block).toContain("1-16/24");
 	});
 
 	it("wraps transcript content for streaming redraw", () => {
