@@ -178,7 +178,21 @@ npm run test:live:pi-mono
 
 ### 发布
 
-发布自动化脚本位于 `scripts/publish-all.sh`。
+发布自动化脚本位于 `scripts/bump-version.mjs` 与 `scripts/publish-all.sh`。
+
+版本升级：
+
+```bash
+npm run version:bump:patch
+```
+
+其他升级方式：
+
+```bash
+npm run version:bump:minor
+npm run version:bump:major
+npm run version:bump:prerelease
+```
 
 常用入口：
 
@@ -186,6 +200,15 @@ npm run test:live:pi-mono
 npm run publish:check
 npm run publish:packages
 npm run publish:verify
+```
+
+推荐发布流程：
+
+```bash
+npm run version:bump:patch
+git add packages/*/package.json
+git commit -m "release 0.0.1"
+npm run publish:all
 ```
 
 一键发布流程：
@@ -196,6 +219,7 @@ npm run publish:all
 
 说明：
 
+- `bump-version.mjs` 会按各包当前版本分别递增，并同步回写内部 `@pickle-pee/*` 依赖版本
 - 脚本会在 `check` 和 `publish` 前强制要求 git 工作区干净
 - 若任一包版本已经发布过，脚本会直接停止，避免 npm 拒绝覆盖版本
 - 如果 npm 账号开启了写操作 2FA，发布时仍可能需要浏览器确认一次

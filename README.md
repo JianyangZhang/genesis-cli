@@ -178,7 +178,21 @@ Local secrets stay out of version control. Copy `.env.example` to `.env.local` a
 
 ### Release
 
-Release automation lives in `scripts/publish-all.sh`.
+Release automation lives in `scripts/bump-version.mjs` and `scripts/publish-all.sh`.
+
+Version bump:
+
+```bash
+npm run version:bump:patch
+```
+
+Other bump modes:
+
+```bash
+npm run version:bump:minor
+npm run version:bump:major
+npm run version:bump:prerelease
+```
 
 Common entry points:
 
@@ -186,6 +200,15 @@ Common entry points:
 npm run publish:check
 npm run publish:packages
 npm run publish:verify
+```
+
+Recommended release flow:
+
+```bash
+npm run version:bump:patch
+git add packages/*/package.json
+git commit -m "release 0.0.1"
+npm run publish:all
 ```
 
 One-shot release flow:
@@ -196,6 +219,7 @@ npm run publish:all
 
 Notes:
 
+- `bump-version.mjs` bumps every published workspace package from its own current version and rewrites internal `@pickle-pee/*` dependency versions to match
 - the script enforces a clean git worktree before `check` and `publish`
 - the script stops if any package version has already been published
 - npm may still require a browser confirmation because the account uses 2FA for writes
