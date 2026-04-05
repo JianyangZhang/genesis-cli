@@ -56,6 +56,7 @@ function createMockSession(overrides?: Partial<SessionState>): SessionFacade {
 		abort: () => {},
 		close: async () => {},
 		onStateChange: () => {},
+		compact: async () => {},
 	} as unknown as SessionFacade;
 }
 
@@ -189,6 +190,6 @@ describe("/compact command", () => {
 		const session = createMockSession();
 		const runtime = createMockRuntime(session);
 		await cmd.execute!(createContext(session, runtime, output));
-		expect(output.lines.some((l) => l.includes("Compacting"))).toBe(true);
+		expect(output.lines.some((l) => l.includes("Compaction completed"))).toBe(true);
 	});
 });

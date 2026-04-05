@@ -7,6 +7,7 @@ import { createPlanEngine } from "../planning/plan-engine.js";
 import { createRuntimeContext } from "../runtime-context.js";
 import { SessionFacadeImpl } from "../session/session-facade.js";
 import { createInitialSessionState } from "../session/session-state.js";
+import { createAppRuntime } from "../create-app-runtime.js";
 import type { ModelDescriptor, SessionId, SessionState } from "../types/index.js";
 import { StubKernelSessionAdapter } from "./stubs/stub-kernel-session-adapter.js";
 
@@ -99,6 +100,29 @@ describe("SessionFacade", () => {
 		if (sessionEvents[0]!.type === "text_delta") {
 			expect(sessionEvents[0]!.content).toBe("Hello");
 		}
+	});
+
+	it("emits compaction events when compact() is invoked", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "interactive",
+			model: { id: "stub-model", provider: "stub" },
+			toolSet: ["read", "edit"],
+			adapter,
+		});
+		const session = runtime.createSession();
+		const seen: string[] = [];
+		session.events.onAny((event) => {
+			seen.push(event.type);
+		});
+
+		await session.compact();
+
+		expect(seen).toContain("compaction_started");
+		expect(seen).toContain("compaction_completed");
+		await session.close();
+		await runtime.shutdown();
 	});
 
 	it("close emits session_closed event", async () => {

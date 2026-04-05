@@ -59,6 +59,9 @@ export interface SessionFacade {
 
 	/** Plan orchestrator — manage plans, enforce safety checks. Null if no plan engine provided. */
 	readonly plan: PlanOrchestrator | null;
+
+	/** Manual context compaction. Requires adapter support. */
+	compact(options?: { readonly customInstructions?: string }): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +138,25 @@ export class SessionFacadeImpl implements SessionFacade {
 
 	get plan(): PlanOrchestrator | null {
 		return this._plan;
+	}
+
+	async compact(options?: { readonly customInstructions?: string }): Promise<void> {
+		this.assertOpen();
+		this.assertNotRunning();
+		this._running = true;
+		this.transitionTask({ status: "running", currentTaskId: "compact", startedAt: Date.now() });
+		try {
+			if (!this._adapter.sendCompact) {
+				throw new Error("Adapter does not support compaction");
+			}
+			const stream = this._adapter.sendCompact(options?.customInstructions);
+			for await (const raw of stream) {
+				this.processRawEvent(raw);
+			}
+		} finally {
+			this.transitionTask({ status: "idle", currentTaskId: null, startedAt: null });
+			this._running = false;
+		}
 	}
 
 	async prompt(input: string): Promise<void> {

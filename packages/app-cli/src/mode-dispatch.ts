@@ -87,6 +87,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
 	private _viewportOffsetFromBottom = 0;
 	private _terminalRows = process.stdout.rows ?? 24;
+	private readonly _history: string[] = [];
+	private _historyIndex: number | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -192,6 +194,7 @@ class InteractiveModeHandler implements ModeHandler {
 					line = await inputLoop.nextLine();
 					continue;
 				}
+				this.rememberHistory(trimmed);
 				this._activeTurn = session
 					.prompt(trimmed)
 					.catch((err) => {
@@ -268,6 +271,12 @@ class InteractiveModeHandler implements ModeHandler {
 		const maxConversationLines = Math.max(0, this._terminalRows - 3);
 		const maxOffset = Math.max(0, snapshot.conversation.lines.length - maxConversationLines);
 
+		if (key === "up" || key === "down") {
+			if (this._inputState.buffer.length > 0 || this._history.length > 0) {
+				this.navigateHistory(key === "up" ? -1 : 1);
+				return;
+			}
+		}
 		if (this._inputState.buffer.length > 0) {
 			return;
 		}
@@ -295,6 +304,29 @@ class InteractiveModeHandler implements ModeHandler {
 			this._viewportOffsetFromBottom = 0;
 			this.renderScreenUpdate(snapshot);
 		}
+	}
+
+	private rememberHistory(line: string): void {
+		if (line.length === 0) return;
+		if (this._history.at(-1) === line) return;
+		this._history.push(line);
+		if (this._history.length > 200) {
+			this._history.shift();
+		}
+		this._historyIndex = null;
+	}
+
+	private navigateHistory(direction: -1 | 1): void {
+		if (this._history.length === 0) return;
+
+		if (this._historyIndex === null) {
+			this._historyIndex = this._history.length;
+		}
+		const next = Math.max(0, Math.min(this._history.length, this._historyIndex + direction));
+		this._historyIndex = next;
+		const text = next === this._history.length ? "" : this._history[next] ?? "";
+		this._inputState = { buffer: text, cursor: text.length };
+		this.renderPromptLine();
 	}
 }
 

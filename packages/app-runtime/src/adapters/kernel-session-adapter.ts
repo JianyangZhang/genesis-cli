@@ -65,6 +65,9 @@ export interface KernelSessionAdapter {
 	/** Continue an existing conversation turn. */
 	sendContinue(input: string): AsyncIterable<RawUpstreamEvent>;
 
+	/** Optional manual compaction hook. */
+	sendCompact?(customInstructions?: string): AsyncIterable<RawUpstreamEvent>;
+
 	/**
 	 * Optional permission-resolution callback for adapters that can suspend a
 	 * tool until the product layer collects a user decision.

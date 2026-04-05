@@ -121,8 +121,8 @@ const compactCommand: SlashCommand = {
 	description: "Trigger context compaction",
 	type: "local",
 	async execute(ctx: SlashCommandContext): Promise<undefined> {
-		ctx.output.writeLine("Compacting context...");
-		ctx.output.writeLine("(Compaction requires kernel adapter support — stub for now)");
+		await ctx.session.compact();
+		ctx.output.writeLine("Compaction completed.");
 		return undefined;
 	},
 };

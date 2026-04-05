@@ -30,6 +30,7 @@ export interface EventBus {
 
 	/** Remove all listeners. */
 	removeAllListeners(): void;
+	onAny(listener: EventListener): Unsubscribe;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,9 +40,13 @@ export interface EventBus {
 export function createEventBus(): EventBus {
 	const typeListeners = new Map<string, Set<EventListener>>();
 	const categoryListeners = new Map<string, Set<EventListener>>();
+	const anyListeners = new Set<EventListener>();
 
 	return {
 		emit(event: RuntimeEvent): void {
+			for (const listener of anyListeners) {
+				listener(event);
+			}
 			const typed = typeListeners.get(event.type);
 			if (typed) {
 				for (const listener of typed) {
@@ -102,6 +107,14 @@ export function createEventBus(): EventBus {
 		removeAllListeners(): void {
 			typeListeners.clear();
 			categoryListeners.clear();
+			anyListeners.clear();
+		},
+
+		onAny(listener: EventListener): Unsubscribe {
+			anyListeners.add(listener);
+			return () => {
+				anyListeners.delete(listener);
+			};
 		},
 	};
 }

@@ -22,6 +22,7 @@ interface AgentSession {
 	prompt(input: string): Promise<void>;
 	followUp(input: string): Promise<void>;
 	abort(): Promise<void>;
+	compact(customInstructions?: string): Promise<void>;
 	dispose(): void;
 }
 
@@ -120,6 +121,10 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 
 	async *sendContinue(input: string): AsyncIterable<RawUpstreamEvent> {
 		yield* this.runPromptLikeOperation(input, "continue");
+	}
+
+	async *sendCompact(customInstructions?: string): AsyncIterable<RawUpstreamEvent> {
+		yield* this.runCompactOperation(customInstructions);
 	}
 
 	async resolveToolPermission(callId: string, decision: PermissionDecision): Promise<void> {
@@ -225,6 +230,66 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 				yield next;
 			}
 			await promptPromise;
+		} finally {
+			unsubscribe();
+			if (this.activeQueue === queue) {
+				this.activeQueue = null;
+			}
+		}
+	}
+
+	private async *runCompactOperation(customInstructions?: string): AsyncIterable<RawUpstreamEvent> {
+		if (this.closed) {
+			throw new Error("Session adapter is closed");
+		}
+
+		await this.initialize();
+		if (!this.session) {
+			throw new Error("Underlying Genesis kernel session is unavailable");
+		}
+
+		this.pendingToolStartEvents.clear();
+		this.approvedToolCalls.clear();
+		this.deniedToolCalls.clear();
+
+		const queue = new AsyncPushQueue<RawUpstreamEvent>();
+		this.activeQueue = queue;
+		let compactCompleted = false;
+
+		const unsubscribe = this.session.subscribe((event) => {
+			const bridged = bridgePiMonoEvent(event as never, this.bridgeState);
+			this.bridgeState = bridged.nextState;
+
+			for (const rawEvent of bridged.rawEvents) {
+				this.handleRawEvent(rawEvent);
+				if (compactCompleted && rawEvent.type === "compaction_end") {
+					queue.close();
+				}
+			}
+		});
+
+		const compactPromise = (async () => {
+			try {
+				await this.session!.compact(customInstructions);
+			} finally {
+				compactCompleted = true;
+				setTimeout(() => {
+					if (this.activeQueue === queue) {
+						queue.close();
+					}
+				}, 100);
+			}
+		})();
+
+		try {
+			while (true) {
+				const next = await queue.next();
+				if (next === null) {
+					break;
+				}
+				yield next;
+			}
+			await compactPromise;
 		} finally {
 			unsubscribe();
 			if (this.activeQueue === queue) {

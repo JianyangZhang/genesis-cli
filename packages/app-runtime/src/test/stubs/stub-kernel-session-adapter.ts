@@ -86,6 +86,20 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 		yield* this.processEvents(events);
 	}
 
+	async *sendCompact(customInstructions?: string): AsyncIterable<RawUpstreamEvent> {
+		void customInstructions;
+		yield { type: "compaction_start", timestamp: Date.now() };
+		yield {
+			type: "compaction_end",
+			timestamp: Date.now(),
+			payload: {
+				originalMessageCount: 10,
+				retainedMessageCount: 4,
+				estimatedTokensSaved: 123,
+			},
+		};
+	}
+
 	resolveToolPermission(
 		callId: string,
 		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
