@@ -326,13 +326,29 @@ class InteractiveModeHandler implements ModeHandler {
 					ctx.output.writeLine("No recent sessions.");
 					return undefined;
 				}
+				const formatAge = (ts: number): string => {
+					const delta = Math.max(0, Date.now() - ts);
+					const seconds = Math.floor(delta / 1000);
+					if (seconds < 60) return `${seconds}s ago`;
+					const minutes = Math.floor(seconds / 60);
+					if (minutes < 60) return `${minutes}m ago`;
+					const hours = Math.floor(minutes / 60);
+					if (hours < 24) return `${hours}h ago`;
+					const days = Math.floor(hours / 24);
+					return `${days}d ago`;
+				};
+
 				ctx.output.writeLine("Recent sessions:");
+				let i = 0;
 				for (const entry of recent) {
+					i++;
 					const id = entry.recoveryData.sessionId.value;
 					const model = entry.recoveryData.model.id;
 					const title = entry.title ? ` — ${entry.title}` : "";
-					ctx.output.writeLine(`  ${id} (${model})${title}`);
+					const age = formatAge(entry.updatedAt);
+					ctx.output.writeLine(`  #${i} ${id} (${model})${title} — ${age}`);
 				}
+				ctx.output.writeLine("Next: /resume <sessionId|#N|title> or /resume (last)");
 				return undefined;
 			},
 		});
@@ -651,11 +667,49 @@ class InteractiveModeHandler implements ModeHandler {
 
 				const dir = getSessionStoreDir(resolveAgentDir());
 				const selector = ctx.args.trim();
+				const recent = selector.length === 0 ? null : await readRecentSessions(dir);
 				const data =
 					selector.length === 0
 						? await readLastSession(dir)
-						: ((await readRecentSessions(dir)).find((entry) => entry.recoveryData.sessionId.value === selector)
-								?.recoveryData ?? null);
+						: (() => {
+								if (!recent) return null;
+								const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
+								const idx = Number.parseInt(idxText, 10);
+								if (Number.isFinite(idx) && idx >= 1 && idx <= recent.length) {
+									return recent[idx - 1]?.recoveryData ?? null;
+								}
+
+								const exact =
+									recent.find((entry) => entry.recoveryData.sessionId.value === selector)?.recoveryData ??
+									null;
+								if (exact) return exact;
+
+								const prefixMatches = recent.filter((entry) =>
+									entry.recoveryData.sessionId.value.startsWith(selector),
+								);
+								if (prefixMatches.length === 1) return prefixMatches[0]!.recoveryData;
+
+								const q = selector.toLowerCase();
+								const titleMatches = recent.filter((entry) => (entry.title ?? "").toLowerCase().includes(q));
+								if (titleMatches.length === 1) return titleMatches[0]!.recoveryData;
+
+								const candidates = [...prefixMatches, ...titleMatches].slice(0, 10);
+								if (candidates.length > 1) {
+									ctx.output.writeLine("Multiple matches:");
+									let i = 0;
+									for (const entry of candidates) {
+										i++;
+										const id = entry.recoveryData.sessionId.value;
+										const model = entry.recoveryData.model.id;
+										const title = entry.title ? ` — ${entry.title}` : "";
+										ctx.output.writeLine(`  #${i} ${id} (${model})${title}`);
+									}
+									ctx.output.writeLine("Tip: use an exact sessionId, or /sessions then /resume #N.");
+									return null;
+								}
+
+								return null;
+							})();
 
 				if (!data) {
 					ctx.output.writeError(
