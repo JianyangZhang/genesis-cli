@@ -41,6 +41,12 @@ export interface InputLoopOptions {
 	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
 	/** Called for terminal focus changes (rawMode only). */
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
+	/** Called for mouse button events (rawMode only). */
+	readonly onMouse?: (event: {
+		kind: "leftdown" | "leftdrag" | "leftup";
+		row: number;
+		column: number;
+	}) => void;
 	/** Whether pressing Enter should emit a terminal newline in raw mode. Defaults to true. */
 	readonly submitNewline?: boolean;
 }
@@ -68,6 +74,7 @@ export function createInputLoop(options: InputLoopOptions = {}): InputLoop {
 			onKey: options.onKey,
 			onTabComplete: options.onTabComplete,
 			onTerminalEvent: options.onTerminalEvent,
+			onMouse: options.onMouse,
 			submitNewline: options.submitNewline,
 		});
 	}
@@ -148,6 +155,11 @@ function createRawInputLoop(options: {
 	) => void;
 	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
+	readonly onMouse?: (event: {
+		kind: "leftdown" | "leftdrag" | "leftup";
+		row: number;
+		column: number;
+	}) => void;
 	readonly submitNewline?: boolean;
 }): InputLoop {
 	const {
@@ -158,6 +170,7 @@ function createRawInputLoop(options: {
 		onKey,
 		onTabComplete,
 		onTerminalEvent,
+		onMouse,
 		submitNewline = true,
 	} = options;
 	const sgrMousePattern = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`);
@@ -257,10 +270,23 @@ function createRawInputLoop(options: {
 		const sgrMouse = sgrMousePattern.exec(seq);
 		if (sgrMouse) {
 			const button = Number.parseInt(sgrMouse[1] ?? "", 10);
+			const column = Number.parseInt(sgrMouse[2] ?? "", 10);
+			const row = Number.parseInt(sgrMouse[3] ?? "", 10);
+			const final = sgrMouse[4] ?? "M";
 			if ((button & 0x43) === 0x40) {
 				onKey?.("wheelup");
 			} else if ((button & 0x43) === 0x41) {
 				onKey?.("wheeldown");
+			} else if (Number.isFinite(column) && Number.isFinite(row)) {
+				const baseButton = button & 0x03;
+				const isMotion = (button & 0x20) !== 0;
+				if (final === "m" && baseButton === 0) {
+					onMouse?.({ kind: "leftup", row, column });
+				} else if (isMotion && baseButton === 0) {
+					onMouse?.({ kind: "leftdrag", row, column });
+				} else if (!isMotion && final === "M" && baseButton === 0) {
+					onMouse?.({ kind: "leftdown", row, column });
+				}
 			}
 			return;
 		}

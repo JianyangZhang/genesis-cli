@@ -5,7 +5,7 @@
  * from it. Mode-specific behavior is isolated to how events are rendered.
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@pickle-pee/runtime";
@@ -108,6 +108,13 @@ class InteractiveModeHandler implements ModeHandler {
 	private _renderedFooterStartRow: number | null = null;
 	private _welcomeLines: readonly string[] = [];
 	private _transcriptScrollOffset = 0;
+	private _renderedTranscriptViewportLines: readonly string[] = [];
+	private _mouseSelection: {
+		anchorRow: number;
+		anchorColumn: number;
+		focusRow: number;
+		focusColumn: number;
+	} | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -843,6 +850,9 @@ class InteractiveModeHandler implements ModeHandler {
 					this.rerenderInteractiveRegions();
 				}
 			},
+			onMouse: (event) => {
+				this.handleMouseEvent(event);
+			},
 		});
 
 		ttySession.enter();
@@ -931,6 +941,44 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private renderPromptLine(): void {
 		this.renderFooterRegion();
+	}
+
+	private handleMouseEvent(event: {
+		kind: "leftdown" | "leftdrag" | "leftup";
+		row: number;
+		column: number;
+	}): void {
+		if (!this.isTranscriptMouseRow(event.row)) {
+			if (event.kind === "leftdown") {
+				this.clearMouseSelection();
+			}
+			return;
+		}
+		if (event.kind === "leftdown") {
+			this._mouseSelection = {
+				anchorRow: event.row,
+				anchorColumn: event.column,
+				focusRow: event.row,
+				focusColumn: event.column,
+			};
+			this.renderTranscriptViewport();
+			return;
+		}
+		if (this._mouseSelection === null) {
+			return;
+		}
+		this._mouseSelection = {
+			...this._mouseSelection,
+			focusRow: event.row,
+			focusColumn: event.column,
+		};
+		this.renderTranscriptViewport();
+		if (event.kind === "leftup") {
+			const selectedText = this.currentTranscriptSelectionText();
+			if (selectedText.length > 0) {
+				copyTextToClipboard(selectedText);
+			}
+		}
 	}
 
 	private handleSpecialKey(
@@ -1234,6 +1282,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (next === this._transcriptScrollOffset) {
 			return;
 		}
+		this.clearMouseSelection(false);
 		this._transcriptScrollOffset = next;
 		this.renderTranscriptViewport();
 		this.renderFooterRegion();
@@ -1327,11 +1376,13 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private rerenderInteractiveRegions(): void {
+		this.clearMouseSelection(false);
 		this.clampTranscriptScrollOffset();
 		this.fullRedrawInteractiveScreen();
 	}
 
 	private adjustTranscriptScrollForGrowth(previousRows: number, nextRows: number): void {
+		this.clearMouseSelection(false);
 		if (this._transcriptScrollOffset === 0) {
 			return;
 		}
@@ -1376,10 +1427,10 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private currentTranscriptViewportRows(): number {
 		const footerUi = this.buildFooterUi();
-		const transcriptTopRow = this._welcomeLines.length + 1;
+		const transcriptTopRow = 1;
 		const transcriptBottomRow =
 			computeFooterStartRow(
-				this._welcomeLines.length,
+				0,
 				this.terminalHeight(),
 				footerUi.lines.length,
 				this.currentTranscriptDisplayRows(),
@@ -1398,6 +1449,33 @@ class InteractiveModeHandler implements ModeHandler {
 		);
 	}
 
+	private isTranscriptMouseRow(row: number): boolean {
+		const footerStartRow = this._renderedFooterStartRow ?? computeFooterStartRow(0, this.terminalHeight(), this.currentFooterHeight(), this.currentTranscriptDisplayRows());
+		return row >= 1 && row < footerStartRow;
+	}
+
+	private clearMouseSelection(redraw = true): void {
+		if (this._mouseSelection === null) {
+			return;
+		}
+		this._mouseSelection = null;
+		if (redraw) {
+			this.renderTranscriptViewport();
+		}
+	}
+
+	private currentTranscriptSelectionText(): string {
+		if (this._mouseSelection === null) {
+			return "";
+		}
+		return extractPlainTextSelection(this._renderedTranscriptViewportLines, {
+			startRow: this._mouseSelection.anchorRow - 1,
+			startColumn: this._mouseSelection.anchorColumn,
+			endRow: this._mouseSelection.focusRow - 1,
+			endColumn: this._mouseSelection.focusColumn,
+		});
+	}
+
 	private transcriptBottomRow(footerHeight = this.currentFooterHeight()): number {
 		return Math.max(1, this.terminalHeight() - footerHeight);
 	}
@@ -1410,7 +1488,7 @@ class InteractiveModeHandler implements ModeHandler {
 		const ui = this.buildFooterUi();
 		const footerHeight = ui.lines.length;
 		const startRow = computeFooterStartRow(
-			this._welcomeLines.length,
+			0,
 			this.terminalHeight(),
 			footerHeight,
 			this.currentTranscriptDisplayRows(),
@@ -1490,19 +1568,10 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private fullRedrawInteractiveScreen(): void {
-		if (this._welcomeLines.length === 0) {
-			return;
-		}
 		this.clampTranscriptScrollOffset();
 		process.stdout.write(ansiResetScrollRegion());
 		process.stdout.write(ansiCursorHome());
 		this.clearVisibleScreenRows();
-		for (let index = 0; index < this._welcomeLines.length; index += 1) {
-			this.writeAbsoluteTerminalLine(
-				index + 1,
-				fitTerminalLine(this._welcomeLines[index] ?? "", this.terminalWidth()),
-			);
-		}
 		this._renderedFooterUi = null;
 		this._renderedFooterStartRow = null;
 		this.renderTranscriptViewport();
@@ -1511,10 +1580,10 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private renderTranscriptViewport(): void {
 		const footerUi = this.buildFooterUi();
-		const transcriptTopRow = this._welcomeLines.length + 1;
+		const transcriptTopRow = 1;
 		const transcriptBottomRow =
 			computeFooterStartRow(
-				this._welcomeLines.length,
+				0,
 				this.terminalHeight(),
 				footerUi.lines.length,
 				this.currentTranscriptDisplayRows(),
@@ -1526,10 +1595,79 @@ class InteractiveModeHandler implements ModeHandler {
 			availableRows,
 			this._transcriptScrollOffset,
 		);
+		this._renderedTranscriptViewportLines = visibleLines.map((line) => stripAnsiWelcome(line));
 		for (let row = transcriptTopRow; row <= transcriptBottomRow; row += 1) {
 			const index = row - transcriptTopRow;
-			this.writeAbsoluteTerminalLine(row, fitTerminalLine(visibleLines[index] ?? "", this.terminalWidth()));
+			const visibleLine = visibleLines[index] ?? "";
+			const plainLine = this._renderedTranscriptViewportLines[index] ?? "";
+			const selectionColumns = this.selectionColumnsForRow(row);
+			const renderedLine =
+				selectionColumns === null
+					? fitTerminalLine(visibleLine, this.terminalWidth())
+					: renderSelectedPlainTranscriptLine(
+							plainLine,
+							selectionColumns.startColumn,
+							selectionColumns.endColumn,
+							this.terminalWidth(),
+						);
+			this.writeAbsoluteTerminalLine(row, renderedLine);
 		}
+	}
+
+	private selectionColumnsForRow(row: number): { startColumn: number; endColumn: number } | null {
+		if (this._mouseSelection === null) {
+			return null;
+		}
+		const start =
+			compareTerminalSelectionPoints(
+				this._mouseSelection.anchorRow,
+				this._mouseSelection.anchorColumn,
+				this._mouseSelection.focusRow,
+				this._mouseSelection.focusColumn,
+			) <= 0
+				? {
+						row: this._mouseSelection.anchorRow,
+						column: this._mouseSelection.anchorColumn,
+					}
+				: {
+						row: this._mouseSelection.focusRow,
+						column: this._mouseSelection.focusColumn,
+					};
+		const end =
+			start.row === this._mouseSelection.anchorRow && start.column === this._mouseSelection.anchorColumn
+				? {
+						row: this._mouseSelection.focusRow,
+						column: this._mouseSelection.focusColumn,
+					}
+				: {
+						row: this._mouseSelection.anchorRow,
+						column: this._mouseSelection.anchorColumn,
+					};
+		if (row < start.row || row > end.row) {
+			return null;
+		}
+		if (start.row === end.row) {
+			return {
+				startColumn: Math.min(start.column, end.column),
+				endColumn: Math.max(start.column, end.column),
+			};
+		}
+		if (row === start.row) {
+			return {
+				startColumn: start.column,
+				endColumn: this.terminalWidth() + 1,
+			};
+		}
+		if (row === end.row) {
+			return {
+				startColumn: 1,
+				endColumn: end.column,
+			};
+		}
+		return {
+			startColumn: 1,
+			endColumn: this.terminalWidth() + 1,
+		};
 	}
 
 	private currentTranscriptDisplayRows(): number {
@@ -1537,14 +1675,15 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentRenderedTranscriptBlocks(): readonly string[] {
+		const welcomeBlocks = this._welcomeLines;
 		if (this._assistantBuffer.length === 0) {
-			return this._transcriptBlocks;
+			return [...welcomeBlocks, ...this._transcriptBlocks];
 		}
 		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
 		if (assistantBlock === null) {
-			return this._transcriptBlocks;
+			return [...welcomeBlocks, ...this._transcriptBlocks];
 		}
-		return appendAssistantTranscriptBlock(this._transcriptBlocks, assistantBlock);
+		return appendAssistantTranscriptBlock([...welcomeBlocks, ...this._transcriptBlocks], assistantBlock);
 	}
 }
 
@@ -2083,6 +2222,13 @@ function transcriptScrollDeltaForKey(
 	}
 }
 
+function compareTerminalSelectionPoints(leftRow: number, leftColumn: number, rightRow: number, rightColumn: number): number {
+	if (leftRow !== rightRow) {
+		return leftRow - rightRow;
+	}
+	return leftColumn - rightColumn;
+}
+
 export function createDebouncedCallback(
 	callback: () => void,
 	delayMs: number,
@@ -2539,6 +2685,90 @@ export function computeVisibleTranscriptLines(
 	const end = flattened.length - clampedOffset;
 	const start = Math.max(0, end - maxRows);
 	return flattened.slice(start, end);
+}
+
+export function extractPlainTextSelection(
+	lines: readonly string[],
+	selection: {
+		startRow: number;
+		startColumn: number;
+		endRow: number;
+		endColumn: number;
+	},
+): string {
+	if (lines.length === 0) {
+		return "";
+	}
+	const startFirst =
+		selection.startRow < selection.endRow ||
+		(selection.startRow === selection.endRow && selection.startColumn <= selection.endColumn);
+	const start = startFirst
+		? { row: selection.startRow, column: selection.startColumn }
+		: { row: selection.endRow, column: selection.endColumn };
+	const end = startFirst
+		? { row: selection.endRow, column: selection.endColumn }
+		: { row: selection.startRow, column: selection.startColumn };
+	const selectedLines: string[] = [];
+	for (let row = start.row; row <= end.row; row += 1) {
+		const line = lines[row] ?? "";
+		const fromColumn = row === start.row ? start.column : 1;
+		const toColumn = row === end.row ? end.column : Number.MAX_SAFE_INTEGER;
+		selectedLines.push(slicePlainTextByDisplayColumns(line, fromColumn - 1, toColumn - 1));
+	}
+	return selectedLines.join("\n").replace(/\s+$/g, "").replace(/\n[ \t]+$/gm, "");
+}
+
+function renderSelectedPlainTranscriptLine(
+	line: string,
+	startColumn: number,
+	endColumn: number,
+	width: number,
+): string {
+	const safeStart = Math.max(1, Math.min(startColumn, endColumn));
+	const safeEnd = Math.max(safeStart, Math.max(startColumn, endColumn));
+	const before = slicePlainTextByDisplayColumns(line, 0, safeStart - 1);
+	const selected = slicePlainTextByDisplayColumns(line, safeStart - 1, safeEnd - 1);
+	const after = slicePlainTextByDisplayColumns(line, safeEnd - 1, Number.MAX_SAFE_INTEGER);
+	const inverse = "\x1b[7m";
+	const reset = "\x1b[0m";
+	return fitTerminalLine(`${before}${inverse}${selected.length > 0 ? selected : " "}${reset}${after}`, width);
+}
+
+function slicePlainTextByDisplayColumns(text: string, startColumn: number, endColumnExclusive: number): string {
+	const start = Math.max(0, startColumn);
+	const end = Math.max(start, endColumnExclusive);
+	let output = "";
+	let used = 0;
+	for (const ch of text) {
+		const charWidth = measureTerminalDisplayWidth(ch);
+		const nextUsed = used + charWidth;
+		if (nextUsed > start && used < end) {
+			output += ch;
+		}
+		if (used >= end) {
+			break;
+		}
+		used = nextUsed;
+	}
+	return output;
+}
+
+function copyTextToClipboard(text: string): void {
+	if (text.length === 0) {
+		return;
+	}
+	if (process.platform === "darwin") {
+		spawnSync("pbcopy", [], { input: text, stdio: ["pipe", "ignore", "ignore"] });
+		return;
+	}
+	if (process.platform === "win32") {
+		spawnSync("clip", [], { input: text, stdio: ["pipe", "ignore", "ignore"] });
+		return;
+	}
+	spawnSync("sh", ["-c", "command -v wl-copy >/dev/null 2>&1 && wl-copy || xclip -selection clipboard"], {
+		input: text,
+		stdio: ["pipe", "ignore", "ignore"],
+	});
 }
 
 export function computeTranscriptDisplayRows(blocks: readonly string[], width: number): number {

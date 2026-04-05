@@ -16,6 +16,7 @@ import {
 	computeVisibleTranscriptLines,
 	countRenderedTerminalRows,
 	createDebouncedCallback,
+	extractPlainTextSelection,
 	fitTerminalLine,
 	formatInteractiveFooter,
 	formatInteractiveInputSeparator,
@@ -404,6 +405,25 @@ describe("interactive transcript formatting", () => {
 		expect(computeVisibleTranscriptLines(["one", "two", "three", "four"], 10, 2, 1)).toEqual(["two", "three"]);
 		expect(computeVisibleTranscriptLines(["one", "two", "three", "four"], 10, 2, 99)).toEqual(["one", "two"]);
 		expect(computeTranscriptDisplayRows(["one\ntwo", "three"], 10)).toBe(3);
+	});
+
+	it("extracts plain-text selections across transcript rows", () => {
+		expect(
+			extractPlainTextSelection(["Welcome back", "History line 01", "History line 02"], {
+				startRow: 0,
+				startColumn: 9,
+				endRow: 1,
+				endColumn: 8,
+			}),
+		).toBe("back\nHistory");
+		expect(
+			extractPlainTextSelection(["abcdef"], {
+				startRow: 0,
+				startColumn: 2,
+				endRow: 0,
+				endColumn: 5,
+			}),
+		).toBe("bcd");
 	});
 
 	it("keeps the footer close to short transcript content before bottom-anchoring", () => {

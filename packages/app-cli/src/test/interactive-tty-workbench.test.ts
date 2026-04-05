@@ -1063,7 +1063,7 @@ describe("interactive workbench TTY", () => {
 		await withPatchedProcessTty(input, output, async (screen) => {
 			const startPromise = createModeHandler("interactive").start(runtime);
 			await waitFor(() => output.getRawOutput().includes("\x1b[?1049h"));
-			await waitFor(() => screen.snapshot().includes("Genesis CLI"));
+			await waitFor(() => screen.snapshot().includes("❯"));
 			expect(output.getRawOutput()).toContain("\x1b[?1000h");
 			expect(output.getRawOutput()).toContain("\x1b[?1002h");
 			expect(output.getRawOutput()).toContain("\x1b[?1006h");
@@ -1087,6 +1087,7 @@ describe("interactive workbench TTY", () => {
 			input.write("scroll history\r");
 			await waitFor(() => screen.snapshot().includes("History line 20"));
 			expect(screen.snapshot()).not.toContain("History line 01");
+			expect(screen.snapshot()).not.toContain("Genesis CLI");
 
 			for (let index = 0; index < 10; index += 1) {
 				input.write("\u001b[5~");

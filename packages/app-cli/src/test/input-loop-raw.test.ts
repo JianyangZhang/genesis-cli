@@ -137,6 +137,38 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("emits left mouse drag events in raw mode", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onMouse = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onMouse });
+		try {
+			const pending = loop.nextLine();
+			input.write("\u001b[<0;12;4M");
+			input.write("\u001b[<32;15;4M");
+			input.write("\u001b[<0;18;4m");
+			input.write("\r");
+			await pending;
+			expect(onMouse).toHaveBeenNthCalledWith(1, {
+				kind: "leftdown",
+				row: 4,
+				column: 12,
+			});
+			expect(onMouse).toHaveBeenNthCalledWith(2, {
+				kind: "leftdrag",
+				row: 4,
+				column: 15,
+			});
+			expect(onMouse).toHaveBeenNthCalledWith(3, {
+				kind: "leftup",
+				row: 4,
+				column: 18,
+			});
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("emits tab and shift-tab special keys in raw mode", async () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();
