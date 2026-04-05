@@ -12,7 +12,7 @@
 
 ## 项目简介
 
-Genesis 面向真实仓库工作：理解代码、规划修改、安全执行、验证结果。
+Genesis 的目标，是成为一个真正像软件搭档一样工作的开源代码 CLI: 既有产品野心，也有工程纪律，同时足够务实，能直接进入你每天面对的真实仓库工作流。
 
 它组合了两类经验：
 
@@ -175,6 +175,30 @@ npm run test:live:pi-mono
 ```
 
 本地密钥默认不进入版本控制。把 `.env.example` 复制为 `.env.local` 后，填入 `GENESIS_API_KEY` 即可。
+
+### 发布
+
+发布自动化脚本位于 `scripts/publish-all.sh`。
+
+常用入口：
+
+```bash
+npm run publish:check
+npm run publish:packages
+npm run publish:verify
+```
+
+一键发布流程：
+
+```bash
+npm run publish:all
+```
+
+说明：
+
+- 脚本会在 `check` 和 `publish` 前强制要求 git 工作区干净
+- 若任一包版本已经发布过，脚本会直接停止，避免 npm 拒绝覆盖版本
+- 如果 npm 账号开启了写操作 2FA，发布时仍可能需要浏览器确认一次
 
 ---
 

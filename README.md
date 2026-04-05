@@ -12,7 +12,7 @@
 
 ## Overview
 
-Genesis is built for real repository work: understand code, plan changes, execute safely, and verify results.
+Genesis is building toward an open-source coding CLI that feels like a real software teammate: ambitious in product vision, disciplined in execution, and practical enough for day-to-day repository work.
 
 The project combines two ideas:
 
@@ -175,6 +175,30 @@ npm run test:live:pi-mono
 ```
 
 Local secrets stay out of version control. Copy `.env.example` to `.env.local` and fill `GENESIS_API_KEY`.
+
+### Release
+
+Release automation lives in `scripts/publish-all.sh`.
+
+Common entry points:
+
+```bash
+npm run publish:check
+npm run publish:packages
+npm run publish:verify
+```
+
+One-shot release flow:
+
+```bash
+npm run publish:all
+```
+
+Notes:
+
+- the script enforces a clean git worktree before `check` and `publish`
+- the script stops if any package version has already been published
+- npm may still require a browser confirmation because the account uses 2FA for writes
 
 ---
 
