@@ -631,6 +631,29 @@ class InteractiveModeHandler implements ModeHandler {
 			},
 			onKey: (key) => {
 				const snapshot = accumulator.snapshot();
+				if (key === "ctrlc") {
+					if (this._pendingPermissionCallId !== null) {
+						const callId = this._pendingPermissionCallId;
+						this._pendingPermissionCallId = null;
+						this._pendingPermissionDetails = null;
+						void sessionRef.current.resolvePermission(callId, "deny").catch((err) => {
+							sink.writeError(`Error: ${err}`);
+						});
+						sink.writeLine("Permission denied.");
+						this.renderScreenUpdate(snapshot);
+						return;
+					}
+					if (this._activeTurn !== null) {
+						sessionRef.current.abort();
+						sink.writeLine("Aborted.");
+						this.renderScreenUpdate(snapshot);
+						return;
+					}
+					exitRequested = true;
+					sink.writeLine("Bye.");
+					inputLoop?.close();
+					return;
+				}
 				this.handleSpecialKey(key, snapshot);
 			},
 		});
@@ -727,7 +750,7 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("\n");
 		process.stdout.write(`${DIM}Start:${RESET} type a prompt and press Enter\n`);
 		process.stdout.write(
-			`${DIM}Help:${RESET} /help    ${DIM}Exit:${RESET} /exit    ${DIM}Scroll:${RESET} ↑/↓ PageUp/PageDown Home/End\n`,
+			`${DIM}Help:${RESET} /help    ${DIM}Exit:${RESET} /exit    ${DIM}Abort/Exit:${RESET} Ctrl+C    ${DIM}Scroll:${RESET} ↑/↓ PageUp/PageDown Home/End\n`,
 		);
 	}
 

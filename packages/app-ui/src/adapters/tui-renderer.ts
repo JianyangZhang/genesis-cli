@@ -70,7 +70,7 @@ export function renderStatusLine(status: StatusLineRegion, width: number): strin
 	const hint =
 		status.phase === "waiting_permission"
 			? ` │ ${DIM}y once · Y session · n deny${RESET}`
-			: ` │ ${DIM}/help · /exit · ↑↓ scroll${RESET}`;
+			: ` │ ${DIM}/help · /exit · Ctrl+C · ↑↓ scroll${RESET}`;
 
 	const content = `${BG_DARK}${icon} ${phaseText}${tool}${plan}${hint}${RESET}`;
 	return truncateToWidth(content, width);

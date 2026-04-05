@@ -23,7 +23,7 @@ export interface InputLoopOptions {
 	/** Called whenever the current input state changes (rawMode only). */
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
 	/** Called for special keys (rawMode only). */
-	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc") => void;
+	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc" | "ctrlc") => void;
 }
 
 export interface InputLoop {
@@ -105,7 +105,7 @@ function createRawInputLoop(options: {
 	readonly input: NodeJS.ReadableStream & { isTTY?: boolean; setRawMode?: (enabled: boolean) => void; resume(): void };
 	readonly output: NodeJS.WritableStream & { isTTY?: boolean };
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
-	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc") => void;
+	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc" | "ctrlc") => void;
 }): InputLoop {
 	const { prompt, input, output, onInputStateChange, onKey } = options;
 
@@ -215,12 +215,12 @@ function createRawInputLoop(options: {
 
 			const code = ch.charCodeAt(0);
 			if (code === 3) {
-				close();
-				if (pendingResolve) {
-					const resolve = pendingResolve;
-					pendingResolve = null;
-					resolve(null);
+				if (onKey) {
+					onKey("ctrlc");
+					clearBuffer();
+					return;
 				}
+				close();
 				return;
 			}
 			if (code === 9) {
