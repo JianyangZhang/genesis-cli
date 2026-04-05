@@ -11,6 +11,8 @@ import {
 	formatTranscriptUserLine,
 	formatTurnNotice,
 	mergeStreamingText,
+	movePermissionSelection,
+	permissionDecisionFromSelection,
 	shouldRenderInteractiveTranscriptEvent,
 	wrapTranscriptContent,
 } from "../mode-dispatch.js";
@@ -119,14 +121,25 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("formats a structured permission block", () => {
-		const block = formatInteractivePermissionBlock({
-			toolName: "write",
-			riskLevel: "L2",
-			targetPath: "/tmp/test.txt",
-		});
+		const block = formatInteractivePermissionBlock(
+			{
+				toolName: "write",
+				riskLevel: "L2",
+				targetPath: "/tmp/test.txt",
+			},
+			1,
+		);
 		expect(block).toContain("⏺ Write(test.txt)");
-		expect(block).toContain("1. Yes");
-		expect(block).toContain("2. Yes, allow during this session");
+		expect(block).toContain("❯ 2. Yes, allow during this session");
+		expect(block).toContain("  1. Yes");
+	});
+
+	it("cycles permission selection and maps it to decisions", () => {
+		expect(movePermissionSelection(0, -1)).toBe(2);
+		expect(movePermissionSelection(2, 1)).toBe(0);
+		expect(permissionDecisionFromSelection(0)).toBe("allow_once");
+		expect(permissionDecisionFromSelection(1)).toBe("allow_for_session");
+		expect(permissionDecisionFromSelection(2)).toBe("deny");
 	});
 });
 

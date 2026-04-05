@@ -137,6 +137,24 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("emits tab and shift-tab special keys in raw mode", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onKey = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onKey });
+		try {
+			const pending = loop.nextLine();
+			input.write("\t");
+			input.write("\u001b[Z");
+			input.write("\r");
+			await pending;
+			expect(onKey).toHaveBeenNthCalledWith(1, "tab");
+			expect(onKey).toHaveBeenNthCalledWith(2, "shifttab");
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("applies tab completion through the raw-mode callback", async () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();

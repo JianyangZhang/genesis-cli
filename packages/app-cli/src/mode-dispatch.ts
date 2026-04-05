@@ -11,8 +11,10 @@ import { basename, join } from "node:path";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
 import type { InteractionState, OutputSink, SlashCommand } from "@genesis-cli/ui";
 import {
+	ansiClearBelow,
 	ansiClearLine,
 	ansiMoveRight,
+	ansiMoveUp,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createSlashCommandRegistry,
@@ -80,6 +82,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
+	private _pendingPermissionSelection = 0;
+	private _permissionUiLineCount = 0;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -112,13 +116,13 @@ class InteractiveModeHandler implements ModeHandler {
 		let inputLoop: InputLoop | null = null;
 		const ttySession = createTtySession({
 			onResume: () => {
-				this.renderPromptLine();
+				this.renderPermissionUi();
 			},
 			useAlternateScreen: false,
 			enableMouseTracking: false,
 		});
 		const onResize = (): void => {
-			this.renderPromptLine();
+			this.renderPermissionUi();
 		};
 		process.stdout.on("resize", onResize);
 
@@ -143,6 +147,8 @@ class InteractiveModeHandler implements ModeHandler {
 			this._turnNotice = null;
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
+			this._pendingPermissionSelection = 0;
+			this._permissionUiLineCount = 0;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -166,11 +172,13 @@ class InteractiveModeHandler implements ModeHandler {
 						reason: (event as { reason?: string }).reason,
 						targetPath: (event as { targetPath?: string }).targetPath,
 					};
-					this.writeTranscriptText(formatInteractivePermissionBlock(this._pendingPermissionDetails), true);
+					this._pendingPermissionSelection = 0;
 				}
 				if (event.type === "permission_resolved") {
 					if (this._pendingPermissionDetails?.toolCallId === event.toolCallId) {
 						this._pendingPermissionDetails = null;
+						this._pendingPermissionSelection = 0;
+						this._permissionUiLineCount = 0;
 					}
 				}
 				if (event.type === "tool_started") {
@@ -754,6 +762,9 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 			},
 			onTabComplete: (state) => {
+				if (this._pendingPermissionCallId !== null) {
+					return null;
+				}
 				const nextState = acceptFirstSlashSuggestion(state, this._commandSuggestions);
 				if (nextState) {
 					this._inputState = nextState;
@@ -791,7 +802,7 @@ class InteractiveModeHandler implements ModeHandler {
 			onTerminalEvent: (event) => {
 				if (event === "focusin") {
 					ttySession.refresh();
-					this.renderPromptLine();
+					this.renderPermissionUi();
 				}
 			},
 		});
@@ -804,22 +815,25 @@ class InteractiveModeHandler implements ModeHandler {
 			let line = await inputLoop.nextLine();
 			while (line !== null) {
 				const trimmed = line.trim();
-				if (trimmed.length === 0) {
-					line = await inputLoop.nextLine();
-					continue;
-				}
 
 				// Permission response
 				if (this._pendingPermissionCallId !== null) {
-					const decision = parsePermissionDecision(trimmed);
+					const decision = parsePermissionDecision(trimmed, this._pendingPermissionSelection);
 					if (!decision) {
-						sink.writeError("Permission: [y] once, [Y] session, [n] deny");
+						sink.writeError("Permission: use 1/2/3, Enter, y/Y/n, or arrow keys/Tab to choose.");
 						line = await inputLoop.nextLine();
 						continue;
 					}
 					await sessionRef.current.resolvePermission(this._pendingPermissionCallId, decision);
 					this._pendingPermissionCallId = null;
 					this._pendingPermissionDetails = null;
+					this._pendingPermissionSelection = 0;
+					this._permissionUiLineCount = 0;
+					line = await inputLoop.nextLine();
+					continue;
+				}
+
+				if (trimmed.length === 0) {
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -935,7 +949,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		process.stdout.write(ansiClearLine());
 		const buffer = this._inputState.buffer;
-		const prompt = this._pendingPermissionCallId !== null ? "choice [1/2/3]> " : this._prompt;
+		const prompt = this._pendingPermissionCallId !== null ? "choice [Enter/1/2/3]> " : this._prompt;
 		process.stdout.write(prompt);
 		if (buffer.length > 0) {
 			process.stdout.write(buffer);
@@ -954,7 +968,19 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write(ansiShowCursor());
 	}
 
-	private handleSpecialKey(key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc"): void {
+	private handleSpecialKey(
+		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc",
+	): void {
+		if (this._pendingPermissionCallId !== null) {
+			if (key === "up" || key === "shifttab") {
+				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, -1);
+				this.renderPermissionUi();
+			} else if (key === "down" || key === "tab") {
+				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, 1);
+				this.renderPermissionUi();
+			}
+			return;
+		}
 		if (key === "up" || key === "down") {
 			this.navigateHistory(key === "up" ? -1 : 1);
 		}
@@ -964,7 +990,31 @@ class InteractiveModeHandler implements ModeHandler {
 		return this._activeTurn === null || this._pendingPermissionCallId !== null;
 	}
 
+	private renderPermissionUi(): void {
+		if (this._pendingPermissionCallId === null || this._pendingPermissionDetails === null) {
+			this.renderPromptLine();
+			return;
+		}
+		const block = formatInteractivePermissionBlock(this._pendingPermissionDetails, this._pendingPermissionSelection);
+		if (this._permissionUiLineCount > 0) {
+			process.stdout.write(ansiMoveUp(this._permissionUiLineCount + 1));
+			process.stdout.write(ansiClearBelow());
+		}
+		process.stdout.write(block);
+		process.stdout.write("\n");
+		this._permissionUiLineCount = block.split("\n").length;
+		this.renderPromptLine();
+	}
+
 	private handleTranscriptEvent(event: RuntimeEvent): void {
+		if (event.category === "permission") {
+			if (event.type === "permission_requested") {
+				this.renderPermissionUi();
+			} else {
+				this.renderPromptLine();
+			}
+			return;
+		}
 		if (event.category === "tool") {
 			const text = formatInteractiveToolEvent(event, this._toolCalls.get(event.toolCallId)?.parameters);
 			if (text.length > 0) {
@@ -1158,8 +1208,9 @@ class RpcModeHandler implements ModeHandler {
 	}
 }
 
-function parsePermissionDecision(input: string): "allow_once" | "allow_for_session" | "deny" | null {
+function parsePermissionDecision(input: string, selectedIndex = 0): "allow_once" | "allow_for_session" | "deny" | null {
 	const trimmed = input.trim();
+	if (trimmed.length === 0) return permissionDecisionFromSelection(selectedIndex);
 	if (trimmed === "y" || trimmed.toLowerCase() === "yes") return "allow_once";
 	if (trimmed === "Y") return "allow_for_session";
 	if (trimmed === "n" || trimmed.toLowerCase() === "no") return "deny";
@@ -1217,21 +1268,40 @@ export function formatInteractiveToolEvent(
 	return "";
 }
 
-export function formatInteractivePermissionBlock(details: {
-	toolName: string;
-	riskLevel: string;
-	reason?: string;
-	targetPath?: string;
-}): string {
+export function formatInteractivePermissionBlock(
+	details: {
+		toolName: string;
+		riskLevel: string;
+		reason?: string;
+		targetPath?: string;
+	},
+	selectedIndex = 0,
+): string {
 	const lines = [
 		formatInteractiveToolTitle(details.toolName, details.targetPath ? { file_path: details.targetPath } : {}),
 	];
 	lines.push("────────────────────────────────────────");
 	lines.push(formatPermissionQuestion(details));
-	lines.push("❯ 1. Yes");
-	lines.push("  2. Yes, allow during this session");
-	lines.push("  3. No");
+	lines.push(formatPermissionChoiceLine(0, selectedIndex, "Yes"));
+	lines.push(formatPermissionChoiceLine(1, selectedIndex, "Yes, allow during this session"));
+	lines.push(formatPermissionChoiceLine(2, selectedIndex, "No"));
 	return lines.join("\n");
+}
+
+export function movePermissionSelection(current: number, direction: -1 | 1): number {
+	const size = 3;
+	return (current + direction + size) % size;
+}
+
+export function permissionDecisionFromSelection(selectedIndex: number): "allow_once" | "allow_for_session" | "deny" {
+	if (selectedIndex === 1) return "allow_for_session";
+	if (selectedIndex === 2) return "deny";
+	return "allow_once";
+}
+
+function formatPermissionChoiceLine(index: number, selectedIndex: number, label: string): string {
+	const prefix = index === selectedIndex ? "❯" : " ";
+	return `${prefix} ${index + 1}. ${label}`;
 }
 
 function formatPermissionQuestion(details: {
