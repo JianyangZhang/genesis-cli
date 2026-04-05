@@ -168,6 +168,22 @@ describe("interactive transcript formatting", () => {
 		expect(lines.at(-1)).toBe("");
 	});
 
+	it("keeps the welcome card at a fixed width before narrow-screen fitting", () => {
+		const lines = buildWelcomeLines({
+			terminalWidth: 40,
+			version: "0.0.2",
+			model: "GLM-5.1",
+			provider: "zai",
+			greeting: "A wise man will hear.",
+		});
+		const stripAnsi = (line: string): string =>
+			line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+		expect(stripAnsi(lines[0] ?? "")).toHaveLength(80);
+		expect(stripAnsi(lines[1] ?? "")).toHaveLength(80);
+		expect(stripAnsi(lines[8] ?? "")).toHaveLength(80);
+		expect(lines.at(-2)).toContain("Start: Enter");
+	});
+
 	it("exposes eight coding-friendly bible greetings and picks them deterministically", () => {
 		expect(WELCOME_BIBLE_GREETINGS).toHaveLength(8);
 		expect(pickWelcomeGreeting(0)).toBe(WELCOME_BIBLE_GREETINGS[0]);

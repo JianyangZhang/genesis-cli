@@ -943,11 +943,7 @@ class InteractiveModeHandler implements ModeHandler {
 		this.renderFooterRegion();
 	}
 
-	private handleMouseEvent(event: {
-		kind: "leftdown" | "leftdrag" | "leftup";
-		row: number;
-		column: number;
-	}): void {
+	private handleMouseEvent(event: { kind: "leftdown" | "leftdrag" | "leftup"; row: number; column: number }): void {
 		if (!this.isTranscriptMouseRow(event.row)) {
 			if (event.kind === "leftdown") {
 				this.clearMouseSelection();
@@ -1429,12 +1425,8 @@ class InteractiveModeHandler implements ModeHandler {
 		const footerUi = this.buildFooterUi();
 		const transcriptTopRow = 1;
 		const transcriptBottomRow =
-			computeFooterStartRow(
-				0,
-				this.terminalHeight(),
-				footerUi.lines.length,
-				this.currentTranscriptDisplayRows(),
-			) - 1;
+			computeFooterStartRow(0, this.terminalHeight(), footerUi.lines.length, this.currentTranscriptDisplayRows()) -
+			1;
 		return Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
 	}
 
@@ -1450,7 +1442,14 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private isTranscriptMouseRow(row: number): boolean {
-		const footerStartRow = this._renderedFooterStartRow ?? computeFooterStartRow(0, this.terminalHeight(), this.currentFooterHeight(), this.currentTranscriptDisplayRows());
+		const footerStartRow =
+			this._renderedFooterStartRow ??
+			computeFooterStartRow(
+				0,
+				this.terminalHeight(),
+				this.currentFooterHeight(),
+				this.currentTranscriptDisplayRows(),
+			);
 		return row >= 1 && row < footerStartRow;
 	}
 
@@ -1582,12 +1581,8 @@ class InteractiveModeHandler implements ModeHandler {
 		const footerUi = this.buildFooterUi();
 		const transcriptTopRow = 1;
 		const transcriptBottomRow =
-			computeFooterStartRow(
-				0,
-				this.terminalHeight(),
-				footerUi.lines.length,
-				this.currentTranscriptDisplayRows(),
-			) - 1;
+			computeFooterStartRow(0, this.terminalHeight(), footerUi.lines.length, this.currentTranscriptDisplayRows()) -
+			1;
 		const availableRows = Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
 		const visibleLines = computeVisibleTranscriptLines(
 			this.currentRenderedTranscriptBlocks(),
@@ -1823,6 +1818,7 @@ export const WELCOME_BIBLE_GREETINGS = [
 	"A wise man will hear.",
 	"Let all things be done decently.",
 ] as const;
+const WELCOME_CARD_WIDTH = 80;
 
 export function pickWelcomeGreeting(randomValue = Math.random()): string {
 	const size = WELCOME_BIBLE_GREETINGS.length;
@@ -1837,7 +1833,7 @@ export function buildWelcomeLines(input: {
 	provider: string;
 	greeting: string;
 }): readonly string[] {
-	const width = Math.max(24, Math.min(input.terminalWidth, 100));
+	const width = WELCOME_CARD_WIDTH;
 	const DIM = INTERACTIVE_THEME.muted;
 	const RESET = INTERACTIVE_THEME.reset;
 	const GREEN = INTERACTIVE_THEME.success;
@@ -1857,7 +1853,7 @@ export function buildWelcomeLines(input: {
 		fill(),
 		center(`${CYAN}${input.model}${RESET} ${DIM}via${RESET} ${input.provider}`),
 		formatWelcomeBottomBorder(width),
-		buildWelcomeHintLine(width),
+		buildWelcomeHintLine(input.terminalWidth),
 		"",
 	];
 }
@@ -2222,7 +2218,12 @@ function transcriptScrollDeltaForKey(
 	}
 }
 
-function compareTerminalSelectionPoints(leftRow: number, leftColumn: number, rightRow: number, rightColumn: number): number {
+function compareTerminalSelectionPoints(
+	leftRow: number,
+	leftColumn: number,
+	rightRow: number,
+	rightColumn: number,
+): number {
 	if (leftRow !== rightRow) {
 		return leftRow - rightRow;
 	}
@@ -2715,7 +2716,10 @@ export function extractPlainTextSelection(
 		const toColumn = row === end.row ? end.column : Number.MAX_SAFE_INTEGER;
 		selectedLines.push(slicePlainTextByDisplayColumns(line, fromColumn - 1, toColumn - 1));
 	}
-	return selectedLines.join("\n").replace(/\s+$/g, "").replace(/\n[ \t]+$/gm, "");
+	return selectedLines
+		.join("\n")
+		.replace(/\s+$/g, "")
+		.replace(/\n[ \t]+$/gm, "");
 }
 
 function renderSelectedPlainTranscriptLine(
