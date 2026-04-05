@@ -5,6 +5,7 @@
 		"moduleResolution": "Node16",
 		"baseUrl": ".",
 		"paths": {
+			"@mariozechner/pi-ai": ["packages/pi-ai/src/index.ts"],
 			"@pickle-pee/genesis-cli": ["packages/app-cli/src/index.ts"],
 			"@pickle-pee/config": ["packages/app-config/src/index.ts"],
 			"@pickle-pee/evaluation": ["packages/app-evaluation/src/index.ts"],

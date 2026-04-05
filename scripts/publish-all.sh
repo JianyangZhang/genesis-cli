@@ -57,6 +57,26 @@ smoke_check_runtime_adapter() {
         throw new Error("Resolved kernel sdk is missing createAgentSession()");
       }
 
+      const result = await sdk.createAgentSession({
+        cwd: process.cwd(),
+        model: {
+          id: "smoke-model",
+          name: "smoke-model",
+          api: "openai-completions",
+          provider: "smoke",
+          baseUrl: "https://example.invalid",
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 128000,
+          maxTokens: 4096,
+          headers: {},
+          compat: {},
+        },
+      });
+
+      result.session.dispose();
+
       console.log(`runtime adapter smoke passed: ${adapterPath}`);
     ' "$adapter_path"
   )

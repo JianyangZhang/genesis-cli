@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { Agent, type ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { Agent, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Model } from "@pickle-pee/pi-ai";
 import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
@@ -95,6 +95,23 @@ export async function createAgentSession(options: CreateAgentSessionOptions): Pr
 
 	const tools = options.tools?.length ? [...options.tools] : createDefaultTools(options.cwd);
 	const toolDescriptions = tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
+	const streamFn: StreamFn = async (activeModel, context, streamOptions) => {
+		const auth = modelRegistry.getRequestAuth(activeModel);
+		if (!auth.ok) {
+			throw new Error(auth.error);
+		}
+
+		const mergedOptions = {
+			...streamOptions,
+			apiKey: auth.apiKey,
+			headers: auth.headers
+				? { ...(auth.headers ?? {}), ...(streamOptions?.headers ?? {}) }
+				: streamOptions?.headers,
+		};
+		return (await streamWithKernelProvider(activeModel, context, mergedOptions)) as unknown as Awaited<
+			ReturnType<StreamFn>
+		>;
+	};
 	const agent = new Agent({
 		initialState: {
 			systemPrompt: buildSystemPrompt(options.cwd, toolDescriptions),
@@ -102,21 +119,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions): Pr
 			thinkingLevel: options.thinkingLevel ?? (model.reasoning ? "minimal" : "off"),
 			tools,
 		},
-		streamFn: async (activeModel, context, streamOptions) => {
-			const auth = modelRegistry.getRequestAuth(activeModel);
-			if (!auth.ok) {
-				throw new Error(auth.error);
-			}
-
-			const mergedOptions = {
-				...streamOptions,
-				apiKey: auth.apiKey,
-				headers: auth.headers
-					? { ...(auth.headers ?? {}), ...(streamOptions?.headers ?? {}) }
-					: streamOptions?.headers,
-			};
-			return streamWithKernelProvider(activeModel, context, mergedOptions);
-		},
+		streamFn,
 		sessionId: sessionManager.getSessionId(),
 		toolExecution: "parallel",
 	});
