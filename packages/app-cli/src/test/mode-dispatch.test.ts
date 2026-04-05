@@ -3,6 +3,7 @@ import {
 	acceptFirstSlashSuggestion,
 	computeSlashSuggestions,
 	formatInteractivePermissionBlock,
+	formatInteractivePromptBuffer,
 	formatInteractiveToolEvent,
 	formatInteractiveToolResult,
 	formatInteractiveToolTitle,
@@ -21,11 +22,17 @@ describe("interactive transcript formatting", () => {
 	it("formats user lines as a compact highlighted block", () => {
 		const line = formatTranscriptUserLine("Hello");
 		expect(line).toContain("Hello");
-		expect(line).toContain("\x1b[48;5;238m");
+		expect(line).toContain("\x1b[48;5;250m");
 	});
 
-	it("formats assistant lines without author prefixes", () => {
-		expect(formatTranscriptAssistantLine("Hello")).toBe("Hello");
+	it("formats assistant lines with a themed bullet prefix", () => {
+		const line = formatTranscriptAssistantLine("Hello");
+		expect(line).toContain("⏺");
+		expect(line).toContain("Hello");
+	});
+
+	it("formats the interactive prompt buffer with a lighter gray background", () => {
+		expect(formatInteractivePromptBuffer("Hello")).toContain("\x1b[48;5;250m");
 	});
 
 	it("suppresses session lifecycle events", () => {
@@ -184,7 +191,7 @@ describe("interactive transcript formatting", () => {
 			1,
 		);
 		expect(block).toContain("⏺ Write(test.txt)");
-		expect(block).toContain("❯ \u001b[7m2. Yes, allow during this session\u001b[0m");
+		expect(block).toContain("❯ \u001b[48;5;111m\u001b[38;5;16m2. Yes, allow during this session\u001b[0m");
 		expect(block).toContain("  1. Yes");
 	});
 

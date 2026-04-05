@@ -29,6 +29,7 @@ import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
 import { getSessionStoreDir, readLastSession, readRecentSessions, writeLastSession } from "./session-store.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
+import { INTERACTIVE_THEME } from "./theme.js";
 import { createTtySession } from "./tty-session.js";
 
 // ---------------------------------------------------------------------------
@@ -70,7 +71,7 @@ class InteractiveModeHandler implements ModeHandler {
 		targetPath?: string;
 	} | null = null;
 	private _activeTurn: Promise<void> | null = null;
-	private readonly _prompt = "genesis> ";
+	private readonly _prompt = "❯ ";
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
 	private readonly _history: string[] = [];
 	private _historyIndex: number | null = null;
@@ -78,10 +79,11 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private _assistantBuffer = "";
-	private _assistantRendered = "";
+	private _streamRenderLineCount = 0;
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
+	private readonly _queuedInputs: string[] = [];
 	private _pendingPermissionSelection = 0;
 	private _permissionUiLineCount = 0;
 
@@ -143,10 +145,11 @@ class InteractiveModeHandler implements ModeHandler {
 			this._lastError = null;
 			this._changedPaths.clear();
 			this._assistantBuffer = "";
-			this._assistantRendered = "";
+			this._streamRenderLineCount = 0;
 			this._turnNotice = null;
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
+			this._queuedInputs.length = 0;
 			this._pendingPermissionSelection = 0;
 			this._permissionUiLineCount = 0;
 			sessionTitle = undefined;
@@ -757,9 +760,7 @@ class InteractiveModeHandler implements ModeHandler {
 			onInputStateChange: (state) => {
 				this._inputState = state;
 				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listAll());
-				if (this.shouldShowPrompt()) {
-					this.renderPromptLine();
-				}
+				this.renderPromptLine();
 			},
 			onTabComplete: (state) => {
 				if (this._pendingPermissionCallId !== null) {
@@ -861,25 +862,11 @@ class InteractiveModeHandler implements ModeHandler {
 
 				// Regular prompt
 				if (this._activeTurn !== null) {
-					sink.writeError("Session is busy. Wait for the active turn or answer the permission prompt.");
+					this._queuedInputs.push(trimmed);
 					line = await inputLoop.nextLine();
 					continue;
 				}
-				this.flushAssistantBuffer(false);
-				this.writeTranscriptText(formatTranscriptUserLine(trimmed), true);
-				this.startTurnFeedback();
-				this.rememberHistory(trimmed);
-				this._activeTurn = sessionRef.current
-					.prompt(trimmed)
-					.catch((err) => {
-						sink.writeError(`Error: ${err}`);
-					})
-					.finally(() => {
-						this._activeTurn = null;
-						this.flushAssistantBuffer(false);
-						this._turnNotice = null;
-						this.renderPromptLine();
-					});
+				this.startPromptTurn(sessionRef.current, trimmed, sink);
 
 				line = await inputLoop.nextLine();
 			}
@@ -894,11 +881,11 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private renderWelcome(session: SessionFacade): void {
 		const width = Math.max(60, Math.min(process.stdout.columns ?? 80, 100));
-		const DIM = "\x1b[2m";
-		const RESET = "\x1b[0m";
-		const GREEN = "\x1b[32m";
-		const CYAN = "\x1b[36m";
-		const BOLD = "\x1b[1m";
+		const DIM = INTERACTIVE_THEME.muted;
+		const RESET = INTERACTIVE_THEME.reset;
+		const GREEN = INTERACTIVE_THEME.success;
+		const CYAN = INTERACTIVE_THEME.brand;
+		const BOLD = INTERACTIVE_THEME.bold;
 		const model = session.state.model.displayName ?? session.state.model.id;
 		const provider = session.state.model.provider;
 		const cwd = session.context.workingDirectory;
@@ -917,7 +904,7 @@ class InteractiveModeHandler implements ModeHandler {
 			return `│${text}${" ".repeat(padding)}│`;
 		};
 		process.stdout.write(
-			`╭─── ${BOLD}${GREEN}Genesis CLI${RESET} ${DIM}v${version}${RESET} ${"─".repeat(Math.max(0, width - 23 - version.length))}╮\n`,
+			`╭─── ${BOLD}${CYAN}Genesis CLI${RESET} ${DIM}v${version}${RESET} ${"─".repeat(Math.max(0, width - 23 - version.length))}╮\n`,
 		);
 		process.stdout.write(fill());
 		process.stdout.write("\n");
@@ -944,15 +931,12 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderPromptLine(): void {
-		if (!this.shouldShowPrompt()) {
-			return;
-		}
 		process.stdout.write(ansiClearLine());
 		const buffer = this._inputState.buffer;
 		const prompt = this._pendingPermissionCallId !== null ? "choice [Enter/1/2/3]> " : this._prompt;
 		process.stdout.write(prompt);
 		if (buffer.length > 0) {
-			process.stdout.write(buffer);
+			process.stdout.write(formatInteractivePromptBuffer(buffer, this._pendingPermissionCallId !== null));
 		}
 		const hint = formatSlashSuggestionHint(
 			this._commandSuggestions,
@@ -984,10 +968,6 @@ class InteractiveModeHandler implements ModeHandler {
 		if (key === "up" || key === "down") {
 			this.navigateHistory(key === "up" ? -1 : 1);
 		}
-	}
-
-	private shouldShowPrompt(): boolean {
-		return this._activeTurn === null || this._pendingPermissionCallId !== null;
 	}
 
 	private renderPermissionUi(): void {
@@ -1061,11 +1041,8 @@ class InteractiveModeHandler implements ModeHandler {
 			}
 			return;
 		}
-		if (this._assistantRendered.length > 0) {
-			process.stdout.write("\n");
-		}
 		this._assistantBuffer = "";
-		this._assistantRendered = "";
+		this._streamRenderLineCount = 0;
 		if (redrawPrompt) {
 			this.renderPromptLine();
 		}
@@ -1081,12 +1058,16 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private renderStreamingAssistantBlock(): void {
 		const rendered = formatTranscriptAssistantLine(this._assistantBuffer);
-		const suffix = rendered.slice(this._assistantRendered.length);
-		if (suffix.length === 0) {
-			return;
+		const lines = wrapTranscriptContent(rendered, process.stdout.columns ?? 80);
+		process.stdout.write("\r");
+		if (this._streamRenderLineCount > 0) {
+			process.stdout.write(ansiMoveUp(this._streamRenderLineCount));
 		}
-		process.stdout.write(suffix);
-		this._assistantRendered = rendered;
+		process.stdout.write(ansiClearBelow());
+		process.stdout.write(lines.join("\n"));
+		process.stdout.write("\n");
+		this._streamRenderLineCount = lines.length;
+		this.renderPromptLine();
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
@@ -1121,6 +1102,28 @@ class InteractiveModeHandler implements ModeHandler {
 		const text = next === this._history.length ? "" : (this._history[next] ?? "");
 		this._inputState = { buffer: text, cursor: text.length };
 		this.renderPromptLine();
+	}
+
+	private startPromptTurn(session: SessionFacade, prompt: string, sink: OutputSink): void {
+		this.flushAssistantBuffer(false);
+		this.startTurnFeedback();
+		this.rememberHistory(prompt);
+		this._activeTurn = session
+			.prompt(prompt)
+			.catch((err) => {
+				sink.writeError(`Error: ${err}`);
+			})
+			.finally(() => {
+				this._activeTurn = null;
+				this.flushAssistantBuffer(false);
+				this._turnNotice = null;
+				const nextQueued = this._queuedInputs.shift();
+				if (nextQueued) {
+					this.startPromptTurn(session, nextQueued, sink);
+					return;
+				}
+				this.renderPromptLine();
+			});
 	}
 }
 
@@ -1307,9 +1310,7 @@ export function permissionDecisionFromSelection(selectedIndex: number): "allow_o
 function formatPermissionChoiceLine(index: number, selectedIndex: number, label: string): string {
 	const prefix = index === selectedIndex ? "❯" : " ";
 	if (index === selectedIndex) {
-		const INVERSE = "\x1b[7m";
-		const RESET = "\x1b[0m";
-		return `${prefix} ${INVERSE}${index + 1}. ${label}${RESET}`;
+		return `${prefix} ${INTERACTIVE_THEME.selectedBg}${INTERACTIVE_THEME.selectedFg}${index + 1}. ${label}${INTERACTIVE_THEME.reset}`;
 	}
 	return `${prefix} ${index + 1}. ${label}`;
 }
@@ -1518,14 +1519,16 @@ export function acceptFirstSlashSuggestion(
 }
 
 export function formatTranscriptUserLine(content: string): string {
-	const BG = "\x1b[48;5;238m";
-	const FG = "\x1b[97m";
-	const RESET = "\x1b[0m";
-	return `${BG}${FG} ${content} ${RESET}`;
+	return formatInteractivePromptBuffer(content, false);
 }
 
 export function formatTranscriptAssistantLine(content: string): string {
-	return content;
+	return `${INTERACTIVE_THEME.assistantBullet}⏺${INTERACTIVE_THEME.reset} ${content}`;
+}
+
+export function formatInteractivePromptBuffer(content: string, plain = false): string {
+	if (plain) return content;
+	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.promptFg} ${content} ${INTERACTIVE_THEME.reset}`;
 }
 
 export function formatTurnNotice(kind: "thinking" | "responding"): string {
