@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 
 interface SessionMetadata {
 	readonly cwd?: string;
@@ -18,7 +18,7 @@ export class SessionManager {
 	}
 
 	static open(sessionPath: string): SessionManager {
-		const metadata = this.readMetadata(sessionPath);
+		const metadata = SessionManager.readMetadata(sessionPath);
 		return new SessionManager(metadata.cwd ?? process.cwd(), metadata.sessionId ?? randomUUID(), sessionPath);
 	}
 

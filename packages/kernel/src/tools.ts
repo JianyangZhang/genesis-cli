@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Type, type Static } from "@sinclair/typebox";
+import { type Static, Type } from "@sinclair/typebox";
 
 type TextContent = { type: "text"; text: string };
 type KernelToolResult<TDetails = unknown> = { content: TextContent[]; details: TDetails };
@@ -68,8 +68,7 @@ export function createReadTool(cwd: string): KernelTool {
 			const endIndex = params.limit ? startIndex + Math.max(params.limit, 0) : lines.length;
 			const sliced = lines.slice(startIndex, endIndex);
 			const body = sliced.join("\n");
-			const suffix =
-				endIndex < lines.length ? `\n\n[Use offset=${endIndex + 1} to continue reading the file.]` : "";
+			const suffix = endIndex < lines.length ? `\n\n[Use offset=${endIndex + 1} to continue reading the file.]` : "";
 			return {
 				content: [{ type: "text", text: body.length > 0 ? body + suffix : "[Empty file]" }],
 				details: { lineCount: sliced.length },
@@ -227,10 +226,7 @@ function normalizeEditInput(input: Static<typeof editSchema>): Static<typeof edi
 	return input;
 }
 
-function applyExactEdits(
-	content: string,
-	edits: ReadonlyArray<{ oldText: string; newText: string }>,
-): string {
+function applyExactEdits(content: string, edits: ReadonlyArray<{ oldText: string; newText: string }>): string {
 	const matches = edits.map((edit) => {
 		if (edit.oldText.length === 0) {
 			throw new Error("Edit tool oldText must not be empty.");

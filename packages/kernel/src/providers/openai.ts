@@ -14,8 +14,8 @@ import {
 	asNumber,
 	asString,
 	createAssistantMessage,
-	iterateSseData,
 	isRecord,
+	iterateSseData,
 	resolveEndpoint,
 	safeParseJson,
 } from "./shared.js";
@@ -180,7 +180,11 @@ export function streamOpenAiCompletions(
 					}
 					const rawFunction = isRecord(rawToolCall.function) ? rawToolCall.function : {};
 					const toolCallId = asString(rawToolCall.id);
-					if (!currentBlock || currentBlock.type !== "toolCall" || (toolCallId && currentBlock.id !== toolCallId)) {
+					if (
+						!currentBlock ||
+						currentBlock.type !== "toolCall" ||
+						(toolCallId && currentBlock.id !== toolCallId)
+					) {
 						finishBlock();
 						currentBlock = {
 							type: "toolCall",

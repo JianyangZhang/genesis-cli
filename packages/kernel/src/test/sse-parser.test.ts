@@ -15,11 +15,7 @@ function streamFromStrings(chunks: readonly string[]): ReadableStream<Uint8Array
 
 describe("iterateSseData", () => {
 	it("yields data payloads split by SSE boundaries", async () => {
-		const stream = streamFromStrings([
-			"data: first\n\n",
-			"data: second\n\n",
-			"\n",
-		]);
+		const stream = streamFromStrings(["data: first\n\n", "data: second\n\n", "\n"]);
 		const collected: string[] = [];
 		for await (const payload of iterateSseData(stream)) {
 			collected.push(payload);
@@ -36,4 +32,3 @@ describe("iterateSseData", () => {
 		expect(collected).toEqual(["tail"]);
 	});
 });
-

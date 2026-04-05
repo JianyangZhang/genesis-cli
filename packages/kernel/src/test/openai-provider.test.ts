@@ -72,4 +72,3 @@ describe("streamOpenAiCompletions", () => {
 		expect(result.errorMessage).toContain("Invalid API key");
 	});
 });
-

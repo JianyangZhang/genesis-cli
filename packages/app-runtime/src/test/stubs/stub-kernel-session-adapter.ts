@@ -100,10 +100,7 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 		};
 	}
 
-	resolveToolPermission(
-		callId: string,
-		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
-	): void {
+	resolveToolPermission(callId: string, decision: "allow" | "allow_for_session" | "allow_once" | "deny"): void {
 		const resolver = this.pendingPermissionResolvers.get(callId);
 		if (resolver) {
 			this.pendingPermissionResolvers.delete(callId);

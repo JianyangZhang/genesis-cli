@@ -1,10 +1,10 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { PiMonoSessionAdapter } from "../adapters/pi-mono-session-adapter.js";
 import type { RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
+import { PiMonoSessionAdapter } from "../adapters/pi-mono-session-adapter.js";
 
 const hasLiveOpenAiConfig =
 	Boolean(process.env.GENESIS_API_KEY) &&
@@ -24,112 +24,99 @@ let piMonoSessionAvailabilityPromise: Promise<{ available: boolean; reason?: str
 let anthropicAvailabilityPromise: Promise<{ available: boolean; modelId?: string; reason?: string }> | null = null;
 
 liveDescribe("PiMono live adapter", () => {
-	it(
-		"sends a non-streaming OpenAI-compatible request",
-		async () => {
-			const modelId = await resolveLiveModelId();
-			const response = await requestOpenAiCompletion(modelId, "Reply exactly LIVE_OPENAI_OK");
+	it("sends a non-streaming OpenAI-compatible request", async () => {
+		const modelId = await resolveLiveModelId();
+		const response = await requestOpenAiCompletion(modelId, "Reply exactly LIVE_OPENAI_OK");
 
-			expect(response.status).toBe(200);
-			const payload = (await response.json()) as {
-				choices?: Array<{ message?: { content?: string } }>;
-			};
-			expect(payload.choices?.[0]?.message?.content).toContain("LIVE_OPENAI_OK");
-		},
-		30_000,
-	);
+		expect(response.status).toBe(200);
+		const payload = (await response.json()) as {
+			choices?: Array<{ message?: { content?: string } }>;
+		};
+		expect(payload.choices?.[0]?.message?.content).toContain("LIVE_OPENAI_OK");
+	}, 30_000);
 
-	it(
-		"streams a real conversation with thinking off and remembers context across turns",
-		async () => {
-			if (!(await ensurePiMonoSessionAvailable())) {
-				return;
-			}
-			const adapter = await createLiveAdapter({ thinkingLevel: "off" });
-			try {
-				const firstTurn = await collectEvents(adapter.sendPrompt("Remember the codeword BANANA and reply exactly ACK."));
-				const secondTurn = await collectEvents(
-					adapter.sendPrompt("What is the codeword I asked you to remember? Reply exactly BANANA."),
-				);
+	it("streams a real conversation with thinking off and remembers context across turns", async () => {
+		if (!(await ensurePiMonoSessionAvailable())) {
+			return;
+		}
+		const adapter = await createLiveAdapter({ thinkingLevel: "off" });
+		try {
+			const firstTurn = await collectEvents(
+				adapter.sendPrompt("Remember the codeword BANANA and reply exactly ACK."),
+			);
+			const secondTurn = await collectEvents(
+				adapter.sendPrompt("What is the codeword I asked you to remember? Reply exactly BANANA."),
+			);
 
-				expect(extractAssistantText(firstTurn)).toContain("ACK");
-				expect(extractAssistantText(secondTurn)).toContain("BANANA");
-				expect(firstTurn.some((event) => event.type === "message_update")).toBe(true);
-				expect(secondTurn.some((event) => event.type === "message_update")).toBe(true);
-			} finally {
-				await adapter.close();
-			}
-		},
-		90_000,
-	);
+			expect(extractAssistantText(firstTurn)).toContain("ACK");
+			expect(extractAssistantText(secondTurn)).toContain("BANANA");
+			expect(firstTurn.some((event) => event.type === "message_update")).toBe(true);
+			expect(secondTurn.some((event) => event.type === "message_update")).toBe(true);
+		} finally {
+			await adapter.close();
+		}
+	}, 90_000);
 
-	it(
-		"streams a real conversation with thinking enabled",
-		async () => {
-			if (!(await ensurePiMonoSessionAvailable())) {
-				return;
-			}
-			const adapter = await createLiveAdapter({ thinkingLevel: "minimal" });
-			try {
-				const events = await collectEvents(adapter.sendPrompt("Reply exactly THINKING_ON_OK."));
-				expect(extractAssistantText(events)).toContain("THINKING_ON_OK");
-			} finally {
-				await adapter.close();
-			}
-		},
-		90_000,
-	);
+	it("streams a real conversation with thinking enabled", async () => {
+		if (!(await ensurePiMonoSessionAvailable())) {
+			return;
+		}
+		const adapter = await createLiveAdapter({ thinkingLevel: "minimal" });
+		try {
+			const events = await collectEvents(adapter.sendPrompt("Reply exactly THINKING_ON_OK."));
+			expect(extractAssistantText(events)).toContain("THINKING_ON_OK");
+		} finally {
+			await adapter.close();
+		}
+	}, 90_000);
 });
 
 anthropicDescribe("Anthropic live adapter", () => {
-	it(
-		"sends a non-streaming Anthropic-compatible request",
-		async () => {
-			const availability = await ensureAnthropicAvailable();
-			if (!availability.available || !availability.modelId) {
-				console.warn(`Skipping Anthropic direct request checks: ${availability.reason}`);
-				return;
-			}
+	it("sends a non-streaming Anthropic-compatible request", async () => {
+		const availability = await ensureAnthropicAvailable();
+		if (!availability.available || !availability.modelId) {
+			console.warn(`Skipping Anthropic direct request checks: ${availability.reason}`);
+			return;
+		}
 
-			const response = await requestAnthropicCompletion(availability.modelId, "Reply exactly LIVE_ANTHROPIC_OK", false, false);
-			expect(response.status).toBe(200);
-			const payload = (await response.json()) as {
-				content?: Array<{ type?: string; text?: string }>;
-			};
-			const text = (payload.content ?? [])
-				.filter((item) => item.type === "text")
-				.map((item) => item.text ?? "")
-				.join("");
-			expect(text).toContain("LIVE_ANTHROPIC_OK");
-		},
-		30_000,
-	);
+		const response = await requestAnthropicCompletion(
+			availability.modelId,
+			"Reply exactly LIVE_ANTHROPIC_OK",
+			false,
+			false,
+		);
+		expect(response.status).toBe(200);
+		const payload = (await response.json()) as {
+			content?: Array<{ type?: string; text?: string }>;
+		};
+		const text = (payload.content ?? [])
+			.filter((item) => item.type === "text")
+			.map((item) => item.text ?? "")
+			.join("");
+		expect(text).toContain("LIVE_ANTHROPIC_OK");
+	}, 30_000);
 
-	it(
-		"streams a real Anthropic-compatible conversation with thinking enabled",
-		async () => {
-			const availability = await ensureAnthropicAvailable();
-			if (!availability.available || !availability.modelId) {
-				console.warn(`Skipping Anthropic session checks: ${availability.reason}`);
-				return;
-			}
+	it("streams a real Anthropic-compatible conversation with thinking enabled", async () => {
+		const availability = await ensureAnthropicAvailable();
+		if (!availability.available || !availability.modelId) {
+			console.warn(`Skipping Anthropic session checks: ${availability.reason}`);
+			return;
+		}
 
-			const adapter = await createLiveAdapter({
-				thinkingLevel: "minimal",
-				baseUrl: process.env.GENESIS_LIVE_ANTHROPIC_BASE_URL!,
-				api: "anthropic-messages",
-				authHeader: false,
-				modelId: availability.modelId,
-			});
-			try {
-				const events = await collectEvents(adapter.sendPrompt("Reply exactly ANTHROPIC_SESSION_OK."));
-				expect(extractAssistantText(events)).toContain("ANTHROPIC_SESSION_OK");
-			} finally {
-				await adapter.close();
-			}
-		},
-		90_000,
-	);
+		const adapter = await createLiveAdapter({
+			thinkingLevel: "minimal",
+			baseUrl: process.env.GENESIS_LIVE_ANTHROPIC_BASE_URL!,
+			api: "anthropic-messages",
+			authHeader: false,
+			modelId: availability.modelId,
+		});
+		try {
+			const events = await collectEvents(adapter.sendPrompt("Reply exactly ANTHROPIC_SESSION_OK."));
+			expect(extractAssistantText(events)).toContain("ANTHROPIC_SESSION_OK");
+		} finally {
+			await adapter.close();
+		}
+	}, 90_000);
 });
 
 async function createLiveAdapter(options: {

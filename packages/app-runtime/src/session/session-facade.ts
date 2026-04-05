@@ -80,7 +80,10 @@ export class SessionFacadeImpl implements SessionFacade {
 	private readonly _usesAdapterGovernanceHook: boolean;
 	private readonly _stateListeners = new Set<(state: SessionState) => void>();
 	private readonly _pendingPermissions = new Map<string, { toolName: string; riskLevel: string }>();
-	private readonly _bufferedToolExecutions = new Map<string, { startedEvent: ToolStartedEvent; bufferedEvents: RuntimeEvent[] }>();
+	private readonly _bufferedToolExecutions = new Map<
+		string,
+		{ startedEvent: ToolStartedEvent; bufferedEvents: RuntimeEvent[] }
+	>();
 	private readonly _deniedToolCalls = new Set<string>();
 	private _closed = false;
 	private _running = false;

@@ -1,4 +1,4 @@
-import { streamSimple, type Context, type Model, type SimpleStreamOptions } from "@mariozechner/pi-ai";
+import { type Context, type Model, type SimpleStreamOptions, streamSimple } from "@mariozechner/pi-ai";
 import { streamAnthropicMessages } from "./providers/anthropic.js";
 import { streamOpenAiCompletions } from "./providers/openai.js";
 
@@ -17,11 +17,9 @@ const builtinProviderHandlers = new Map<string, KernelProviderHandler>([
 	[
 		"openai-completions",
 		(model, context, options) =>
-			streamOpenAiCompletions(
-				model as Model<"openai-completions">,
-				context,
-				options,
-			) as unknown as ReturnType<typeof streamSimple>,
+			streamOpenAiCompletions(model as Model<"openai-completions">, context, options) as unknown as ReturnType<
+				typeof streamSimple
+			>,
 	],
 	[
 		"anthropic-messages",
@@ -31,11 +29,9 @@ const builtinProviderHandlers = new Map<string, KernelProviderHandler>([
 		// Do not expand Anthropic-specific behavior unless the OpenAI mainline and
 		// user-facing product layer milestones are already stable.
 		(model, context, options) =>
-			streamAnthropicMessages(
-				model as Model<"anthropic-messages">,
-				context,
-				options,
-			) as unknown as ReturnType<typeof streamSimple>,
+			streamAnthropicMessages(model as Model<"anthropic-messages">, context, options) as unknown as ReturnType<
+				typeof streamSimple
+			>,
 	],
 ]);
 

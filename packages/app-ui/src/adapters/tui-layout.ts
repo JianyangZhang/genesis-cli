@@ -41,7 +41,13 @@ export interface ConversationRegion {
 }
 
 /** A single line in the conversation area. */
-export type ConversationLine = TextLine | ToolCallLine | PermissionPromptLine | PermissionResultLine | PlanStepLine | DividerLine;
+export type ConversationLine =
+	| TextLine
+	| ToolCallLine
+	| PermissionPromptLine
+	| PermissionResultLine
+	| PlanStepLine
+	| DividerLine;
 
 export interface TextLine {
 	readonly type: "text";

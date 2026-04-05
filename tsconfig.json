@@ -27,6 +27,7 @@
 	"references": [
 		{ "path": "packages/app-config" },
 		{ "path": "packages/app-tools" },
+		{ "path": "packages/pi-ai" },
 		{ "path": "packages/kernel" },
 		{ "path": "packages/app-runtime" },
 		{ "path": "packages/app-ui" },

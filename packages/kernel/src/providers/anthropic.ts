@@ -4,9 +4,7 @@ import type {
 	Model,
 	SimpleStreamOptions,
 	TextContent,
-	ThinkingContent,
 	Tool,
-	ToolCall,
 	ToolResultMessage,
 	UserMessage,
 } from "@mariozechner/pi-ai";
@@ -15,9 +13,8 @@ import {
 	asNumber,
 	asString,
 	createAssistantMessage,
-	emptyUsage,
-	iterateSseData,
 	isRecord,
+	iterateSseData,
 	resolveEndpoint,
 	safeParseJson,
 } from "./shared.js";
@@ -37,7 +34,14 @@ type KernelAnthropicStreamOptions = SimpleStreamOptions & {
 type KernelAnthropicContentBlock =
 	| { type: "text"; text: string; index: number }
 	| { type: "thinking"; thinking: string; thinkingSignature?: string; redacted?: boolean; index: number }
-	| { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown>; partialJson?: string; index: number };
+	| {
+			type: "toolCall";
+			id: string;
+			name: string;
+			arguments: Record<string, unknown>;
+			partialJson?: string;
+			index: number;
+	  };
 
 export function streamAnthropicMessages(
 	model: Model<"anthropic-messages">,
@@ -73,7 +77,9 @@ export function streamAnthropicMessages(
 			stream.push({ type: "start", partial: output });
 
 			const blocks = output.content as KernelAnthropicContentBlock[];
-			const findBlock = (eventIndex: number): { block: KernelAnthropicContentBlock; contentIndex: number } | null => {
+			const findBlock = (
+				eventIndex: number,
+			): { block: KernelAnthropicContentBlock; contentIndex: number } | null => {
 				const contentIndex = blocks.findIndex((candidate) => candidate.index === eventIndex);
 				if (contentIndex === -1) {
 					return null;
@@ -270,7 +276,8 @@ function buildRequestBody(
 ): Record<string, unknown> {
 	const body: Record<string, unknown> = {
 		model: model.id,
-		max_tokens: typeof options?.maxTokens === "number" ? options.maxTokens : Math.max(1024, Math.floor(model.maxTokens / 3)),
+		max_tokens:
+			typeof options?.maxTokens === "number" ? options.maxTokens : Math.max(1024, Math.floor(model.maxTokens / 3)),
 		messages: convertMessages(context.messages),
 		stream: true,
 	};
@@ -389,7 +396,9 @@ function convertUserMessage(message: UserMessage): Record<string, unknown> {
 	};
 }
 
-function convertAssistantContent(message: Extract<import("@mariozechner/pi-ai").Message, { role: "assistant" }>): Record<string, unknown>[] {
+function convertAssistantContent(
+	message: Extract<import("@mariozechner/pi-ai").Message, { role: "assistant" }>,
+): Record<string, unknown>[] {
 	const blocks: Record<string, unknown>[] = [];
 
 	for (const block of message.content) {

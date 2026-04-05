@@ -1,15 +1,15 @@
 // Runtime — the shared product-layer runtime.
 
-// Adapters
-export type { KernelSessionAdapter, RawUpstreamEvent } from "./adapters/kernel-session-adapter.js";
 export {
 	bridgePiMonoEvent,
 	createInitialBridgeState,
-	PiMonoSessionAdapter,
 	type PiMonoBridgeResult,
 	type PiMonoBridgeState,
+	PiMonoSessionAdapter,
 	type PiMonoSessionAdapterOptions,
 } from "./adapters/index.js";
+// Adapters
+export type { KernelSessionAdapter, RawUpstreamEvent } from "./adapters/kernel-session-adapter.js";
 export type { AppRuntime, AppRuntimeConfig } from "./create-app-runtime.js";
 // Entry point
 export { createAppRuntime } from "./create-app-runtime.js";

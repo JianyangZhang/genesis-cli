@@ -40,8 +40,7 @@ export function createLayoutAccumulator(sessionState: SessionState | (() => Sess
 	const lines: ConversationLine[] = [];
 	// Track active tool calls so we can update their status on completion.
 	const activeToolCalls = new Map<string, number>(); // toolCallId → index in lines[]
-	const getSessionState =
-		typeof sessionState === "function" ? sessionState : () => sessionState;
+	const getSessionState = typeof sessionState === "function" ? sessionState : () => sessionState;
 
 	return {
 		push(event: RuntimeEvent): void {

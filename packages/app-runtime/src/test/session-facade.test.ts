@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KernelSessionAdapter, RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
+import { createAppRuntime } from "../create-app-runtime.js";
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
 import { createToolGovernor } from "../governance/tool-governor.js";
@@ -7,7 +8,6 @@ import { createPlanEngine } from "../planning/plan-engine.js";
 import { createRuntimeContext } from "../runtime-context.js";
 import { SessionFacadeImpl } from "../session/session-facade.js";
 import { createInitialSessionState } from "../session/session-state.js";
-import { createAppRuntime } from "../create-app-runtime.js";
 import type { ModelDescriptor, SessionId, SessionState } from "../types/index.js";
 import { StubKernelSessionAdapter } from "./stubs/stub-kernel-session-adapter.js";
 

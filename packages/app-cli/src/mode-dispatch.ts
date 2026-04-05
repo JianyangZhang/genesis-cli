@@ -5,9 +5,9 @@
  * from it. Mode-specific behavior is isolated to how events are rendered.
  */
 
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
 import type { InteractionState, OutputSink, SlashCommand, TuiScreenLayout } from "@genesis-cli/ui";
 import {
@@ -16,8 +16,8 @@ import {
 	ansiEnterAlternateScreen,
 	ansiExitAlternateScreen,
 	ansiHideCursor,
-	ansiMoveUp,
 	ansiMoveRight,
+	ansiMoveUp,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createLayoutAccumulator,
@@ -86,15 +86,13 @@ function createStdoutSink(): OutputSink {
 class InteractiveModeHandler implements ModeHandler {
 	private _lastRenderedLines = 0;
 	private _pendingPermissionCallId: string | null = null;
-	private _pendingPermissionDetails:
-		| {
-				toolName: string;
-				toolCallId: string;
-				riskLevel: string;
-				reason?: string;
-				targetPath?: string;
-		  }
-		| null = null;
+	private _pendingPermissionDetails: {
+		toolName: string;
+		toolCallId: string;
+		riskLevel: string;
+		reason?: string;
+		targetPath?: string;
+	} | null = null;
 	private _activeTurn: Promise<void> | null = null;
 	private readonly _prompt = "genesis> ";
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
@@ -124,7 +122,7 @@ class InteractiveModeHandler implements ModeHandler {
 		// Layout accumulator for TUI
 		const accumulator = createLayoutAccumulator(() => sessionRef.current.state);
 		let interactionState: InteractionState = initialInteractionState();
-		let sessionTitle: string | undefined = undefined;
+		let sessionTitle: string | undefined;
 		const onResize = (): void => {
 			this._terminalRows = process.stdout.rows ?? 24;
 			this.renderScreenUpdate(accumulator.snapshot());
@@ -574,8 +572,8 @@ class InteractiveModeHandler implements ModeHandler {
 				const data =
 					selector.length === 0
 						? await readLastSession(dir)
-						: (await readRecentSessions(dir)).find((entry) => entry.recoveryData.sessionId.value === selector)
-								?.recoveryData ?? null;
+						: ((await readRecentSessions(dir)).find((entry) => entry.recoveryData.sessionId.value === selector)
+								?.recoveryData ?? null);
 
 				if (!data) {
 					ctx.output.writeError(
@@ -741,7 +739,10 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write(ansiShowCursor());
 	}
 
-	private handleSpecialKey(key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc", snapshot: TuiScreenLayout): void {
+	private handleSpecialKey(
+		key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc",
+		snapshot: TuiScreenLayout,
+	): void {
 		const maxConversationLines = Math.max(0, this._terminalRows - 3);
 		const maxOffset = Math.max(0, snapshot.conversation.lines.length - maxConversationLines);
 
@@ -765,12 +766,18 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		if (key === "pageup") {
-			this._viewportOffsetFromBottom = Math.min(maxOffset, this._viewportOffsetFromBottom + Math.max(1, Math.floor(maxConversationLines / 2)));
+			this._viewportOffsetFromBottom = Math.min(
+				maxOffset,
+				this._viewportOffsetFromBottom + Math.max(1, Math.floor(maxConversationLines / 2)),
+			);
 			this.renderScreenUpdate(snapshot);
 			return;
 		}
 		if (key === "pagedown") {
-			this._viewportOffsetFromBottom = Math.max(0, this._viewportOffsetFromBottom - Math.max(1, Math.floor(maxConversationLines / 2)));
+			this._viewportOffsetFromBottom = Math.max(
+				0,
+				this._viewportOffsetFromBottom - Math.max(1, Math.floor(maxConversationLines / 2)),
+			);
 			this.renderScreenUpdate(snapshot);
 			return;
 		}
@@ -798,7 +805,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		const next = Math.max(0, Math.min(this._history.length, this._historyIndex + direction));
 		this._historyIndex = next;
-		const text = next === this._history.length ? "" : this._history[next] ?? "";
+		const text = next === this._history.length ? "" : (this._history[next] ?? "");
 		this._inputState = { buffer: text, cursor: text.length };
 		this.renderPromptLine();
 	}

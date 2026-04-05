@@ -5,7 +5,7 @@
 	"description": "Genesis CLI, a next-generation coding CLI built on pi-mono",
 	"workspaces": ["packages/*"],
 	"scripts": {
-		"build": "npm run build --workspaces",
+		"build": "npm run build -w @mariozechner/pi-ai && npm run build --workspaces",
 		"chat": "node ./packages/app-cli/dist/main.js",
 		"chat:live": "node --env-file=.env.local ./packages/app-cli/dist/main.js",
 		"check": "npm run check:lint && npm run check:format && npm run check:types",
@@ -13,7 +13,7 @@
 		"check:format": "biome check --formatter-enabled=true --linter-enabled=false packages/",
 		"check:types": "tsc --build",
 		"test:live:pi-mono": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run packages/app-runtime/src/test/pi-mono-live.test.ts",
-		"test": "vitest run --passWithNoTests",
+		"test": "npm run build --workspaces && vitest run --passWithNoTests",
 		"prepare": "husky"
 	},
 	"engines": {

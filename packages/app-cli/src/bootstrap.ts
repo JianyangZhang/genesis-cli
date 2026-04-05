@@ -40,10 +40,9 @@ export async function ensureAgentDirBootstrapped(options: EnsureBootstrapOptions
 	const baseUrl = explicitBaseUrl ?? resolveDefaultBootstrapBaseUrl();
 	const api = options.bootstrapApi ?? "openai-completions";
 	const apiKeyEnv = options.bootstrapApiKeyEnv ?? "GENESIS_API_KEY";
-	const authHeader = options.bootstrapAuthHeader ?? (api !== "anthropic-messages");
+	const authHeader = options.bootstrapAuthHeader ?? api !== "anthropic-messages";
 	const reasoning =
-		options.bootstrapReasoning ??
-		(options.thinkingLevel !== undefined ? options.thinkingLevel !== "off" : false);
+		options.bootstrapReasoning ?? (options.thinkingLevel !== undefined ? options.thinkingLevel !== "off" : false);
 
 	await mkdir(options.agentDir, { recursive: true });
 	const modelsPath = resolve(options.agentDir, "models.json");
@@ -91,16 +90,19 @@ export async function ensureAgentDirBootstrapped(options: EnsureBootstrapOptions
 		...(Object.keys(compat).length > 0 ? { compat } : {}),
 	};
 
-	const nextModels = [
-		...existingModels.filter((model) => model.id !== options.modelId),
-		nextModel,
-	];
+	const nextModels = [...existingModels.filter((model) => model.id !== options.modelId), nextModel];
 
 	providers[providerKey] = {
 		...providerRecord,
-		baseUrl: typeof providerRecord.baseUrl === "string" && providerRecord.baseUrl.length > 0 ? providerRecord.baseUrl : baseUrl,
+		baseUrl:
+			typeof providerRecord.baseUrl === "string" && providerRecord.baseUrl.length > 0
+				? providerRecord.baseUrl
+				: baseUrl,
 		api: typeof providerRecord.api === "string" && providerRecord.api.length > 0 ? providerRecord.api : api,
-		apiKey: typeof providerRecord.apiKey === "string" && providerRecord.apiKey.length > 0 ? providerRecord.apiKey : apiKeyEnv,
+		apiKey:
+			typeof providerRecord.apiKey === "string" && providerRecord.apiKey.length > 0
+				? providerRecord.apiKey
+				: apiKeyEnv,
 		authHeader: typeof providerRecord.authHeader === "boolean" ? providerRecord.authHeader : authHeader,
 		models: nextModels,
 	};

@@ -216,7 +216,9 @@ describe("Permission resolution flow", () => {
 
 		await facade.prompt("write something");
 
-		await expect(facade.resolvePermission("nonexistent-call-id", "deny")).rejects.toThrow("No pending permission request");
+		await expect(facade.resolvePermission("nonexistent-call-id", "deny")).rejects.toThrow(
+			"No pending permission request",
+		);
 
 		await facade.close();
 	});

@@ -52,4 +52,3 @@ describe("ensureAgentDirBootstrapped", () => {
 		expect(after).toBe(before);
 	});
 });
-

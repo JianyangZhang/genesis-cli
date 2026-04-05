@@ -197,7 +197,7 @@ function createRawInputLoop(options: {
 			setState({ buffer: next, cursor });
 			return;
 		}
-	}
+	};
 
 	const onData = (chunk: Buffer): void => {
 		if (closed) return;

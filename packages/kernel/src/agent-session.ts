@@ -5,13 +5,7 @@ import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
 import { streamWithKernelProvider } from "./provider-registry.js";
 import { SessionManager } from "./session-manager.js";
-import {
-	createBashTool,
-	createEditTool,
-	createReadTool,
-	createWriteTool,
-	type KernelTool,
-} from "./tools.js";
+import { createBashTool, createEditTool, createReadTool, createWriteTool, type KernelTool } from "./tools.js";
 
 export interface CreateAgentSessionOptions {
 	readonly cwd: string;
@@ -87,9 +81,11 @@ class GenesisAgentSessionImpl implements GenesisAgentSession {
 }
 
 export async function createAgentSession(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
-	const authStorage = options.authStorage ?? AuthStorage.create(options.agentDir ? join(options.agentDir, "auth.json") : undefined);
+	const authStorage =
+		options.authStorage ?? AuthStorage.create(options.agentDir ? join(options.agentDir, "auth.json") : undefined);
 	const modelRegistry =
-		options.modelRegistry ?? ModelRegistry.create(authStorage, options.agentDir ? join(options.agentDir, "models.json") : undefined);
+		options.modelRegistry ??
+		ModelRegistry.create(authStorage, options.agentDir ? join(options.agentDir, "models.json") : undefined);
 	const sessionManager = options.sessionManager ?? SessionManager.create(options.cwd);
 	const model = options.model ?? modelRegistry.list()[0];
 
@@ -115,7 +111,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions): Pr
 			const mergedOptions = {
 				...streamOptions,
 				apiKey: auth.apiKey,
-				headers: auth.headers ? { ...(auth.headers ?? {}), ...(streamOptions?.headers ?? {}) } : streamOptions?.headers,
+				headers: auth.headers
+					? { ...(auth.headers ?? {}), ...(streamOptions?.headers ?? {}) }
+					: streamOptions?.headers,
 			};
 			return streamWithKernelProvider(activeModel, context, mergedOptions);
 		},

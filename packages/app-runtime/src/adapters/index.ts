@@ -2,8 +2,8 @@
 
 export type { KernelSessionAdapter, RawUpstreamEvent } from "./kernel-session-adapter.js";
 export {
-	createInitialBridgeState,
 	bridgePiMonoEvent,
+	createInitialBridgeState,
 	type PiMonoBridgeResult,
 	type PiMonoBridgeState,
 } from "./pi-mono-event-bridge.js";

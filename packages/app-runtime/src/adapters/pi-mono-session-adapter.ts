@@ -1,14 +1,9 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { resolve as resolvePath } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
-import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";
-import type {
-	KernelSessionAdapter,
-	RawUpstreamEvent,
-	ToolExecutionGate,
-} from "./kernel-session-adapter.js";
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
+import type { KernelSessionAdapter, RawUpstreamEvent, ToolExecutionGate } from "./kernel-session-adapter.js";
+import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";
 
 type PermissionDecision = "allow" | "allow_for_session" | "allow_once" | "deny";
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -52,7 +47,10 @@ interface PiMonoSdk {
 		create(filePath?: string): unknown;
 	};
 	ModelRegistry: {
-		create(authStorage: unknown, modelsPath?: string): {
+		create(
+			authStorage: unknown,
+			modelsPath?: string,
+		): {
 			find(provider: string, modelId: string): PiMonoModel | undefined;
 		};
 	};
@@ -171,10 +169,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		this.pendingRecoveryData = data;
 	}
 
-	private async *runPromptLikeOperation(
-		input: string,
-		mode: "prompt" | "continue",
-	): AsyncIterable<RawUpstreamEvent> {
+	private async *runPromptLikeOperation(input: string, mode: "prompt" | "continue"): AsyncIterable<RawUpstreamEvent> {
 		if (this.closed) {
 			throw new Error("Session adapter is closed");
 		}
@@ -449,7 +444,13 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 					signal?: AbortSignal,
 					onUpdate?: Parameters<PiMonoTool["execute"]>[3],
 				) => {
-					return await this.executeGuardedTool(tool, toolCallId, params as Record<string, unknown>, signal, onUpdate);
+					return await this.executeGuardedTool(
+						tool,
+						toolCallId,
+						params as Record<string, unknown>,
+						signal,
+						onUpdate,
+					);
 				},
 			};
 		});
@@ -462,12 +463,11 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		signal?: AbortSignal,
 		onUpdate?: Parameters<PiMonoTool["execute"]>[3],
 	): Promise<ReturnType<PiMonoTool["execute"]> extends Promise<infer TResult> ? TResult : never> {
-		const decision =
-			this.toolExecutionGate?.beforeToolExecution({
-				toolName: tool.name,
-				toolCallId,
-				parameters,
-			}) ?? { type: "allow" as const };
+		const decision = this.toolExecutionGate?.beforeToolExecution({
+			toolName: tool.name,
+			toolCallId,
+			parameters,
+		}) ?? { type: "allow" as const };
 
 		if (decision.type === "allow") {
 			this.approveToolCall(toolCallId);

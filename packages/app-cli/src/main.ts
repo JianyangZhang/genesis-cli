@@ -2,7 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createAppRuntime, PiMonoSessionAdapter, type CliMode, type ModelDescriptor } from "@genesis-cli/runtime";
+import { type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@genesis-cli/runtime";
 import { ensureAgentDirBootstrapped } from "./bootstrap.js";
 import { createModeHandler } from "./mode-dispatch.js";
 
@@ -135,7 +135,8 @@ async function resolveCliOptions(flags: Readonly<Record<string, string | boolean
 	const mode = readModeFlag(flags, "mode", "interactive");
 
 	const sources: Record<string, { layer: SourceLayer; detail: string }> = {};
-	sources.cwd = typeof flags.cwd === "string" ? { layer: "cli", detail: "--cwd" } : { layer: "default", detail: "process.cwd()" };
+	sources.cwd =
+		typeof flags.cwd === "string" ? { layer: "cli", detail: "--cwd" } : { layer: "default", detail: "process.cwd()" };
 	sources.agentDir =
 		typeof flags["agent-dir"] === "string"
 			? { layer: "cli", detail: "--agent-dir" }
@@ -346,11 +347,7 @@ async function readOptionalJson(filePath: string): Promise<FileConfig | null> {
 	}
 }
 
-function readModeFlag(
-	flags: Readonly<Record<string, string | boolean>>,
-	key: string,
-	fallback: CliMode,
-): CliMode {
+function readModeFlag(flags: Readonly<Record<string, string | boolean>>, key: string, fallback: CliMode): CliMode {
 	const value = readStringFlag(flags, key, fallback);
 	if (value === "interactive" || value === "print" || value === "json" || value === "rpc") {
 		return value;
@@ -358,11 +355,7 @@ function readModeFlag(
 	throw new Error(`Unsupported mode: ${value}`);
 }
 
-function readStringFlag(
-	flags: Readonly<Record<string, string | boolean>>,
-	key: string,
-	fallback: string,
-): string {
+function readStringFlag(flags: Readonly<Record<string, string | boolean>>, key: string, fallback: string): string {
 	const value = flags[key];
 	return typeof value === "string" && value.length > 0 ? value : fallback;
 }
@@ -379,7 +372,7 @@ function readOptionalStringFlag(
 	return fallback;
 }
 
-function readBooleanFlag(
+function _readBooleanFlag(
 	flags: Readonly<Record<string, string | boolean>>,
 	key: string,
 	envValue: string | undefined,
