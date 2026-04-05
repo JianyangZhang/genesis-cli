@@ -231,6 +231,27 @@ export interface ThinkingDeltaEvent extends BaseEvent {
 export type TextStreamEvent = TextDeltaEvent | ThinkingDeltaEvent;
 
 // ---------------------------------------------------------------------------
+// 7. Token Usage
+// ---------------------------------------------------------------------------
+
+export interface TokenUsage {
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead: number;
+	readonly cacheWrite: number;
+	readonly totalTokens: number;
+}
+
+export interface UsageUpdatedEvent extends BaseEvent {
+	readonly category: "usage";
+	readonly type: "usage_updated";
+	readonly usage: TokenUsage;
+	readonly isFinal: boolean;
+}
+
+export type UsageEvent = UsageUpdatedEvent;
+
+// ---------------------------------------------------------------------------
 // Union of all product-layer events
 // ---------------------------------------------------------------------------
 
@@ -240,4 +261,5 @@ export type RuntimeEvent =
 	| PlanProgressEvent
 	| CompactionEvent
 	| PermissionDecisionEvent
-	| TextStreamEvent;
+	| TextStreamEvent
+	| UsageEvent;

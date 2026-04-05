@@ -133,6 +133,8 @@ function extractRpcParams(event: RuntimeEvent): Readonly<Record<string, unknown>
 		"riskLevel",
 		"decision",
 		"content",
+		"usage",
+		"isFinal",
 		"recoveryData",
 	] as const;
 

@@ -89,6 +89,11 @@ export function sanitizeForJson(event: RuntimeEvent): Readonly<Record<string, un
 			if ("content" in event) base.content = event.content;
 			break;
 		}
+		case "usage": {
+			if ("usage" in event) base.usage = event.usage;
+			if ("isFinal" in event) base.isFinal = event.isFinal;
+			break;
+		}
 	}
 
 	return base;

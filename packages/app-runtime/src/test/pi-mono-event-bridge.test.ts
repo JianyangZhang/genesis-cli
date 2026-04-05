@@ -64,6 +64,85 @@ describe("PiMonoEventBridge", () => {
 		]);
 	});
 
+	it("emits usage updates from streaming partial messages", () => {
+		const state = createInitialBridgeState({
+			model: { id: "glm-5.1", provider: "zai" },
+			toolSet: [],
+		});
+
+		const result = bridgePiMonoEvent(
+			{
+				type: "message_update",
+				message: {} as never,
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					contentIndex: 0,
+					delta: "reasoning",
+					partial: {
+						usage: {
+							input: 120,
+							output: 45,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 165,
+						},
+					} as never,
+				},
+			} as never,
+			state,
+		);
+
+		expect(result.rawEvents).toContainEqual(
+			expect.objectContaining({
+				type: "usage_update",
+				payload: expect.objectContaining({
+					input: 120,
+					output: 45,
+					totalTokens: 165,
+					isFinal: false,
+				}),
+			}),
+		);
+	});
+
+	it("emits final usage updates from assistant message_end", () => {
+		const state = createInitialBridgeState({
+			model: { id: "glm-5.1", provider: "zai" },
+			toolSet: [],
+		});
+
+		const result = bridgePiMonoEvent(
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					usage: {
+						input: 200,
+						output: 80,
+						cacheRead: 10,
+						cacheWrite: 0,
+						totalTokens: 290,
+					},
+				},
+			} as never,
+			state,
+		);
+
+		expect(result.rawEvents).toEqual([
+			expect.objectContaining({
+				type: "usage_update",
+				payload: {
+					input: 200,
+					output: 80,
+					cacheRead: 10,
+					cacheWrite: 0,
+					totalTokens: 290,
+					isFinal: true,
+				},
+			}),
+		]);
+	});
+
 	it("tracks tool execution lifecycle", () => {
 		const state = createInitialBridgeState({
 			model: { id: "glm-5.1", provider: "zai" },

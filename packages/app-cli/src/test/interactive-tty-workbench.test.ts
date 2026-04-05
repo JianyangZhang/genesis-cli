@@ -181,6 +181,7 @@ class FakeInteractiveSession implements SessionFacade {
 				type: "text_delta",
 				content: "Hi from Genesis",
 			} as RuntimeEvent);
+			this.emitUsage("usage-hello-final", { input: 120, output: 24, totalTokens: 144 }, true);
 			return;
 		}
 
@@ -193,7 +194,8 @@ class FakeInteractiveSession implements SessionFacade {
 				type: "thinking_delta",
 				content: "...",
 			} as RuntimeEvent);
-			await sleep(900);
+			this.emitUsage("usage-slow-partial", { input: 180, output: 32, totalTokens: 212 }, false);
+			await sleep(2300);
 			this.emit({
 				id: "text-slow-1",
 				timestamp: Date.now(),
@@ -202,6 +204,7 @@ class FakeInteractiveSession implements SessionFacade {
 				type: "text_delta",
 				content: "First delayed reply",
 			} as RuntimeEvent);
+			this.emitUsage("usage-slow-final", { input: 180, output: 64, totalTokens: 244 }, true);
 			return;
 		}
 
@@ -214,6 +217,7 @@ class FakeInteractiveSession implements SessionFacade {
 				type: "text_delta",
 				content: "Queued follow-up reply",
 			} as RuntimeEvent);
+			this.emitUsage("usage-queued-final", { input: 90, output: 33, totalTokens: 123 }, true);
 			return;
 		}
 
@@ -385,6 +389,28 @@ class FakeInteractiveSession implements SessionFacade {
 		this.events.emit(event);
 	}
 
+	private emitUsage(
+		id: string,
+		usage: { input: number; output: number; totalTokens: number; cacheRead?: number; cacheWrite?: number },
+		isFinal: boolean,
+	): void {
+		this.emit({
+			id,
+			timestamp: Date.now(),
+			sessionId: this.id,
+			category: "usage",
+			type: "usage_updated",
+			usage: {
+				input: usage.input,
+				output: usage.output,
+				cacheRead: usage.cacheRead ?? 0,
+				cacheWrite: usage.cacheWrite ?? 0,
+				totalTokens: usage.totalTokens,
+			},
+			isFinal,
+		} as RuntimeEvent);
+	}
+
 	private emitBashExecution(callId: string, command: string, result: string): void {
 		this.emit({
 			id: `tool-start-${callId}`,
@@ -552,7 +578,7 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
-	it("animates thinking and previews queued prompts before the next turn starts", async () => {
+	it("animates thinking, shows elapsed time and usage, and previews queued prompts before the next turn starts", async () => {
 		const session = new FakeInteractiveSession();
 		const runtime = createFakeRuntime(session);
 		const input = new FakeTtyInput();
@@ -564,6 +590,7 @@ describe("interactive workbench TTY", () => {
 
 			input.write("slow hello\r");
 			await waitFor(() => screen.snapshot().includes("Thinking."));
+			await waitFor(() => screen.snapshot().includes("Σ212"));
 
 			input.write("queued followup\r");
 			await waitFor(() => screen.snapshot().includes("Queued: queued followup"));
@@ -571,12 +598,17 @@ describe("interactive workbench TTY", () => {
 				const snapshot = screen.snapshot();
 				return snapshot.includes("Thinking..") || snapshot.includes("Thinking...");
 			}, 2000);
-			await waitFor(() => screen.snapshot().includes("First delayed reply"), 3000);
+			await waitFor(() => screen.snapshot().includes("2s"), 3000);
+			await waitFor(() => screen.snapshot().includes("First delayed reply"), 4000);
 			await waitFor(() => screen.snapshot().includes("Queued follow-up reply"), 3000);
 
 			const snapshot = screen.snapshot();
 			expect(snapshot).toContain("queued followup");
 			expect(snapshot).toContain("Queued follow-up reply");
+			expect(snapshot).toContain("Last turn");
+			expect(snapshot).toContain("Session");
+			expect(snapshot).toContain("Σ123");
+			expect(snapshot).toContain("Σ367");
 
 			input.write("/exit\r");
 			await startPromise;

@@ -194,6 +194,25 @@ describe("formatEventAsText", () => {
 		const text = formatEventAsText(event);
 		expect(text).toBe("");
 	});
+
+	it("formats final usage summaries", () => {
+		const event: RuntimeEvent = {
+			...base,
+			category: "usage",
+			type: "usage_updated",
+			usage: {
+				input: 120,
+				output: 24,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 144,
+			},
+			isFinal: true,
+		};
+		const text = formatEventAsText(event);
+		expect(text).toContain("Usage:");
+		expect(text).toContain("total 144");
+	});
 });
 
 describe("formatToolStep", () => {

@@ -54,6 +54,8 @@ export function formatEventAsText(event: RuntimeEvent): string {
 			return formatPermissionEvent(event);
 		case "text":
 			return formatTextEvent(event);
+		case "usage":
+			return formatUsageEvent(event);
 		default:
 			return "";
 	}
@@ -201,6 +203,19 @@ function formatTextEvent(event: RuntimeEvent): string {
 	}
 	// thinking_delta — not shown in print mode by default
 	return "";
+}
+
+function formatUsageEvent(event: RuntimeEvent): string {
+	if (event.type !== "usage_updated" || !event.isFinal) {
+		return "";
+	}
+	const parts: string[] = [];
+	if (event.usage.input > 0) parts.push(`in ${event.usage.input}`);
+	if (event.usage.output > 0) parts.push(`out ${event.usage.output}`);
+	if (event.usage.cacheRead > 0) parts.push(`cache read ${event.usage.cacheRead}`);
+	if (event.usage.cacheWrite > 0) parts.push(`cache write ${event.usage.cacheWrite}`);
+	parts.push(`total ${event.usage.totalTokens}`);
+	return `${DIM}Usage:${RESET} ${parts.join(", ")}`;
 }
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,15 @@ type PiMonoBridgeEvent =
 	| { type: "agent_end" }
 	| {
 			type: "message_update";
-			assistantMessageEvent: { type: "text_delta" | "thinking_delta"; delta: string };
+			assistantMessageEvent: {
+				type: string;
+				delta?: string;
+				partial?: unknown;
+			};
+	  }
+	| {
+			type: "message_end";
+			message?: unknown;
 	  }
 	| {
 			type: "tool_execution_start";
@@ -37,6 +45,7 @@ export interface PiMonoBridgeState {
 	} | null;
 	readonly toolSet: readonly string[];
 	readonly toolStartedAtById: ReadonlyMap<string, number>;
+	readonly lastUsageSignature: string | null;
 }
 
 export interface PiMonoBridgeResult {
@@ -52,6 +61,7 @@ export function createInitialBridgeState(params: {
 		model: params.model,
 		toolSet: [...params.toolSet],
 		toolStartedAtById: new Map(),
+		lastUsageSignature: null,
 	};
 }
 
@@ -59,6 +69,7 @@ export function bridgePiMonoEvent(event: PiMonoBridgeEvent, state: PiMonoBridgeS
 	const timestamp = Date.now();
 	const rawEvents: RawUpstreamEvent[] = [];
 	const toolStartedAtById = new Map(state.toolStartedAtById);
+	let lastUsageSignature = state.lastUsageSignature;
 
 	switch (event.type) {
 		case "agent_start":
@@ -77,9 +88,18 @@ export function bridgePiMonoEvent(event: PiMonoBridgeEvent, state: PiMonoBridgeS
 				type: "agent_end",
 				timestamp,
 			});
+			lastUsageSignature = null;
 			break;
 
 		case "message_update": {
+			pushUsageUpdate(rawEvents, timestamp, extractUsage(event.assistantMessageEvent.partial), false, {
+				get signature() {
+					return lastUsageSignature;
+				},
+				set signature(value: string | null) {
+					lastUsageSignature = value;
+				},
+			});
 			const delta = extractMessageDelta(event);
 			if (delta !== null) {
 				rawEvents.push({
@@ -93,6 +113,17 @@ export function bridgePiMonoEvent(event: PiMonoBridgeEvent, state: PiMonoBridgeS
 			}
 			break;
 		}
+
+		case "message_end":
+			pushUsageUpdate(rawEvents, timestamp, extractMessageUsage(event.message), true, {
+				get signature() {
+					return lastUsageSignature;
+				},
+				set signature(value: string | null) {
+					lastUsageSignature = value;
+				},
+			});
+			break;
 
 		case "tool_execution_start":
 			toolStartedAtById.set(event.toolCallId, timestamp);
@@ -165,6 +196,7 @@ export function bridgePiMonoEvent(event: PiMonoBridgeEvent, state: PiMonoBridgeS
 			model: state.model,
 			toolSet: state.toolSet,
 			toolStartedAtById,
+			lastUsageSignature,
 		},
 	};
 }
@@ -187,6 +219,93 @@ function extractMessageDelta(
 	}
 
 	return null;
+}
+
+function extractUsage(partial: unknown): {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	totalTokens: number;
+} | null {
+	if (!partial || typeof partial !== "object") {
+		return null;
+	}
+	const usage = (partial as { usage?: unknown }).usage;
+	return normalizeUsage(usage);
+}
+
+function extractMessageUsage(message: unknown): {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	totalTokens: number;
+} | null {
+	if (!message || typeof message !== "object") {
+		return null;
+	}
+	if ((message as { role?: unknown }).role !== "assistant") {
+		return null;
+	}
+	return normalizeUsage((message as { usage?: unknown }).usage);
+}
+
+function normalizeUsage(usage: unknown): {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	totalTokens: number;
+} | null {
+	if (!usage || typeof usage !== "object") {
+		return null;
+	}
+	const record = usage as Record<string, unknown>;
+	const input = asNumber(record.input) ?? 0;
+	const output = asNumber(record.output) ?? 0;
+	const cacheRead = asNumber(record.cacheRead) ?? 0;
+	const cacheWrite = asNumber(record.cacheWrite) ?? 0;
+	const totalTokens = asNumber(record.totalTokens) ?? input + output + cacheRead + cacheWrite;
+	if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0 && totalTokens === 0) {
+		return null;
+	}
+	return {
+		input,
+		output,
+		cacheRead,
+		cacheWrite,
+		totalTokens,
+	};
+}
+
+function pushUsageUpdate(
+	rawEvents: RawUpstreamEvent[],
+	timestamp: number,
+	usage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number } | null,
+	isFinal: boolean,
+	state: { signature: string | null },
+): void {
+	if (!usage) {
+		return;
+	}
+	const signature = `${usage.input}:${usage.output}:${usage.cacheRead}:${usage.cacheWrite}:${usage.totalTokens}:${isFinal ? 1 : 0}`;
+	if (state.signature === signature) {
+		return;
+	}
+	state.signature = signature;
+	rawEvents.push({
+		type: "usage_update",
+		timestamp,
+		payload: {
+			input: usage.input,
+			output: usage.output,
+			cacheRead: usage.cacheRead,
+			cacheWrite: usage.cacheWrite,
+			totalTokens: usage.totalTokens,
+			isFinal,
+		},
+	});
 }
 
 function extractToolText(value: unknown): string | undefined {
@@ -219,4 +338,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 		return {};
 	}
 	return { ...(value as Record<string, unknown>) };
+}
+
+function asNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

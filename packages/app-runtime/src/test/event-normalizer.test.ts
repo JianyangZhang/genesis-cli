@@ -151,6 +151,28 @@ describe("EventNormalizer", () => {
 		}
 	});
 
+	it("maps usage_update to usage_updated", () => {
+		const raw: RawUpstreamEvent = {
+			type: "usage_update",
+			timestamp: 8500,
+			payload: {
+				input: 210,
+				output: 95,
+				cacheRead: 12,
+				cacheWrite: 0,
+				totalTokens: 317,
+				isFinal: true,
+			},
+		};
+
+		const result = normalizer.normalize(raw);
+		expect(result!.type).toBe("usage_updated");
+		if (result!.type === "usage_updated") {
+			expect(result!.usage.totalTokens).toBe(317);
+			expect(result!.isFinal).toBe(true);
+		}
+	});
+
 	it("returns null for unrecognized events", () => {
 		const raw: RawUpstreamEvent = { type: "unknown_event_type", timestamp: 9000 };
 		const result = normalizer.normalize(raw);

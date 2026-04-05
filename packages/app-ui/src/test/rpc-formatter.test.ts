@@ -53,6 +53,25 @@ describe("eventToRpcNotification", () => {
 		const rpc = eventToRpcNotification(event);
 		expect(rpc.id).toBeUndefined();
 	});
+
+	it("includes usage payloads in notifications", () => {
+		const event: RuntimeEvent = {
+			...base,
+			category: "usage",
+			type: "usage_updated",
+			usage: {
+				input: 120,
+				output: 24,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 144,
+			},
+			isFinal: true,
+		};
+		const rpc = eventToRpcNotification(event);
+		expect((rpc.params as Record<string, unknown>)?.usage).toEqual(event.usage);
+		expect((rpc.params as Record<string, unknown>)?.isFinal).toBe(true);
+	});
 });
 
 describe("createRpcResponse", () => {

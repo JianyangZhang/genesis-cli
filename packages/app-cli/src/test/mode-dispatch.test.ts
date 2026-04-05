@@ -220,6 +220,17 @@ describe("interactive transcript formatting", () => {
 		expect(formatTurnNotice("thinking", { animationFrame: 0 })).toContain("Thinking.");
 		expect(formatTurnNotice("thinking", { animationFrame: 1 })).toContain("Thinking..");
 		expect(formatTurnNotice("thinking", { animationFrame: 2 })).toContain("Thinking...");
+		expect(formatTurnNotice("thinking", { elapsedMs: 2500 })).toContain("2s");
+		expect(
+			formatTurnNotice("thinking", {
+				usage: { input: 1200, output: 345, cacheRead: 0, cacheWrite: 0, totalTokens: 1545 },
+			}),
+		).toContain("↑1.2k");
+		expect(
+			formatTurnNotice("thinking", {
+				usage: { input: 1200, output: 345, cacheRead: 0, cacheWrite: 0, totalTokens: 1545 },
+			}),
+		).toContain("Σ1.5k");
 		expect(formatTurnNotice("thinking", { queuedCount: 2 })).toContain("2 queued");
 		expect(formatTurnNotice("responding")).toContain("Responding");
 	});
@@ -239,6 +250,24 @@ describe("interactive transcript formatting", () => {
 		expect(footer.block).toContain("second prompt");
 		expect(footer.block).toContain("third prompt");
 		expect(footer.block).toContain("2 queued");
+	});
+
+	it("shows last-turn and session usage summaries when idle", () => {
+		const footer = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "",
+			cursor: 0,
+			suggestions: [],
+			turnNotice: null,
+			lastTurnUsage: { input: 120, output: 24, cacheRead: 0, cacheWrite: 0, totalTokens: 144 },
+			sessionUsage: { input: 210, output: 57, cacheRead: 0, cacheWrite: 0, totalTokens: 267 },
+			permission: null,
+		});
+		expect(footer.block).toContain("Last turn");
+		expect(footer.block).toContain("Session");
+		expect(footer.block).toContain("Σ144");
+		expect(footer.block).toContain("Σ267");
 	});
 
 	it("wraps transcript content for streaming redraw", () => {

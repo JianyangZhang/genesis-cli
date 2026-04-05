@@ -55,6 +55,16 @@ export function createModeHandler(mode: CliMode): ModeHandler {
 	}
 }
 
+interface UsageSnapshot {
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead: number;
+	readonly cacheWrite: number;
+	readonly totalTokens: number;
+}
+
+const TURN_NOTICE_ELAPSED_THRESHOLD_MS = 2_000;
+
 // ---------------------------------------------------------------------------
 // Interactive mode
 // ---------------------------------------------------------------------------
@@ -84,6 +94,11 @@ class InteractiveModeHandler implements ModeHandler {
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
+	private _turnStartedAt: number | null = null;
+	private _activeTurnUsageTotals: UsageSnapshot = emptyUsageSnapshot();
+	private _currentMessageUsage: UsageSnapshot = emptyUsageSnapshot();
+	private _lastTurnUsage: UsageSnapshot | null = null;
+	private _sessionUsageTotals: UsageSnapshot = emptyUsageSnapshot();
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
 	private readonly _queuedInputs: string[] = [];
@@ -157,6 +172,11 @@ class InteractiveModeHandler implements ModeHandler {
 			this.stopTurnNoticeAnimation();
 			this._turnNotice = null;
 			this._turnNoticeAnimationFrame = 0;
+			this._turnStartedAt = null;
+			this._activeTurnUsageTotals = emptyUsageSnapshot();
+			this._currentMessageUsage = emptyUsageSnapshot();
+			this._lastTurnUsage = null;
+			this._sessionUsageTotals = emptyUsageSnapshot();
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
 			this._queuedInputs.length = 0;
@@ -950,6 +970,11 @@ class InteractiveModeHandler implements ModeHandler {
 			}
 			return;
 		}
+		if (event.category === "usage" && event.type === "usage_updated") {
+			this.updateTurnUsage(event.usage, event.isFinal);
+			this.renderPromptLine();
+			return;
+		}
 		if (!shouldRenderInteractiveTranscriptEvent(event)) {
 			this.renderPromptLine();
 			return;
@@ -1106,6 +1131,9 @@ class InteractiveModeHandler implements ModeHandler {
 	private startPromptTurn(session: SessionFacade, prompt: string, sink: OutputSink): void {
 		this.flushAssistantBuffer(false);
 		this.writeTranscriptText(formatTranscriptUserLine(prompt), true, false);
+		this._turnStartedAt = Date.now();
+		this._activeTurnUsageTotals = emptyUsageSnapshot();
+		this._currentMessageUsage = emptyUsageSnapshot();
 		this.startTurnFeedback();
 		this.rememberHistory(prompt);
 		this._activeTurn = session
@@ -1115,10 +1143,18 @@ class InteractiveModeHandler implements ModeHandler {
 			})
 			.finally(() => {
 				this.stopTurnNoticeAnimation();
+				const completedTurnUsage = this.currentTurnUsage();
 				this._activeTurn = null;
 				this.flushAssistantBuffer(false);
 				this._turnNotice = null;
 				this._turnNoticeAnimationFrame = 0;
+				this._turnStartedAt = null;
+				if (hasUsageSnapshot(completedTurnUsage)) {
+					this._lastTurnUsage = completedTurnUsage;
+					this._sessionUsageTotals = addUsageSnapshots(this._sessionUsageTotals, completedTurnUsage);
+				}
+				this._activeTurnUsageTotals = emptyUsageSnapshot();
+				this._currentMessageUsage = emptyUsageSnapshot();
 				const nextQueued = this._queuedInputs.shift();
 				if (nextQueued) {
 					this.startPromptTurn(session, nextQueued, sink);
@@ -1137,6 +1173,10 @@ class InteractiveModeHandler implements ModeHandler {
 			suggestions: this._commandSuggestions,
 			turnNotice: this._turnNotice,
 			turnNoticeAnimationFrame: this._turnNoticeAnimationFrame,
+			elapsedMs: this.currentTurnElapsedMs(),
+			currentTurnUsage: this.currentTurnUsage(),
+			lastTurnUsage: this._lastTurnUsage,
+			sessionUsage: this._sessionUsageTotals,
 			queuedInputs: this._queuedInputs,
 			permission:
 				this._pendingPermissionCallId !== null && this._pendingPermissionDetails !== null
@@ -1150,6 +1190,28 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private rerenderInteractiveRegions(): void {
 		this.fullRedrawInteractiveScreen();
+	}
+
+	private updateTurnUsage(usage: UsageSnapshot, isFinal: boolean): void {
+		const normalized = normalizeUsageSnapshot(usage);
+		if (isFinal) {
+			this._activeTurnUsageTotals = addUsageSnapshots(this._activeTurnUsageTotals, normalized);
+			this._currentMessageUsage = emptyUsageSnapshot();
+			return;
+		}
+		this._currentMessageUsage = normalized;
+	}
+
+	private currentTurnUsage(): UsageSnapshot | null {
+		const usage = addUsageSnapshots(this._activeTurnUsageTotals, this._currentMessageUsage);
+		return hasUsageSnapshot(usage) ? usage : null;
+	}
+
+	private currentTurnElapsedMs(): number | null {
+		if (this._turnNotice !== "thinking" || this._turnStartedAt === null) {
+			return null;
+		}
+		return Math.max(0, Date.now() - this._turnStartedAt);
 	}
 
 	private terminalWidth(): number {
@@ -1586,6 +1648,10 @@ export function formatInteractiveFooter(state: {
 	readonly suggestions: readonly string[];
 	readonly turnNotice: "thinking" | "responding" | null;
 	readonly turnNoticeAnimationFrame?: number;
+	readonly elapsedMs?: number | null;
+	readonly currentTurnUsage?: UsageSnapshot | null;
+	readonly lastTurnUsage?: UsageSnapshot | null;
+	readonly sessionUsage?: UsageSnapshot | null;
 	readonly queuedInputs?: readonly string[];
 	readonly permission: {
 		readonly details: {
@@ -1603,9 +1669,18 @@ export function formatInteractiveFooter(state: {
 		lines.push(
 			formatTurnNotice(state.turnNotice, {
 				animationFrame: state.turnNoticeAnimationFrame ?? 0,
+				elapsedMs: state.elapsedMs ?? null,
+				usage: state.currentTurnUsage ?? null,
 				queuedCount: state.queuedInputs?.length ?? 0,
 			}),
 		);
+	} else {
+		if (hasUsageSnapshot(state.lastTurnUsage ?? null)) {
+			lines.push(formatUsageSummaryLine("Last turn", state.lastTurnUsage!));
+		}
+		if (hasUsageSnapshot(state.sessionUsage ?? null)) {
+			lines.push(formatUsageSummaryLine("Session", state.sessionUsage!));
+		}
 	}
 	if ((state.queuedInputs?.length ?? 0) > 0) {
 		lines.push(...formatQueuedPromptPreviewLines(state.queuedInputs ?? [], state.terminalWidth));
@@ -2024,7 +2099,8 @@ export function formatTurnNotice(
 	options: {
 		readonly animationFrame?: number;
 		readonly queuedCount?: number;
-		readonly tokenCount?: number;
+		readonly usage?: UsageSnapshot | null;
+		readonly elapsedMs?: number | null;
 	} = {},
 ): string {
 	const DIM = "\x1b[2m";
@@ -2033,13 +2109,74 @@ export function formatTurnNotice(
 	const suffix = kind === "thinking" ? ".".repeat(((options.animationFrame ?? 0) % 3) + 1) : "...";
 	const label = kind === "thinking" ? `Thinking${suffix}` : `Responding${suffix}`;
 	const meta: string[] = [];
-	if (typeof options.tokenCount === "number" && Number.isFinite(options.tokenCount)) {
-		meta.push(`${options.tokenCount} tokens`);
+	if (kind === "thinking" && (options.elapsedMs ?? 0) >= TURN_NOTICE_ELAPSED_THRESHOLD_MS) {
+		meta.push(`${Math.floor((options.elapsedMs ?? 0) / 1000)}s`);
+	}
+	const usageLabel = formatUsageCompact(options.usage ?? null);
+	if (usageLabel.length > 0) {
+		meta.push(usageLabel);
 	}
 	if ((options.queuedCount ?? 0) > 0) {
 		meta.push(`${options.queuedCount} queued`);
 	}
 	return `${DIM}${CYAN}· ${label}${meta.length > 0 ? ` (${meta.join(" · ")})` : ""}${RESET}`;
+}
+
+function formatUsageSummaryLine(label: string, usage: UsageSnapshot): string {
+	const DIM = "\x1b[2m";
+	const CYAN = "\x1b[36m";
+	const RESET = "\x1b[0m";
+	return `${DIM}${CYAN}· ${label}: ${formatUsageCompact(usage)}${RESET}`;
+}
+
+function formatUsageCompact(usage: UsageSnapshot | null): string {
+	if (!hasUsageSnapshot(usage)) {
+		return "";
+	}
+	const parts: string[] = [];
+	if (usage.input > 0) parts.push(`↑${formatTokenCount(usage.input)}`);
+	if (usage.output > 0) parts.push(`↓${formatTokenCount(usage.output)}`);
+	if (usage.cacheRead > 0) parts.push(`R${formatTokenCount(usage.cacheRead)}`);
+	if (usage.cacheWrite > 0) parts.push(`W${formatTokenCount(usage.cacheWrite)}`);
+	parts.push(`Σ${formatTokenCount(usage.totalTokens)}`);
+	return parts.join(" ");
+}
+
+function formatTokenCount(count: number): string {
+	if (count < 1_000) return `${count}`;
+	if (count < 10_000) return `${(count / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+	return `${Math.round(count / 1_000)}k`;
+}
+
+function emptyUsageSnapshot(): UsageSnapshot {
+	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
+}
+
+function normalizeUsageSnapshot(usage: UsageSnapshot): UsageSnapshot {
+	return {
+		input: Math.max(0, usage.input),
+		output: Math.max(0, usage.output),
+		cacheRead: Math.max(0, usage.cacheRead),
+		cacheWrite: Math.max(0, usage.cacheWrite),
+		totalTokens: Math.max(0, usage.totalTokens),
+	};
+}
+
+function addUsageSnapshots(left: UsageSnapshot, right: UsageSnapshot): UsageSnapshot {
+	return {
+		input: left.input + right.input,
+		output: left.output + right.output,
+		cacheRead: left.cacheRead + right.cacheRead,
+		cacheWrite: left.cacheWrite + right.cacheWrite,
+		totalTokens: left.totalTokens + right.totalTokens,
+	};
+}
+
+function hasUsageSnapshot(usage: UsageSnapshot | null | undefined): usage is UsageSnapshot {
+	if (!usage) {
+		return false;
+	}
+	return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0 || usage.totalTokens > 0;
 }
 
 export function mergeStreamingText(existing: string, incoming: string): string {

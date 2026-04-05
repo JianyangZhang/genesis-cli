@@ -91,14 +91,25 @@ describe("SessionFacade", () => {
 		const { facade, adapter } = createFacade();
 		const sessionEvents: RuntimeEvent[] = [];
 		facade.events.on("text_delta", (e) => sessionEvents.push(e));
+		facade.events.on("usage_updated", (e) => sessionEvents.push(e));
 
-		adapter.enqueueDefaultEvents([{ type: "message_update", timestamp: 1000, payload: { content: "Hello" } }]);
+		adapter.enqueueDefaultEvents([
+			{ type: "message_update", timestamp: 1000, payload: { content: "Hello" } },
+			{
+				type: "usage_update",
+				timestamp: 1001,
+				payload: { input: 120, output: 24, cacheRead: 0, cacheWrite: 0, totalTokens: 144, isFinal: true },
+			},
+		]);
 
 		await facade.prompt("test");
 
-		expect(sessionEvents).toHaveLength(1);
+		expect(sessionEvents).toHaveLength(2);
 		if (sessionEvents[0]!.type === "text_delta") {
 			expect(sessionEvents[0]!.content).toBe("Hello");
+		}
+		if (sessionEvents[1]!.type === "usage_updated") {
+			expect(sessionEvents[1]!.usage.totalTokens).toBe(144);
 		}
 	});
 

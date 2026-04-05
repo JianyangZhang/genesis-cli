@@ -173,4 +173,23 @@ describe("sanitizeForJson", () => {
 		const data = sanitizeForJson(event);
 		expect(data.content).toBe("Hello");
 	});
+
+	it("handles usage_updated payload", () => {
+		const event: RuntimeEvent = {
+			...base,
+			category: "usage",
+			type: "usage_updated",
+			usage: {
+				input: 120,
+				output: 24,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 144,
+			},
+			isFinal: true,
+		};
+		const data = sanitizeForJson(event);
+		expect(data.usage).toEqual(event.usage);
+		expect(data.isFinal).toBe(true);
+	});
 });

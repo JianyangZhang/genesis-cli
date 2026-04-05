@@ -142,6 +142,21 @@ export class EventNormalizer {
 				};
 			}
 
+			case "usage_update":
+				return {
+					...base,
+					category: "usage",
+					type: "usage_updated",
+					usage: {
+						input: (raw.payload?.input as number) ?? 0,
+						output: (raw.payload?.output as number) ?? 0,
+						cacheRead: (raw.payload?.cacheRead as number) ?? 0,
+						cacheWrite: (raw.payload?.cacheWrite as number) ?? 0,
+						totalTokens: (raw.payload?.totalTokens as number) ?? 0,
+					},
+					isFinal: raw.payload?.isFinal === true,
+				};
+
 			// -- Permission --
 			case "permission_request":
 				return {
