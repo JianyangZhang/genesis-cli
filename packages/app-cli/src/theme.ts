@@ -5,6 +5,7 @@ export const INTERACTIVE_THEME = {
 	muted: "\x1b[2m",
 	bold: "\x1b[1m",
 	reset: "\x1b[0m",
+	welcomeBg: "\x1b[48;5;236m",
 	promptBg: "\x1b[48;5;250m",
 	promptFg: "\x1b[38;5;235m",
 	selectedBg: "\x1b[48;5;111m",

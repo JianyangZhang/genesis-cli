@@ -887,7 +887,6 @@ class InteractiveModeHandler implements ModeHandler {
 		const BOLD = INTERACTIVE_THEME.bold;
 		const model = session.state.model.displayName ?? session.state.model.id;
 		const provider = session.state.model.provider;
-		const cwd = session.context.workingDirectory;
 		const version = process.env.npm_package_version ?? "dev";
 		const contentWidth = width - 2;
 		const center = (text: string): string => formatWelcomeCenteredLine(contentWidth, text);
@@ -906,9 +905,9 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("\n");
 		process.stdout.write(center(`${DIM}        ${CYAN}│${RESET}        ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`));
+		process.stdout.write(fill());
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}${cwd}${RESET}`));
+		process.stdout.write(center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`));
 		process.stdout.write("\n");
 		process.stdout.write(formatWelcomeBottomBorder(width));
 		process.stdout.write("\n");
@@ -1143,14 +1142,11 @@ class InteractiveModeHandler implements ModeHandler {
 		for (let index = 0; index < footerHeight; index += 1) {
 			const row = startRow + index;
 			const line = fitTerminalLine(ui.lines[index] ?? "", this.terminalWidth());
-			process.stdout.write(ansiCursorTo(row, 1));
-			process.stdout.write(ansiClearLine());
-			process.stdout.write(line);
+			this.writeAbsoluteTerminalLine(row, line);
 		}
 		const oldHeight = this._renderedFooterUi?.lines.length ?? 0;
 		for (let index = footerHeight; index < oldHeight; index += 1) {
-			process.stdout.write(ansiCursorTo(startRow + index, 1));
-			process.stdout.write(ansiClearLine());
+			this.writeAbsoluteTerminalLine(startRow + index, "");
 		}
 		process.stdout.write(
 			ansiCursorTo(
@@ -1195,16 +1191,22 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private clearTranscriptRows(startRow: number, endRow: number): void {
 		for (let row = startRow; row <= endRow; row += 1) {
-			process.stdout.write(ansiCursorTo(row, 1));
-			process.stdout.write(ansiClearLine());
+			this.writeAbsoluteTerminalLine(row, "");
 		}
 	}
 
 	private writeLinesAtRow(startRow: number, lines: readonly string[], width: number): void {
 		for (let index = 0; index < lines.length; index += 1) {
-			process.stdout.write(ansiCursorTo(startRow + index, 1));
-			process.stdout.write(fitTerminalLine(lines[index] ?? "", width));
+			this.writeAbsoluteTerminalLine(startRow + index, fitTerminalLine(lines[index] ?? "", width));
 		}
+	}
+
+	private writeAbsoluteTerminalLine(row: number, line: string): void {
+		process.stdout.write(ansiDisableAutoWrap());
+		process.stdout.write(ansiCursorTo(row, 1));
+		process.stdout.write(ansiClearLine());
+		process.stdout.write(line);
+		process.stdout.write(ansiEnableAutoWrap());
 	}
 }
 
@@ -1336,7 +1338,7 @@ export function formatWelcomeBottomBorder(width: number): string {
 export function formatWelcomeFilledLine(contentWidth: number, text = ""): string {
 	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(text));
 	const padding = Math.max(0, contentWidth - plainWidth);
-	return `│${text}${" ".repeat(padding)}│`;
+	return `│${INTERACTIVE_THEME.welcomeBg}${text}${" ".repeat(padding)}${INTERACTIVE_THEME.reset}│`;
 }
 
 export function formatWelcomeCenteredLine(contentWidth: number, text: string): string {
@@ -1344,7 +1346,7 @@ export function formatWelcomeCenteredLine(contentWidth: number, text: string): s
 	const padding = Math.max(0, contentWidth - plainWidth);
 	const left = Math.floor(padding / 2);
 	const right = padding - left;
-	return `│${" ".repeat(left)}${text}${" ".repeat(right)}│`;
+	return `│${INTERACTIVE_THEME.welcomeBg}${" ".repeat(left)}${text}${" ".repeat(right)}${INTERACTIVE_THEME.reset}│`;
 }
 
 export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
@@ -1790,6 +1792,14 @@ function ansiSetScrollRegion(top: number, bottom: number): string {
 
 function ansiResetScrollRegion(): string {
 	return "\x1b[r";
+}
+
+function ansiDisableAutoWrap(): string {
+	return "\x1b[?7l";
+}
+
+function ansiEnableAutoWrap(): string {
+	return "\x1b[?7h";
 }
 
 function fitTerminalLine(line: string, width: number): string {

@@ -111,8 +111,10 @@ describe("interactive transcript formatting", () => {
 	it("keeps welcome body rows aligned to the frame width", () => {
 		const filled = formatWelcomeFilledLine(38, "abc");
 		const centered = formatWelcomeCenteredLine(38, "abc");
-		expect(filled).toHaveLength(40);
-		expect(centered).toHaveLength(40);
+		const filledVisible = filled.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+		const centeredVisible = centered.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+		expect(filledVisible).toHaveLength(40);
+		expect(centeredVisible).toHaveLength(40);
 		expect(filled.startsWith("│")).toBe(true);
 		expect(centered.endsWith("│")).toBe(true);
 	});
