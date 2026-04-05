@@ -22,21 +22,27 @@ The exact package layout is intentionally documented in the technical plan rathe
 
 ## Quick Start / 快速开始
 
-### Requirements / 环境要求
+### For Users (Interactive TUI) / 使用者（交互式 TUI）
+
+#### Requirements / 环境要求
 
 - Operating system: macOS 13+ or Linux (x86_64/arm64). Windows requires WSL2.
 - Node.js: 20.0.0+ (`node -v`)
 - npm: 9.0.0+ (`npm -v`)
 - Git: 2.31.0+ (`git --version`)
 
-### Clone / 克隆
+You must provide an API key via `.env.local`:
+
+- Required: `GENESIS_API_KEY`
+
+#### Clone / 克隆
 
 ```bash
 git clone https://github.com/JianyangZhang/genesis-cli.git
 cd genesis-cli
 ```
 
-### Install Dependencies / 安装依赖
+#### Install Dependencies / 安装依赖
 
 ```bash
 npm ci
@@ -44,7 +50,7 @@ npm ci
 
 Expected: a line matching `added <number> packages` and exit code 0.
 
-### Build / 构建
+#### Build / 构建
 
 ```bash
 npm run build
@@ -52,7 +58,7 @@ npm run build
 
 Expected: exit code 0 and no TypeScript diagnostics (no `error TS` lines).
 
-### Run Locally / 本地运行
+#### Run / 运行
 
 This project is a CLI. It does not start an HTTP server.
 
@@ -74,7 +80,14 @@ Start interactive mode:
 npm run chat:live
 ```
 
-### Tests / 测试
+Verify quickly:
+
+- Type `/help` and confirm the command list is printed.
+- Type a short prompt and confirm the assistant response streams in the transcript area.
+
+### For Developers / 开发者
+
+#### Tests / 测试
 
 Unit tests:
 
@@ -99,6 +112,23 @@ npm run test:live:pi-mono
 ```
 
 Expected: Vitest prints a summary and exits with code 0.
+
+Lint and formatting:
+
+```bash
+npm run check:lint
+npm run check:format
+```
+
+Expected: exit code 0.
+
+All checks:
+
+```bash
+npm run check
+```
+
+Expected: exit code 0.
 
 Test reports and coverage:
 
