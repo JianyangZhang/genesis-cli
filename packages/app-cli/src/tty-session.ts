@@ -26,6 +26,8 @@ interface TtySessionOptions {
 	readonly output?: TtyOutput;
 	readonly restoreTermios?: () => void;
 	readonly onResume?: () => void;
+	readonly useAlternateScreen?: boolean;
+	readonly enableMouseTracking?: boolean;
 }
 
 export interface TtySession {
@@ -39,6 +41,8 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 	const output = options.output ?? (process.stdout as TtyOutput);
 	const restoreTermios = options.restoreTermios ?? defaultRestoreTermios;
 	const onResume = options.onResume;
+	const useAlternateScreen = options.useAlternateScreen ?? true;
+	const enableMouseTracking = options.enableMouseTracking ?? true;
 	let active = false;
 	let restored = false;
 
@@ -52,11 +56,13 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 	};
 
 	const writeActiveModes = (reenterAlternateScreen: boolean): void => {
-		if (reenterAlternateScreen) {
+		if (useAlternateScreen && reenterAlternateScreen) {
 			output.write(ansiEnterAlternateScreen());
 		}
 		output.write(ansiEnableFocusReporting());
-		output.write(ansiEnableMouseTracking());
+		if (enableMouseTracking) {
+			output.write(ansiEnableMouseTracking());
+		}
 		output.write(ansiHideCursor());
 	};
 
@@ -66,7 +72,9 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 				return;
 			}
 			active = true;
-			output.write(ansiEnterAlternateScreen());
+			if (useAlternateScreen) {
+				output.write(ansiEnterAlternateScreen());
+			}
 			writeActiveModes(false);
 
 			for (const signal of ["SIGINT", "SIGTERM", "SIGCONT"] as const) {
@@ -117,8 +125,12 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 			try {
 				output.write(ansiShowCursor());
 				output.write(ansiDisableFocusReporting());
-				output.write(ansiDisableMouseTracking());
-				output.write(ansiExitAlternateScreen());
+				if (enableMouseTracking) {
+					output.write(ansiDisableMouseTracking());
+				}
+				if (useAlternateScreen) {
+					output.write(ansiExitAlternateScreen());
+				}
 			} catch {}
 			try {
 				restoreTermios();

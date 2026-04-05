@@ -53,8 +53,9 @@ Keyboard and scrolling:
 
 - `↑` / `↓`: cycle local input history in the `genesis> ` prompt.
 - `←` / `→` / `Home` / `End`: move the cursor inside the current input line.
-- Mouse wheel / trackpad scroll: browse the transcript scrollback without touching the input buffer.
-- `PageUp` / `PageDown`: scroll the transcript by page.
+- Mouse wheel / trackpad scroll: use your terminal's native scrollback to browse prior transcript output.
+- `PageUp` / `PageDown`: follow your terminal's native scrollback behavior.
+- Interactive mode stays on the primary terminal buffer, so the transcript remains visible after `/exit`.
 
 Exit flow:
 

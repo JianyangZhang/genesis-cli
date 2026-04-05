@@ -9,22 +9,17 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
-import type { InteractionState, OutputSink, SlashCommand, TuiScreenLayout } from "@genesis-cli/ui";
+import type { InteractionState, OutputSink, SlashCommand } from "@genesis-cli/ui";
 import {
-	ansiClearBelow,
 	ansiClearLine,
-	ansiCursorHome,
-	ansiHideCursor,
 	ansiMoveRight,
 	ansiShowCursor,
 	createBuiltinCommands,
-	createLayoutAccumulator,
 	createSlashCommandRegistry,
 	eventToJsonEnvelope,
 	formatEventAsText,
 	initialInteractionState,
 	reduceInteractionState,
-	renderScreen,
 } from "@genesis-cli/ui";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
@@ -62,24 +57,6 @@ export function createModeHandler(mode: CliMode): ModeHandler {
 }
 
 // ---------------------------------------------------------------------------
-// Output sink implementations
-// ---------------------------------------------------------------------------
-
-function createStdoutSink(): OutputSink {
-	return {
-		write(text: string): void {
-			process.stdout.write(text);
-		},
-		writeLine(text: string): void {
-			process.stdout.write(`${text}\n`);
-		},
-		writeError(text: string): void {
-			process.stderr.write(`${text}\n`);
-		},
-	};
-}
-
-// ---------------------------------------------------------------------------
 // Interactive mode
 // ---------------------------------------------------------------------------
 
@@ -95,15 +72,13 @@ class InteractiveModeHandler implements ModeHandler {
 	private _activeTurn: Promise<void> | null = null;
 	private readonly _prompt = "genesis> ";
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
-	private _viewportOffsetFromBottom = 0;
-	private _wheelOrientation: 1 | -1 = 1;
-	private _wheelProbe: { key: "wheelup" | "wheeldown"; count: number; time: number } | null = null;
-	private _terminalRows = process.stdout.rows ?? 24;
 	private readonly _history: string[] = [];
 	private _historyIndex: number | null = null;
 	private _suppressPersistOnce = false;
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
+	private _assistantBuffer = "";
+	private _assistantTimestamp: number | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -112,7 +87,17 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 
 		const sessionRef: { current: SessionFacade } = { current: runtime.createSession() };
-		const sink = createStdoutSink();
+		const sink: OutputSink = {
+			write: (text) => {
+				this.writeTranscriptText(text, false);
+			},
+			writeLine: (text) => {
+				this.writeTranscriptText(text, true);
+			},
+			writeError: (text) => {
+				this.writeTranscriptText(`Error: ${text}`, true);
+			},
+		};
 
 		// Slash command registry
 		const registry = createSlashCommandRegistry();
@@ -120,20 +105,19 @@ class InteractiveModeHandler implements ModeHandler {
 			registry.register(cmd);
 		}
 
-		// Layout accumulator for TUI
-		const accumulator = createLayoutAccumulator(() => sessionRef.current.state);
 		let interactionState: InteractionState = initialInteractionState();
 		let sessionTitle: string | undefined;
 		let exitRequested = false;
 		let inputLoop: InputLoop | null = null;
 		const ttySession = createTtySession({
 			onResume: () => {
-				this.renderScreenUpdate(accumulator.snapshot());
+				this.renderPromptLine();
 			},
+			useAlternateScreen: false,
+			enableMouseTracking: false,
 		});
 		const onResize = (): void => {
-			this._terminalRows = process.stdout.rows ?? 24;
-			this.renderScreenUpdate(accumulator.snapshot());
+			this.renderPromptLine();
 		};
 		process.stdout.on("resize", onResize);
 
@@ -150,13 +134,13 @@ class InteractiveModeHandler implements ModeHandler {
 			this._pendingPermissionCallId = null;
 			this._pendingPermissionDetails = null;
 			this._activeTurn = null;
-			this._viewportOffsetFromBottom = 0;
 			this._historyIndex = null;
 			this._lastError = null;
 			this._changedPaths.clear();
+			this._assistantBuffer = "";
+			this._assistantTimestamp = null;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
-			accumulator.reset();
 
 			sessionRef.current.events.on("session_closed", (event) => {
 				if (this._suppressPersistOnce) {
@@ -202,7 +186,6 @@ class InteractiveModeHandler implements ModeHandler {
 					this._lastError = `${event.toolName}: ${event.result ?? "failure"}`;
 				}
 
-				accumulator.push(event);
 				interactionState = reduceInteractionState(interactionState, event);
 
 				if (interactionState.phase === "waiting_permission" && interactionState.activeToolCallId) {
@@ -210,9 +193,7 @@ class InteractiveModeHandler implements ModeHandler {
 				} else if (interactionState.phase !== "waiting_permission") {
 					this._pendingPermissionCallId = null;
 				}
-
-				const snapshot = accumulator.snapshot();
-				this.renderScreenUpdate(snapshot);
+				this.handleTranscriptEvent(event);
 			});
 		};
 
@@ -313,10 +294,10 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "clear",
 			description: "Clear the transcript",
 			type: "local",
-			async execute() {
-				accumulator.reset();
-				handler._viewportOffsetFromBottom = 0;
-				handler.renderScreenUpdate(accumulator.snapshot());
+			async execute(ctx) {
+				ctx.output.writeLine(
+					"Transcript stays in terminal scrollback. Use your terminal clear command if you want a clean screen.",
+				);
 				return undefined;
 			},
 		});
@@ -743,7 +724,7 @@ class InteractiveModeHandler implements ModeHandler {
 				const recovered = runtime.recoverSession(data);
 				attachSession(recovered);
 				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
-				handler.renderScreenUpdate(accumulator.snapshot());
+				handler.renderPromptLine();
 				return undefined;
 			},
 		});
@@ -759,7 +740,6 @@ class InteractiveModeHandler implements ModeHandler {
 				this.renderPromptLine();
 			},
 			onKey: (key) => {
-				const snapshot = accumulator.snapshot();
 				if (key === "ctrlc") {
 					if (this._pendingPermissionCallId !== null) {
 						const callId = this._pendingPermissionCallId;
@@ -769,13 +749,13 @@ class InteractiveModeHandler implements ModeHandler {
 							sink.writeError(`Error: ${err}`);
 						});
 						sink.writeLine("Permission denied.");
-						this.renderScreenUpdate(snapshot);
+						this.renderPromptLine();
 						return;
 					}
 					if (this._activeTurn !== null) {
 						sessionRef.current.abort();
+						this.flushAssistantBuffer(false);
 						sink.writeLine("Aborted.");
-						this.renderScreenUpdate(snapshot);
 						return;
 					}
 					exitRequested = true;
@@ -783,16 +763,12 @@ class InteractiveModeHandler implements ModeHandler {
 					inputLoop?.close();
 					return;
 				}
-				this.handleSpecialKey(key, snapshot);
+				this.handleSpecialKey(key);
 			},
 			onTerminalEvent: (event) => {
 				if (event === "focusin") {
 					ttySession.refresh();
-					if (accumulator.snapshot().conversation.lines.length > 0) {
-						this.renderScreenUpdate(accumulator.snapshot());
-					} else {
-						this.renderPromptLine();
-					}
+					this.renderPromptLine();
 				}
 			},
 		});
@@ -852,14 +828,8 @@ class InteractiveModeHandler implements ModeHandler {
 					line = await inputLoop.nextLine();
 					continue;
 				}
-				accumulator.appendText({
-					role: "user",
-					content: trimmed,
-					timestamp: Date.now(),
-					authorName: process.env.USER ?? "You",
-				});
-				this._viewportOffsetFromBottom = 0;
-				this.renderScreenUpdate(accumulator.snapshot());
+				this.flushAssistantBuffer(false);
+				this.writeTranscriptText(formatTranscriptSpeakerLine(process.env.USER ?? "You", trimmed, Date.now()), true);
 				this.rememberHistory(trimmed);
 				this._activeTurn = sessionRef.current
 					.prompt(trimmed)
@@ -868,6 +838,8 @@ class InteractiveModeHandler implements ModeHandler {
 					})
 					.finally(() => {
 						this._activeTurn = null;
+						this.flushAssistantBuffer(false);
+						this.renderPromptLine();
 					});
 
 				line = await inputLoop.nextLine();
@@ -905,9 +877,6 @@ class InteractiveModeHandler implements ModeHandler {
 			const padding = Math.max(0, contentWidth - plain.length);
 			return `│${text}${" ".repeat(padding)}│`;
 		};
-		process.stdout.write(ansiHideCursor());
-		process.stdout.write(ansiCursorHome());
-		process.stdout.write(ansiClearBelow());
 		process.stdout.write(
 			`╭─── ${BOLD}${GREEN}Genesis CLI${RESET} ${DIM}v${version}${RESET} ${"─".repeat(Math.max(0, width - 23 - version.length))}╮\n`,
 		);
@@ -937,41 +906,6 @@ class InteractiveModeHandler implements ModeHandler {
 		);
 	}
 
-	private renderScreenUpdate(snapshot: TuiScreenLayout): void {
-		const width = process.stdout.columns ?? 80;
-		process.stdout.write(ansiCursorHome());
-		process.stdout.write(ansiClearBelow());
-		const rendered = renderScreen(this.applyViewport(snapshot), width);
-		process.stdout.write(ansiHideCursor());
-		process.stdout.write(`${rendered}\n`);
-		this.renderPromptLine();
-	}
-
-	private applyViewport(snapshot: TuiScreenLayout): TuiScreenLayout {
-		const lines = snapshot.conversation.lines;
-		const viewport = computeConversationViewport(lines.length, this._terminalRows, this._viewportOffsetFromBottom);
-		if (lines.length <= viewport.maxConversationLines) {
-			return {
-				...snapshot,
-				statusLine: {
-					...snapshot.statusLine,
-					scrollPosition: lines.length > 0 ? `Lines 1-${lines.length}/${lines.length}` : null,
-				},
-			};
-		}
-		return {
-			...snapshot,
-			conversation: {
-				...snapshot.conversation,
-				lines: lines.slice(viewport.start, viewport.end),
-			},
-			statusLine: {
-				...snapshot.statusLine,
-				scrollPosition: `Lines ${viewport.start + 1}-${viewport.end}/${lines.length}`,
-			},
-		};
-	}
-
 	private renderPromptLine(): void {
 		process.stdout.write(ansiClearLine());
 		const buffer = this._inputState.buffer;
@@ -990,71 +924,54 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write(ansiShowCursor());
 	}
 
-	private handleSpecialKey(
-		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc",
-		snapshot: TuiScreenLayout,
-	): void {
-		const maxOffset = computeConversationViewport(
-			snapshot.conversation.lines.length,
-			this._terminalRows,
-			this._viewportOffsetFromBottom,
-		).maxOffset;
-
+	private handleSpecialKey(key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc"): void {
 		if (key === "up" || key === "down") {
 			this.navigateHistory(key === "up" ? -1 : 1);
-			return;
 		}
-		if (key === "wheelup" || key === "wheeldown") {
-			this.maybeFlipWheelOrientation(key, maxOffset);
-			const effectiveKey = this.resolveWheelKey(key);
-			if (effectiveKey === "wheelup") {
-				this._viewportOffsetFromBottom = Math.min(maxOffset, this._viewportOffsetFromBottom + 1);
-			} else {
-				this._viewportOffsetFromBottom = Math.max(0, this._viewportOffsetFromBottom - 1);
+	}
+
+	private handleTranscriptEvent(event: RuntimeEvent): void {
+		if (event.category === "text" && event.type === "text_delta") {
+			if (this._assistantBuffer.length === 0) {
+				this._assistantTimestamp = event.timestamp;
 			}
-			this.renderScreenUpdate(snapshot);
+			this._assistantBuffer += event.content;
 			return;
 		}
-		if (key === "pageup") {
-			this._viewportOffsetFromBottom = Math.min(
-				maxOffset,
-				this._viewportOffsetFromBottom +
-					Math.max(1, Math.floor(conversationViewportHeight(this._terminalRows) / 2)),
-			);
-			this.renderScreenUpdate(snapshot);
-			return;
-		}
-		if (key === "pagedown") {
-			this._viewportOffsetFromBottom = Math.max(
-				0,
-				this._viewportOffsetFromBottom -
-					Math.max(1, Math.floor(conversationViewportHeight(this._terminalRows) / 2)),
-			);
-			this.renderScreenUpdate(snapshot);
-			return;
+		this.flushAssistantBuffer(false);
+		const text = formatEventAsText(event);
+		if (text.length > 0) {
+			this.writeTranscriptText(text, true);
+		} else {
+			this.renderPromptLine();
 		}
 	}
 
-	private resolveWheelKey(key: "wheelup" | "wheeldown"): "wheelup" | "wheeldown" {
-		return this._wheelOrientation === 1 ? key : key === "wheelup" ? "wheeldown" : "wheelup";
+	private flushAssistantBuffer(redrawPrompt: boolean): void {
+		if (this._assistantBuffer.length === 0) {
+			if (redrawPrompt) {
+				this.renderPromptLine();
+			}
+			return;
+		}
+		const text = formatTranscriptSpeakerLine(
+			"Assistant",
+			this._assistantBuffer,
+			this._assistantTimestamp ?? Date.now(),
+		);
+		this._assistantBuffer = "";
+		this._assistantTimestamp = null;
+		this.writeTranscriptText(text, true, redrawPrompt);
 	}
 
-	private maybeFlipWheelOrientation(key: "wheelup" | "wheeldown", maxOffset: number): void {
-		if (maxOffset <= 0) {
-			this._wheelProbe = null;
-			return;
+	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
+		process.stdout.write(ansiClearLine());
+		process.stdout.write(text);
+		if (newline) {
+			process.stdout.write("\n");
 		}
-		const expectedBoundaryKey = boundaryProbeKey(this._wheelOrientation);
-		if (this._viewportOffsetFromBottom !== 0 || key !== expectedBoundaryKey) {
-			this._wheelProbe = null;
-			return;
-		}
-		const now = Date.now();
-		const nextProbe = advanceWheelProbe(this._wheelProbe, key, now);
-		this._wheelProbe = nextProbe.probe;
-		if (nextProbe.shouldFlip) {
-			this._wheelOrientation = flipWheelOrientation(this._wheelOrientation);
-			this._wheelProbe = null;
+		if (redrawPrompt) {
+			this.renderPromptLine();
 		}
 	}
 
@@ -1189,71 +1106,22 @@ function runGit(
 	});
 }
 
-export function computeConversationViewport(
-	totalLines: number,
-	terminalRows: number,
-	offsetFromBottom: number,
-): {
-	readonly maxConversationLines: number;
-	readonly maxOffset: number;
-	readonly offset: number;
-	readonly start: number;
-	readonly end: number;
-} {
-	const maxConversationLines = conversationViewportHeight(terminalRows);
-	const maxOffset = Math.max(0, totalLines - maxConversationLines);
-	const offset = Math.max(0, Math.min(offsetFromBottom, maxOffset));
-	const start = Math.max(0, totalLines - maxConversationLines - offset);
-	const end = Math.min(totalLines, start + maxConversationLines);
-	return {
-		maxConversationLines,
-		maxOffset,
-		offset,
-		start,
-		end,
-	};
-}
-
-function conversationViewportHeight(terminalRows: number): number {
-	// Reserve rows for header, divider, status line, and the prompt line.
-	return Math.max(0, terminalRows - 4);
-}
-
 function stripAnsiWelcome(text: string): string {
 	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
 }
 
-const WHEEL_PROBE_THRESHOLD = 2;
-const WHEEL_PROBE_WINDOW_MS = 600;
-
-function boundaryProbeKey(orientation: 1 | -1): "wheelup" | "wheeldown" {
-	return orientation === 1 ? "wheeldown" : "wheelup";
-}
-
-function flipWheelOrientation(orientation: 1 | -1): 1 | -1 {
-	return orientation === 1 ? -1 : 1;
-}
-
-export function advanceWheelProbe(
-	probe: { key: "wheelup" | "wheeldown"; count: number; time: number } | null,
-	key: "wheelup" | "wheeldown",
-	now: number,
-): {
-	readonly probe: { key: "wheelup" | "wheeldown"; count: number; time: number };
-	readonly shouldFlip: boolean;
-} {
-	const withinWindow = probe && probe.key === key && now - probe.time <= WHEEL_PROBE_WINDOW_MS;
-	const nextProbe = {
-		key,
-		count: withinWindow ? probe.count + 1 : 1,
-		time: now,
-	};
-	return {
-		probe: nextProbe,
-		shouldFlip: nextProbe.count >= WHEEL_PROBE_THRESHOLD,
-	};
-}
-
 export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
 	return measureTerminalDisplayWidth(prompt) + measureTerminalDisplayWidth(buffer.slice(0, cursor));
+}
+
+export function formatTranscriptSpeakerLine(author: string, content: string, timestamp: number): string {
+	return `${formatTranscriptTimestamp(timestamp)} ${author} ${content}`;
+}
+
+function formatTranscriptTimestamp(timestamp: number): string {
+	const date = new Date(timestamp);
+	const hours = `${date.getHours()}`.padStart(2, "0");
+	const minutes = `${date.getMinutes()}`.padStart(2, "0");
+	const seconds = `${date.getSeconds()}`.padStart(2, "0");
+	return `${hours}:${minutes}:${seconds}`;
 }

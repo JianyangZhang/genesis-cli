@@ -53,8 +53,9 @@ npm run chat:live
 
 - `↑` / `↓`：切换 `genesis> ` 输入框的本地历史。
 - `←` / `→` / `Home` / `End`：在当前输入行内移动光标。
-- 鼠标滚轮 / 触摸板滚动：浏览上方对话缓冲区，不影响输入框内容。
-- `PageUp` / `PageDown`：按页滚动对话历史。
+- 鼠标滚轮 / 触摸板滚动：使用终端自身的 scrollback 浏览历史对话。
+- `PageUp` / `PageDown`：遵循终端自身的 scrollback 行为。
+- Interactive 模式保持在 terminal 主缓冲区中，执行 `/exit` 后仍可继续翻看对话历史。
 
 退出流程：
 

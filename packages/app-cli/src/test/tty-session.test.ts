@@ -81,4 +81,30 @@ describe("createTtySession", () => {
 		expect(input.setRawMode).toHaveBeenCalledWith(true);
 		expect(written.match(new RegExp(`${String.fromCharCode(27)}\\[\\?1004h`, "g"))?.length).toBeGreaterThanOrEqual(2);
 	});
+
+	it("can stay on the primary buffer without mouse tracking", () => {
+		const input = createTtyInput();
+		const output = createTtyOutput();
+		let written = "";
+		output.on("data", (chunk) => {
+			written += chunk.toString("utf8");
+		});
+		const session = createTtySession({
+			input,
+			output,
+			restoreTermios: vi.fn(),
+			useAlternateScreen: false,
+			enableMouseTracking: false,
+		});
+
+		session.enter();
+		session.restore();
+
+		expect(written).not.toContain("\x1b[?1049h");
+		expect(written).not.toContain("\x1b[?1000h");
+		expect(written).not.toContain("\x1b[?1002h");
+		expect(written).not.toContain("\x1b[?1006h");
+		expect(written).toContain("\x1b[?1004h");
+		expect(written).toContain("\x1b[?1004l");
+	});
 });
