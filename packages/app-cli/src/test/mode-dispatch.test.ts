@@ -6,6 +6,7 @@ import {
 	formatTranscriptUserLine,
 	formatTurnNotice,
 	shouldRenderInteractiveTranscriptEvent,
+	wrapTranscriptContent,
 } from "../mode-dispatch.js";
 
 describe("interactive transcript formatting", () => {
@@ -55,6 +56,11 @@ describe("interactive transcript formatting", () => {
 	it("formats turn notices for thinking and responding", () => {
 		expect(formatTurnNotice("thinking")).toContain("Thinking");
 		expect(formatTurnNotice("responding")).toContain("Responding");
+	});
+
+	it("wraps transcript content for streaming redraw", () => {
+		expect(wrapTranscriptContent("abcdef", 3)).toEqual(["abc", "def"]);
+		expect(wrapTranscriptContent("你好吗", 4)).toEqual(["你好", "吗"]);
 	});
 });
 

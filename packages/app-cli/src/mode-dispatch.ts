@@ -11,8 +11,10 @@ import { join } from "node:path";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
 import type { InteractionState, OutputSink, SlashCommand } from "@genesis-cli/ui";
 import {
+	ansiClearBelow,
 	ansiClearLine,
 	ansiMoveRight,
+	ansiMoveUp,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createSlashCommandRegistry,
@@ -78,6 +80,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private _assistantBuffer = "";
+	private _streamRenderLineCount = 0;
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
 
@@ -139,6 +142,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._lastError = null;
 			this._changedPaths.clear();
 			this._assistantBuffer = "";
+			this._streamRenderLineCount = 0;
 			this._turnNotice = null;
 			this._commandSuggestions = [];
 			sessionTitle = undefined;
@@ -891,15 +895,11 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("\n");
 		process.stdout.write(fill());
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}    ·   ◌   ·    ${RESET}`));
+		process.stdout.write(center(`${DIM}        ◌        ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}      ${CYAN}◜${GREEN}◎${CYAN}◝${RESET}      ${RESET}`));
+		process.stdout.write(center(`${DIM}      ◌ ${GREEN}◎${RESET} ◌      ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}    ◌ ${CYAN}│${GREEN}◉${CYAN}│${RESET} ◌    ${RESET}`));
-		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}      ${CYAN}◟${GREEN}◎${CYAN}◞${RESET}      ${RESET}`));
-		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}    ·   ◌   ·    ${RESET}`));
+		process.stdout.write(center(`${DIM}        ◌        ${RESET}`));
 		process.stdout.write("\n");
 		process.stdout.write(center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`));
 		process.stdout.write("\n");
@@ -962,6 +962,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this.writeTranscriptText(formatTurnNotice("responding"), true, false);
 			}
 			this._assistantBuffer += event.content;
+			this.renderStreamingAssistantBlock();
 			return;
 		}
 		this.flushAssistantBuffer(false);
@@ -980,9 +981,11 @@ class InteractiveModeHandler implements ModeHandler {
 			}
 			return;
 		}
-		const text = formatTranscriptAssistantLine(this._assistantBuffer);
 		this._assistantBuffer = "";
-		this.writeTranscriptText(text, true, redrawPrompt);
+		this._streamRenderLineCount = 0;
+		if (redrawPrompt) {
+			this.renderPromptLine();
+		}
 	}
 
 	private startTurnFeedback(): void {
@@ -991,6 +994,21 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		this._turnNotice = "thinking";
 		this.writeTranscriptText(formatTurnNotice("thinking"), true);
+	}
+
+	private renderStreamingAssistantBlock(): void {
+		const lines = wrapTranscriptContent(
+			formatTranscriptAssistantLine(this._assistantBuffer),
+			process.stdout.columns ?? 80,
+		);
+		if (this._streamRenderLineCount > 0) {
+			process.stdout.write(ansiMoveUp(this._streamRenderLineCount));
+			process.stdout.write(ansiClearBelow());
+		}
+		process.stdout.write(lines.join("\n"));
+		process.stdout.write("\n");
+		this._streamRenderLineCount = lines.length;
+		this.renderPromptLine();
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
@@ -1194,4 +1212,32 @@ export function formatTurnNotice(kind: "thinking" | "responding"): string {
 	const CYAN = "\x1b[36m";
 	const RESET = "\x1b[0m";
 	return kind === "thinking" ? `${DIM}${CYAN}· Thinking…${RESET}` : `${DIM}${CYAN}· Responding…${RESET}`;
+}
+
+export function wrapTranscriptContent(content: string, width: number): readonly string[] {
+	if (content.length === 0) {
+		return [""];
+	}
+	const lines: string[] = [];
+	let current = "";
+	let currentWidth = 0;
+	for (const ch of content.replace(/\r\n/g, "\n")) {
+		if (ch === "\n") {
+			lines.push(current);
+			current = "";
+			currentWidth = 0;
+			continue;
+		}
+		const charWidth = measureTerminalDisplayWidth(ch);
+		if (currentWidth + charWidth > width && current.length > 0) {
+			lines.push(current);
+			current = ch;
+			currentWidth = charWidth;
+			continue;
+		}
+		current += ch;
+		currentWidth += charWidth;
+	}
+	lines.push(current);
+	return lines;
 }
