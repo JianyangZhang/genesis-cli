@@ -59,7 +59,9 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 		return value as Record<string, unknown>;
 	}
 
-	function getSessionFromParams(params: Record<string, unknown> | null): { session: SessionFacade; sessionId: string } | null {
+	function getSessionFromParams(
+		params: Record<string, unknown> | null,
+	): { session: SessionFacade; sessionId: string } | null {
 		const sid = typeof params?.sessionId === "string" ? params.sessionId : activeSessionId;
 		if (!sid) return null;
 		const session = sessions.get(sid) ?? null;
@@ -176,7 +178,7 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 
 			case RPC_METHODS.PLAN_STATUS: {
 				const resolved = getSessionFromParams(params);
-				if (!resolved || !resolved.session.plan) {
+				if (!resolved?.session.plan) {
 					send(createRpcResponse(id ?? 0, { active: false, plan: null }));
 					break;
 				}

@@ -713,11 +713,22 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderWelcome(session: SessionFacade): void {
+		const DIM = "\x1b[2m";
+		const RESET = "\x1b[0m";
 		const model = session.state.model.displayName ?? session.state.model.id;
+		const provider = session.state.model.provider;
+		const cwd = session.context.workingDirectory;
+		const agentDir = session.context.agentDir ?? "(default)";
 		process.stdout.write(ansiHideCursor());
 		process.stdout.write(ansiClearBelow());
-		process.stdout.write(`Genesis CLI — model: ${model}\n`);
-		process.stdout.write("Type /help for commands, or start chatting.\n");
+		process.stdout.write(`Genesis CLI — model: ${model} (${provider})\n`);
+		process.stdout.write(`${DIM}Session:${RESET} ${session.id.value}  ${DIM}CWD:${RESET} ${cwd}\n`);
+		process.stdout.write(`${DIM}Agent dir:${RESET} ${agentDir}\n`);
+		process.stdout.write("\n");
+		process.stdout.write(`${DIM}Start:${RESET} type a prompt and press Enter\n`);
+		process.stdout.write(
+			`${DIM}Help:${RESET} /help    ${DIM}Exit:${RESET} /exit    ${DIM}Scroll:${RESET} ↑/↓ PageUp/PageDown Home/End\n`,
+		);
 	}
 
 	private renderScreenUpdate(snapshot: TuiScreenLayout): void {

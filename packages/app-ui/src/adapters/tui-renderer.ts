@@ -52,11 +52,12 @@ export function renderScreen(layout: TuiScreenLayout, terminalWidth: number): st
 
 /** Render the header bar. */
 export function renderHeader(header: HeaderRegion, width: number): string {
+	const title = `${BOLD}Genesis CLI${RESET}`;
 	const model = `${BOLD}${header.modelName}${RESET}`;
 	const status = `${DIM}${header.sessionStatus}${RESET}`;
 	const plan = header.planStatus ? `${CYAN}${header.planStatus}${RESET}` : "";
 
-	const content = [model, status, plan].filter(Boolean).join(" │ ");
+	const content = [title, model, status, plan].filter(Boolean).join(" │ ");
 	return truncateToWidth(content, width);
 }
 
@@ -66,8 +67,12 @@ export function renderStatusLine(status: StatusLineRegion, width: number): strin
 	const phaseText = phaseLabel(status.phase);
 	const tool = status.activeTool ? ` │ ${CYAN}${status.activeTool}${RESET}` : "";
 	const plan = status.planProgress ? ` │ ${YELLOW}${status.planProgress}${RESET}` : "";
+	const hint =
+		status.phase === "waiting_permission"
+			? ` │ ${DIM}y once · Y session · n deny${RESET}`
+			: ` │ ${DIM}/help · /exit · ↑↓ scroll${RESET}`;
 
-	const content = `${BG_DARK}${icon} ${phaseText}${tool}${plan}${RESET}`;
+	const content = `${BG_DARK}${icon} ${phaseText}${tool}${plan}${hint}${RESET}`;
 	return truncateToWidth(content, width);
 }
 
