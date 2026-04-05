@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="image/genesis-cli-cover.jpeg" alt="Genesis CLI interactive workbench" width="1024">
+</p>
+
 # Genesis CLI
 
 **An open-source coding CLI inspired by pi-mono and Claude Code, built around a vendored micro-kernel centered on `pi-agent-core`.**

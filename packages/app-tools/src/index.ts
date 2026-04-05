@@ -8,7 +8,7 @@ export { createToolCatalog } from "./catalog/tool-catalog.js";
 export type { MutationQueue } from "./mutation-queue/mutation-queue.js";
 // Mutation queue
 export { createMutationQueue } from "./mutation-queue/mutation-queue.js";
-export { classifyCommand, createCommandPolicy } from "./policy/command-classifier.js";
+export { classifyCommand, createCommandPolicy, isReadOnlyShellCommand } from "./policy/command-classifier.js";
 export type { PermissionEngine } from "./policy/permission-engine.js";
 // Policy
 export { createPermissionEngine } from "./policy/permission-engine.js";

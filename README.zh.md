@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="image/genesis-cli-cover.jpeg" alt="Genesis CLI 交互式工作台" width="1024">
+</p>
+
 # Genesis CLI
 
 **一个同时借鉴 `pi-mono` 与 Claude Code、并以 `pi-agent-core` 为中心收敛微内核边界的开源代码 CLI。**

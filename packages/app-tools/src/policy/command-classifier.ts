@@ -60,6 +60,11 @@ const RISK_DEFAULTS: Readonly<Record<CommandClass, string>> = {
 	background_process: "L3",
 };
 
+const SHELL_META_PATTERN = /[|&;><`$()]/;
+const SIMPLE_ARG_PATTERN = /^[./~:@A-Za-z0-9_=-]+$/;
+const LS_SAFE_FLAG_CHARS = new Set(["a", "A", "l", "h", "F", "G", "1", "t", "r", "S", "d"]);
+const PWD_SAFE_FLAG_CHARS = new Set(["L", "P"]);
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -103,4 +108,36 @@ export function createCommandPolicy(command: string, cwd: string): CommandPolicy
 		timeoutMs: TIMEOUT_DEFAULTS[commandClass],
 		riskLevel: RISK_DEFAULTS[commandClass],
 	};
+}
+
+export function isReadOnlyShellCommand(command: string): boolean {
+	const trimmed = command.trim();
+	if (trimmed.length === 0 || SHELL_META_PATTERN.test(trimmed)) {
+		return false;
+	}
+	const tokens = trimmed.split(/\s+/);
+	const head = tokens[0];
+	if (head === "pwd") {
+		return tokens.slice(1).every((token) => isSafeShortFlag(token, PWD_SAFE_FLAG_CHARS));
+	}
+	if (head === "ls") {
+		return tokens.slice(1).every((token) => isSafeLsArg(token));
+	}
+	return false;
+}
+
+function isSafeLsArg(token: string): boolean {
+	return isSafeShortFlag(token, LS_SAFE_FLAG_CHARS) || SIMPLE_ARG_PATTERN.test(token);
+}
+
+function isSafeShortFlag(token: string, allowedChars: ReadonlySet<string>): boolean {
+	if (!token.startsWith("-") || token === "--") {
+		return false;
+	}
+	for (const char of token.slice(1)) {
+		if (!allowedChars.has(char)) {
+			return false;
+		}
+	}
+	return token.length > 1;
 }

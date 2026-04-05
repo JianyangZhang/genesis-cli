@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyCommand, createCommandPolicy } from "../policy/command-classifier.js";
+import { classifyCommand, createCommandPolicy, isReadOnlyShellCommand } from "../policy/command-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -108,5 +108,25 @@ describe("createCommandPolicy", () => {
 
 		expect(policy.commandClass).toBe("long_task");
 		expect(policy.timeoutMs).toBe(300_000);
+	});
+});
+
+describe("isReadOnlyShellCommand", () => {
+	it("allows simple pwd commands", () => {
+		expect(isReadOnlyShellCommand("pwd")).toBe(true);
+		expect(isReadOnlyShellCommand("pwd -P")).toBe(true);
+	});
+
+	it("allows simple ls commands", () => {
+		expect(isReadOnlyShellCommand("ls")).toBe(true);
+		expect(isReadOnlyShellCommand("ls -la")).toBe(true);
+		expect(isReadOnlyShellCommand("ls -lah src")).toBe(true);
+	});
+
+	it("rejects shell commands with metacharacters or unsupported syntax", () => {
+		expect(isReadOnlyShellCommand("ls | cat")).toBe(false);
+		expect(isReadOnlyShellCommand("pwd > out.txt")).toBe(false);
+		expect(isReadOnlyShellCommand("ls $(pwd)")).toBe(false);
+		expect(isReadOnlyShellCommand("echo hello")).toBe(false);
 	});
 });

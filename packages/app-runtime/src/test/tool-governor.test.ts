@@ -197,6 +197,48 @@ describe("ToolGovernor", () => {
 				expect(decision.riskLevel).toBe("L4");
 			}
 		});
+
+		it("auto-allows read-only pwd commands for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					parameters: { command: "pwd -P" },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
+		});
+
+		it("auto-allows read-only ls commands for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					parameters: { command: "ls -lah src" },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
+		});
+
+		it("still asks for non-allowlisted bash commands", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					parameters: { command: "echo hello" },
+				}),
+			);
+
+			expect(decision.type).toBe("ask_user");
+		});
 	});
 
 	describe("afterExecution", () => {

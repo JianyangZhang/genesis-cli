@@ -92,6 +92,11 @@ export interface ToolGovernor {
 	readonly audit: AuditLog;
 }
 
+const SHELL_META_PATTERN = /[|&;><`$()]/;
+const SIMPLE_ARG_PATTERN = /^[./~:@A-Za-z0-9_=-]+$/;
+const LS_SAFE_FLAG_CHARS = new Set(["a", "A", "l", "h", "F", "G", "1", "t", "r", "S", "d"]);
+const PWD_SAFE_FLAG_CHARS = new Set(["L", "P"]);
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -180,12 +185,15 @@ export function createToolGovernor(): ToolGovernor {
 			const effectiveRiskLevel =
 				typeof command === "string" && isDestructiveCommand(command) ? "L4" : classifyRisk(toolDef, parameters);
 			const effectiveCommandDigest = deriveCommandDigest(parameters, commandDigest);
+			const autoAllowReadOnlyBash =
+				toolName === "bash" && typeof command === "string" && isAutoAllowedReadOnlyBashCommand(command);
+			if (autoAllowReadOnlyBash) {
+				activeExecutions.set(toolCallId, { toolName, targetPath, riskLevel: effectiveRiskLevel });
+				return { type: "allow" };
+			}
 			const matchingSessionApproval = sessionApprovals.find((entry) =>
 				matchesSessionApproval(entry, sessionId, toolName, effectiveRiskLevel, targetPath, effectiveCommandDigest),
 			);
-			if (matchingSessionApproval) {
-				return { type: "allow" };
-			}
 			const permContext: PermissionContext = {
 				sessionId,
 				toolIdentity: toolDef.identity,
@@ -199,27 +207,29 @@ export function createToolGovernor(): ToolGovernor {
 			};
 
 			// 3. Evaluate permission
-			const decision = permissions.evaluate(permContext);
-			if (decision.verdict === "deny") {
-				recordDeniedAudit(
-					toolName,
-					toolCallId,
-					decision.riskLevel,
-					decision.reason ?? "Permission denied",
-					targetPath,
-				);
-				return {
-					type: "deny",
-					reason: decision.reason ?? `Permission denied for "${toolName}"`,
-					riskLevel: decision.riskLevel,
-				};
-			}
-			if (decision.verdict === "ask_user") {
-				return {
-					type: "ask_user",
-					reason: decision.reason ?? `Tool "${toolName}" requires confirmation`,
-					riskLevel: decision.riskLevel,
-				};
+			if (!matchingSessionApproval) {
+				const decision = permissions.evaluate(permContext);
+				if (decision.verdict === "deny") {
+					recordDeniedAudit(
+						toolName,
+						toolCallId,
+						decision.riskLevel,
+						decision.reason ?? "Permission denied",
+						targetPath,
+					);
+					return {
+						type: "deny",
+						reason: decision.reason ?? `Permission denied for "${toolName}"`,
+						riskLevel: decision.riskLevel,
+					};
+				}
+				if (decision.verdict === "ask_user") {
+					return {
+						type: "ask_user",
+						reason: decision.reason ?? `Tool "${toolName}" requires confirmation`,
+						riskLevel: decision.riskLevel,
+					};
+				}
 			}
 
 			// 4. Check mutation queue for per_target concurrency
@@ -291,6 +301,36 @@ export function createToolGovernor(): ToolGovernor {
 			return audit;
 		},
 	};
+}
+
+function isAutoAllowedReadOnlyBashCommand(command: string): boolean {
+	const trimmed = command.trim();
+	if (trimmed.length === 0 || SHELL_META_PATTERN.test(trimmed)) {
+		return false;
+	}
+	const tokens = trimmed.split(/\s+/);
+	const head = tokens[0];
+	if (head === "pwd") {
+		return tokens.slice(1).every((token) => isSafeShortFlag(token, PWD_SAFE_FLAG_CHARS));
+	}
+	if (head === "ls") {
+		return tokens
+			.slice(1)
+			.every((token) => isSafeShortFlag(token, LS_SAFE_FLAG_CHARS) || SIMPLE_ARG_PATTERN.test(token));
+	}
+	return false;
+}
+
+function isSafeShortFlag(token: string, allowedChars: ReadonlySet<string>): boolean {
+	if (!token.startsWith("-") || token === "--") {
+		return false;
+	}
+	for (const char of token.slice(1)) {
+		if (!allowedChars.has(char)) {
+			return false;
+		}
+	}
+	return token.length > 1;
 }
 
 function matchesSessionApproval(
