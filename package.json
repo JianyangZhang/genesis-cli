@@ -13,6 +13,7 @@
 		"check:format": "biome check --formatter-enabled=true --linter-enabled=false packages/",
 		"check:types": "tsc --build",
 		"test:live:pi-mono": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run packages/app-runtime/src/test/pi-mono-live.test.ts",
+		"test:tui": "./scripts/test-tui-regressions.sh",
 		"test": "npm run build && vitest run --passWithNoTests",
 		"prepare": "husky"
 	},

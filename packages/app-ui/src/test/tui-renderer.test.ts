@@ -43,6 +43,7 @@ describe("renderStatusLine", () => {
 			phase: "idle" as InteractionPhase,
 			activeTool: null,
 			planProgress: null,
+			scrollPosition: null,
 		};
 		const result = renderStatusLine(status, 80);
 		expect(result).toContain("Ready");
@@ -53,6 +54,7 @@ describe("renderStatusLine", () => {
 			phase: "streaming" as InteractionPhase,
 			activeTool: null,
 			planProgress: null,
+			scrollPosition: null,
 		};
 		const result = renderStatusLine(status, 80);
 		expect(result).toContain("Streaming");
@@ -63,6 +65,7 @@ describe("renderStatusLine", () => {
 			phase: "tool_executing" as InteractionPhase,
 			activeTool: "read_file",
 			planProgress: null,
+			scrollPosition: null,
 		};
 		const result = renderStatusLine(status, 80);
 		expect(result).toContain("read_file");
@@ -74,17 +77,29 @@ describe("renderStatusLine", () => {
 			phase: "idle" as InteractionPhase,
 			activeTool: null,
 			planProgress: "Plan: 2/5",
+			scrollPosition: null,
 		};
 		const result = renderStatusLine(status, 80);
 		expect(result).toContain("2/5");
+	});
+
+	it("renders scroll position", () => {
+		const status: StatusLineRegion = {
+			phase: "idle" as InteractionPhase,
+			activeTool: null,
+			planProgress: null,
+			scrollPosition: "Lines 3-20/40",
+		};
+		const result = renderStatusLine(status, 120);
+		expect(result).toContain("Lines 3-20/40");
 	});
 });
 
 describe("renderScreen", () => {
 	it("renders a complete screen with conversation lines", () => {
 		const lines: ConversationLine[] = [
-			{ type: "text", role: "user", content: "Hello" },
-			{ type: "text", role: "assistant", content: "Hi there" },
+			{ type: "text", role: "user", content: "Hello", timestamp: 1000, authorName: "alice" },
+			{ type: "text", role: "assistant", content: "Hi there", timestamp: 2000, authorName: "Assistant" },
 			{ type: "divider" },
 			{
 				type: "tool_call",
@@ -98,11 +113,12 @@ describe("renderScreen", () => {
 			mode: "interactive",
 			header: { modelName: "Test", sessionStatus: "active", planStatus: null },
 			conversation: { lines },
-			statusLine: { phase: "idle", activeTool: null, planProgress: null },
+			statusLine: { phase: "idle", activeTool: null, planProgress: null, scrollPosition: "Lines 1-4/4" },
 		};
 		const result = renderScreen(layout, 80);
 		expect(result).toContain("Hello");
 		expect(result).toContain("Hi there");
+		expect(result).toContain("alice");
 		expect(result).toContain("read_file");
 		expect(result).toContain("Ready");
 	});

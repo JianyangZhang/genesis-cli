@@ -68,12 +68,13 @@ export function renderStatusLine(status: StatusLineRegion, width: number): strin
 	const phaseText = phaseLabel(status.phase);
 	const tool = status.activeTool ? ` │ ${CYAN}${status.activeTool}${RESET}` : "";
 	const plan = status.planProgress ? ` │ ${YELLOW}${status.planProgress}${RESET}` : "";
+	const scroll = status.scrollPosition ? ` │ ${DIM}${status.scrollPosition}${RESET}` : "";
 	const hint =
 		status.phase === "waiting_permission"
 			? ` │ ${DIM}y once · Y session · n deny${RESET}`
-			: ` │ ${DIM}/help · /exit · Ctrl+C · ↑↓ scroll${RESET}`;
+			: ` │ ${DIM}/help · /exit · ↑↓ history · wheel/PgUp/PgDn scroll${RESET}`;
 
-	const content = `${BG_DARK}${icon} ${phaseText}${tool}${plan}${hint}${RESET}`;
+	const content = `${BG_DARK}${icon} ${phaseText}${tool}${plan}${scroll}${hint}${RESET}`;
 	return truncateToWidth(content, width);
 }
 
@@ -103,16 +104,26 @@ function renderConversationLine(line: ConversationLine, width: number): string {
 }
 
 function renderTextLine(
-	line: { readonly role: "user" | "assistant"; readonly content: string },
+	line: {
+		readonly role: "user" | "assistant";
+		readonly content: string;
+		readonly timestamp: number;
+		readonly authorName?: string;
+	},
 	width: number,
 ): string {
-	const labelPlain = line.role === "user" ? "You:" : "Assistant:";
-	const labelAnsi = line.role === "user" ? `${BOLD}${labelPlain}${RESET}` : `${GREEN}${labelPlain}${RESET}`;
+	const timestamp = formatTimestamp(line.timestamp);
+	const authorPlain = line.authorName?.trim() || (line.role === "user" ? "You" : "Assistant");
+	const metaPlain = `${timestamp} ${authorPlain}`;
+	const metaAnsi =
+		line.role === "user"
+			? `${DIM}${timestamp}${RESET} ${BOLD}${authorPlain}${RESET}`
+			: `${DIM}${timestamp}${RESET} ${GREEN}${authorPlain}${RESET}`;
 
-	const available = Math.max(10, width - (labelPlain.length + 1));
+	const available = Math.max(10, width - (metaPlain.length + 1));
 	const chunks = wrapPlainText(line.content, available);
-	const indent = " ".repeat(labelPlain.length + 1);
-	return chunks.map((chunk, i) => (i === 0 ? `${labelAnsi} ${chunk}` : `${indent}${chunk}`)).join("\n");
+	const indent = " ".repeat(metaPlain.length + 1);
+	return chunks.map((chunk, i) => (i === 0 ? `${metaAnsi} ${chunk}` : `${indent}${chunk}`)).join("\n");
 }
 
 function renderToolCallLine(line: {
@@ -231,6 +242,14 @@ export function ansiExitAlternateScreen(): string {
 	return `${ESC}?1049l`;
 }
 
+export function ansiEnableMouseTracking(): string {
+	return `${ESC}?1000h${ESC}?1006h`;
+}
+
+export function ansiDisableMouseTracking(): string {
+	return `${ESC}?1006l${ESC}?1000l`;
+}
+
 // ---------------------------------------------------------------------------
 // Icon helpers
 // ---------------------------------------------------------------------------
@@ -347,4 +366,12 @@ function wrapPlainText(text: string, width: number): string[] {
 function renderRule(width: number): string {
 	const n = Math.max(0, Math.min(width, 200));
 	return `${DIM}${"─".repeat(n)}${RESET}`;
+}
+
+function formatTimestamp(timestamp: number): string {
+	const date = new Date(timestamp);
+	const hours = `${date.getHours()}`.padStart(2, "0");
+	const minutes = `${date.getMinutes()}`.padStart(2, "0");
+	const seconds = `${date.getSeconds()}`.padStart(2, "0");
+	return `${hours}:${minutes}:${seconds}`;
 }

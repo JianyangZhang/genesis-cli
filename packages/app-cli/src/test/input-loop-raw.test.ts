@@ -2,10 +2,19 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { createInputLoop } from "../input-loop.js";
 
-function createTtyPassThrough(): PassThrough & { isTTY: boolean; setRawMode: (enabled: boolean) => void } {
-	const stream = new PassThrough() as PassThrough & { isTTY: boolean; setRawMode: (enabled: boolean) => void };
+function createTtyPassThrough(): PassThrough & {
+	isTTY: boolean;
+	setRawMode: (enabled: boolean) => void;
+	pause: () => void;
+} {
+	const stream = new PassThrough() as PassThrough & {
+		isTTY: boolean;
+		setRawMode: (enabled: boolean) => void;
+		pause: () => void;
+	};
 	stream.isTTY = true;
 	stream.setRawMode = vi.fn();
+	stream.pause = vi.fn();
 	return stream;
 }
 
@@ -40,5 +49,30 @@ describe("createInputLoop (rawMode)", () => {
 		} finally {
 			loop.close();
 		}
+	});
+
+	it("emits wheel events for SGR mouse sequences", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onKey = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onKey });
+		try {
+			const pending = loop.nextLine();
+			input.write("\u001b[<64;10;10M");
+			input.write("\r");
+			await pending;
+			expect(onKey).toHaveBeenCalledWith("wheelup");
+		} finally {
+			loop.close();
+		}
+	});
+
+	it("restores raw mode and pauses stdin on close", () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true });
+		loop.close();
+		expect(input.setRawMode).toHaveBeenCalledWith(false);
+		expect(input.pause).toHaveBeenCalled();
 	});
 });

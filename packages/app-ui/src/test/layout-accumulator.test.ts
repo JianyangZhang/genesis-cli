@@ -51,6 +51,8 @@ describe("push — text events", () => {
 		if (line.type === "text") {
 			expect(line.role).toBe("assistant");
 			expect(line.content).toBe("Hello");
+			expect(line.timestamp).toBe(1000);
+			expect(line.authorName).toBe("Assistant");
 		}
 	});
 
@@ -63,6 +65,28 @@ describe("push — text events", () => {
 		const line = snapshot.conversation.lines[0] as ConversationLine;
 		if (line.type === "text") {
 			expect(line.content).toBe("Hello world");
+		}
+	});
+});
+
+describe("appendText", () => {
+	it("adds local user text with metadata", () => {
+		const acc = createLayoutAccumulator(createTestSessionState());
+		acc.appendText({
+			role: "user",
+			content: "Inspect this file",
+			timestamp: 2000,
+			authorName: "alice",
+		});
+		const snapshot = acc.snapshot();
+		expect(snapshot.conversation.lines).toHaveLength(1);
+		const line = snapshot.conversation.lines[0];
+		expect(line.type).toBe("text");
+		if (line.type === "text") {
+			expect(line.role).toBe("user");
+			expect(line.content).toBe("Inspect this file");
+			expect(line.timestamp).toBe(2000);
+			expect(line.authorName).toBe("alice");
 		}
 	});
 });
@@ -238,6 +262,7 @@ describe("statusLine with plan progress", () => {
 		const acc = createLayoutAccumulator(stateWithPlan);
 		const snapshot = acc.snapshot();
 		expect(snapshot.statusLine.planProgress).toBe("Plan: 2/5");
+		expect(snapshot.statusLine.scrollPosition).toBeNull();
 	});
 
 	it("reads the latest session state from a supplier", () => {

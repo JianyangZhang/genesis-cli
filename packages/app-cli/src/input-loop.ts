@@ -23,7 +23,7 @@ export interface InputLoopOptions {
 	/** Called whenever the current input state changes (rawMode only). */
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
 	/** Called for special keys (rawMode only). */
-	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc" | "ctrlc") => void;
+	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc" | "ctrlc") => void;
 }
 
 export interface InputLoop {
@@ -102,12 +102,18 @@ export function createInputLoop(options: InputLoopOptions = {}): InputLoop {
 
 function createRawInputLoop(options: {
 	readonly prompt: string;
-	readonly input: NodeJS.ReadableStream & { isTTY?: boolean; setRawMode?: (enabled: boolean) => void; resume(): void };
+	readonly input: NodeJS.ReadableStream & {
+		isTTY?: boolean;
+		setRawMode?: (enabled: boolean) => void;
+		resume(): void;
+		pause?: () => void;
+	};
 	readonly output: NodeJS.WritableStream & { isTTY?: boolean };
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
-	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc" | "ctrlc") => void;
+	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc" | "ctrlc") => void;
 }): InputLoop {
 	const { prompt, input, output, onInputStateChange, onKey } = options;
+	const sgrMousePattern = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`);
 
 	let closed = false;
 	let buffer = "";
@@ -175,12 +181,10 @@ function createRawInputLoop(options: {
 		}
 		if (seq === "\u001b[H" || seq === "\u001b[1~") {
 			setCursor(0);
-			onKey?.("home");
 			return;
 		}
 		if (seq === "\u001b[F" || seq === "\u001b[4~") {
 			setCursor(buffer.length);
-			onKey?.("end");
 			return;
 		}
 		if (seq === "\u001b[5~") {
@@ -189,6 +193,25 @@ function createRawInputLoop(options: {
 		}
 		if (seq === "\u001b[6~") {
 			onKey?.("pagedown");
+			return;
+		}
+		const sgrMouse = sgrMousePattern.exec(seq);
+		if (sgrMouse) {
+			const button = Number.parseInt(sgrMouse[1] ?? "", 10);
+			if ((button & 0x43) === 0x40) {
+				onKey?.("wheelup");
+			} else if ((button & 0x43) === 0x41) {
+				onKey?.("wheeldown");
+			}
+			return;
+		}
+		if (seq.length === 6 && seq.startsWith("\u001b[M")) {
+			const button = seq.charCodeAt(3) - 32;
+			if ((button & 0x43) === 0x40) {
+				onKey?.("wheelup");
+			} else if ((button & 0x43) === 0x41) {
+				onKey?.("wheeldown");
+			}
 			return;
 		}
 		if (seq === "\u001b[3~") {
@@ -271,6 +294,9 @@ function createRawInputLoop(options: {
 		}
 		try {
 			input.setRawMode?.(false);
+		} catch {}
+		try {
+			input.pause?.();
 		} catch {}
 		if (escapeTimeout) {
 			clearTimeout(escapeTimeout);

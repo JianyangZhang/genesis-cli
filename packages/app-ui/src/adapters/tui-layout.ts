@@ -52,6 +52,8 @@ export type ConversationLine =
 export interface TextLine {
 	readonly type: "text";
 	readonly role: "user" | "assistant";
+	readonly timestamp: number;
+	readonly authorName?: string;
 	readonly content: string;
 }
 
@@ -103,4 +105,6 @@ export interface StatusLineRegion {
 	readonly activeTool: string | null;
 	/** Plan progress string, e.g. "Plan: 2/5 steps". */
 	readonly planProgress: string | null;
+	/** Scroll position indicator, e.g. "Lines 20-40/80". */
+	readonly scrollPosition: string | null;
 }

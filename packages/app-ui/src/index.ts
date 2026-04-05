@@ -13,6 +13,8 @@ export type {
 export {
 	ansiClearBelow,
 	ansiClearLine,
+	ansiDisableMouseTracking,
+	ansiEnableMouseTracking,
 	ansiEnterAlternateScreen,
 	ansiExitAlternateScreen,
 	ansiHideCursor,

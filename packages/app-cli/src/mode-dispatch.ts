@@ -13,8 +13,6 @@ import type { InteractionState, OutputSink, SlashCommand, TuiScreenLayout } from
 import {
 	ansiClearBelow,
 	ansiClearLine,
-	ansiEnterAlternateScreen,
-	ansiExitAlternateScreen,
 	ansiHideCursor,
 	ansiMoveRight,
 	ansiMoveUp,
@@ -33,6 +31,7 @@ import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
 import { getSessionStoreDir, readLastSession, readRecentSessions, writeLastSession } from "./session-store.js";
+import { createTtySession } from "./tty-session.js";
 
 // ---------------------------------------------------------------------------
 // Mode handler interface
@@ -125,6 +124,7 @@ class InteractiveModeHandler implements ModeHandler {
 		let sessionTitle: string | undefined;
 		let exitRequested = false;
 		let inputLoop: InputLoop | null = null;
+		const ttySession = createTtySession();
 		const onResize = (): void => {
 			this._terminalRows = process.stdout.rows ?? 24;
 			this.renderScreenUpdate(accumulator.snapshot());
@@ -781,7 +781,7 @@ class InteractiveModeHandler implements ModeHandler {
 			},
 		});
 
-		process.stdout.write(ansiEnterAlternateScreen());
+		ttySession.enter();
 		this.renderWelcome(sessionRef.current);
 		this.renderScreenUpdate(accumulator.snapshot());
 
@@ -836,6 +836,14 @@ class InteractiveModeHandler implements ModeHandler {
 					line = await inputLoop.nextLine();
 					continue;
 				}
+				accumulator.appendText({
+					role: "user",
+					content: trimmed,
+					timestamp: Date.now(),
+					authorName: process.env.USER ?? "You",
+				});
+				this._viewportOffsetFromBottom = 0;
+				this.renderScreenUpdate(accumulator.snapshot());
 				this.rememberHistory(trimmed);
 				this._activeTurn = sessionRef.current
 					.prompt(trimmed)
@@ -851,8 +859,7 @@ class InteractiveModeHandler implements ModeHandler {
 		} finally {
 			process.stdout.off("resize", onResize);
 			inputLoop.close();
-			process.stdout.write(ansiShowCursor());
-			process.stdout.write(ansiExitAlternateScreen());
+			ttySession.restore();
 			sessionRef.current.events.removeAllListeners();
 			await sessionRef.current.close();
 		}
@@ -873,7 +880,7 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("\n");
 		process.stdout.write(`${DIM}Start:${RESET} type a prompt and press Enter\n`);
 		process.stdout.write(
-			`${DIM}Help:${RESET} /help    ${DIM}Exit:${RESET} /exit    ${DIM}Abort/Exit:${RESET} Ctrl+C    ${DIM}Scroll:${RESET} ↑/↓ PageUp/PageDown Home/End\n`,
+			`${DIM}Help:${RESET} /help    ${DIM}Exit:${RESET} /exit    ${DIM}Abort/Exit:${RESET} Ctrl+C    ${DIM}History:${RESET} ↑/↓    ${DIM}Scroll:${RESET} wheel PageUp/PageDown\n`,
 		);
 	}
 
@@ -894,7 +901,13 @@ class InteractiveModeHandler implements ModeHandler {
 		const maxConversationLines = Math.max(0, this._terminalRows - 3);
 		const lines = snapshot.conversation.lines;
 		if (lines.length <= maxConversationLines) {
-			return snapshot;
+			return {
+				...snapshot,
+				statusLine: {
+					...snapshot.statusLine,
+					scrollPosition: lines.length > 0 ? `Lines 1-${lines.length}/${lines.length}` : null,
+				},
+			};
 		}
 		const maxOffset = Math.max(0, lines.length - maxConversationLines);
 		const offset = Math.max(0, Math.min(this._viewportOffsetFromBottom, maxOffset));
@@ -905,6 +918,10 @@ class InteractiveModeHandler implements ModeHandler {
 			conversation: {
 				...snapshot.conversation,
 				lines: lines.slice(start, end),
+			},
+			statusLine: {
+				...snapshot.statusLine,
+				scrollPosition: `Lines ${start + 1}-${end}/${lines.length}`,
 			},
 		};
 	}
@@ -926,27 +943,22 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private handleSpecialKey(
-		key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc",
+		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc",
 		snapshot: TuiScreenLayout,
 	): void {
 		const maxConversationLines = Math.max(0, this._terminalRows - 3);
 		const maxOffset = Math.max(0, snapshot.conversation.lines.length - maxConversationLines);
 
 		if (key === "up" || key === "down") {
-			if (this._inputState.buffer.length > 0 || this._history.length > 0) {
-				this.navigateHistory(key === "up" ? -1 : 1);
-				return;
-			}
-		}
-		if (this._inputState.buffer.length > 0) {
+			this.navigateHistory(key === "up" ? -1 : 1);
 			return;
 		}
-		if (key === "up") {
+		if (key === "wheelup") {
 			this._viewportOffsetFromBottom = Math.min(maxOffset, this._viewportOffsetFromBottom + 1);
 			this.renderScreenUpdate(snapshot);
 			return;
 		}
-		if (key === "down") {
+		if (key === "wheeldown") {
 			this._viewportOffsetFromBottom = Math.max(0, this._viewportOffsetFromBottom - 1);
 			this.renderScreenUpdate(snapshot);
 			return;
@@ -966,10 +978,6 @@ class InteractiveModeHandler implements ModeHandler {
 			);
 			this.renderScreenUpdate(snapshot);
 			return;
-		}
-		if (key === "end") {
-			this._viewportOffsetFromBottom = 0;
-			this.renderScreenUpdate(snapshot);
 		}
 	}
 

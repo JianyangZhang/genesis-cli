@@ -24,6 +24,9 @@ export interface LayoutAccumulator {
 	/** Push a new event into the accumulator. */
 	push(event: RuntimeEvent): void;
 
+	/** Append a locally generated transcript line, such as user input. */
+	appendText(line: Omit<Extract<ConversationLine, { type: "text" }>, "type">): void;
+
 	/** Get the current screen layout snapshot. */
 	snapshot(): TuiScreenLayout;
 
@@ -48,6 +51,10 @@ export function createLayoutAccumulator(sessionState: SessionState | (() => Sess
 			accumulateEvent(event, lines, activeToolCalls);
 		},
 
+		appendText(line): void {
+			appendOrExtendText(lines, line.role, line.content, line.timestamp, line.authorName);
+		},
+
 		snapshot(): TuiScreenLayout {
 			return buildLayout(getSessionState(), interactionState, lines);
 		},
@@ -68,7 +75,13 @@ function accumulateEvent(event: RuntimeEvent, lines: ConversationLine[], activeT
 	switch (event.category) {
 		case "text": {
 			if (event.type === "text_delta") {
-				appendOrExtendText(lines, "assistant", (event as { content: string }).content);
+				appendOrExtendText(
+					lines,
+					"assistant",
+					(event as { content: string }).content,
+					event.timestamp,
+					"Assistant",
+				);
 			}
 			break;
 		}
@@ -213,6 +226,7 @@ function buildStatusLine(
 		phase: interaction.phase,
 		activeTool: interaction.activeToolName,
 		planProgress,
+		scrollPosition: null,
 	};
 }
 
@@ -220,13 +234,19 @@ function buildStatusLine(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function appendOrExtendText(lines: ConversationLine[], role: "user" | "assistant", content: string): void {
+function appendOrExtendText(
+	lines: ConversationLine[],
+	role: "user" | "assistant",
+	content: string,
+	timestamp: number,
+	authorName?: string,
+): void {
 	const last = lines[lines.length - 1];
 	if (last && last.type === "text" && last.role === role) {
 		// Extend the existing text line
 		lines[lines.length - 1] = { ...last, content: last.content + content };
 	} else {
-		lines.push({ type: "text", role, content });
+		lines.push({ type: "text", role, content, timestamp, authorName });
 	}
 }
 

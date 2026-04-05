@@ -49,6 +49,19 @@ Quick verification:
 - Type `/help` and confirm the command list is printed.
 - Exit by typing `/exit` (or `/quit`).
 
+Keyboard and scrolling:
+
+- `↑` / `↓`: cycle local input history in the `genesis> ` prompt.
+- `←` / `→` / `Home` / `End`: move the cursor inside the current input line.
+- Mouse wheel / trackpad scroll: browse the transcript scrollback without touching the input buffer.
+- `PageUp` / `PageDown`: scroll the transcript by page.
+
+Exit flow:
+
+- `/exit`, `/quit`, or idle `Ctrl+C` closes the TUI, restores mouse/raw-mode terminal state, and returns control to the shell immediately.
+- `Ctrl+C` aborts the active turn instead of exiting when a response is in progress.
+- `Ctrl+C` denies the current permission prompt when approval is pending.
+
 ### For Developers
 
 #### Tests / 测试
@@ -57,6 +70,12 @@ Unit tests:
 
 ```bash
 npm test
+```
+
+Focused TUI regression suite:
+
+```bash
+npm run test:tui
 ```
 
 Expected: Vitest prints a summary and exits with code 0.
