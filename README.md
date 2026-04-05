@@ -20,72 +20,35 @@ The exact package layout is intentionally documented in the technical plan rathe
 
 ---
 
-## Quick Start / 快速开始
+## Quick Start
 
-### For Users (Interactive TUI) / 使用者（交互式 TUI）
+### For Users (Interactive TUI)
 
-#### Requirements / 环境要求
-
-- Operating system: macOS 13+ or Linux (x86_64/arm64). Windows requires WSL2.
-- Node.js: 20.0.0+ (`node -v`)
-- npm: 9.0.0+ (`npm -v`)
-- Git: 2.31.0+ (`git --version`)
-
-You must provide an API key via `.env.local`:
-
-- Required: `GENESIS_API_KEY`
-
-#### Clone / 克隆
+Clone and start the interactive TUI:
 
 ```bash
 git clone https://github.com/JianyangZhang/genesis-cli.git
 cd genesis-cli
-```
-
-#### Install Dependencies / 安装依赖
-
-```bash
 npm ci
-```
-
-Expected: a line matching `added <number> packages` and exit code 0.
-
-#### Build / 构建
-
-```bash
 npm run build
-```
-
-Expected: exit code 0 and no TypeScript diagnostics (no `error TS` lines).
-
-#### Run / 运行
-
-This project is a CLI. It does not start an HTTP server.
-
-- Default port: N/A
-- Access address: N/A
-- Startup success signal: the banner `Genesis CLI — model:` is printed and the prompt `genesis> ` is shown.
-
-Configure secrets:
-
-```bash
 cp .env.example .env.local
-```
-
-Expected: no output and `.env.local` is created.
-
-Start interactive mode:
-
-```bash
 npm run chat:live
 ```
 
-Verify quickly:
+Requirements:
+
+- Node.js 20.0.0+
+- `GENESIS_API_KEY` is set in `.env.local`
+
+Startup success signal:
+
+- The banner `Genesis CLI — model:` is printed and the prompt `genesis> ` is shown.
+
+Quick verification:
 
 - Type `/help` and confirm the command list is printed.
-- Type a short prompt and confirm the assistant response streams in the transcript area.
 
-### For Developers / 开发者
+### For Developers
 
 #### Tests / 测试
 
