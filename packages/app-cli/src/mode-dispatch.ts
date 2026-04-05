@@ -31,7 +31,7 @@ import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
-import { getSessionStoreDir, readLastSession, writeLastSession } from "./session-store.js";
+import { getSessionStoreDir, readLastSession, readRecentSessions, writeLastSession } from "./session-store.js";
 
 // ---------------------------------------------------------------------------
 // Mode handler interface
@@ -112,6 +112,7 @@ class InteractiveModeHandler implements ModeHandler {
 		// Layout accumulator for TUI
 		const accumulator = createLayoutAccumulator(() => sessionRef.current.state);
 		let interactionState: InteractionState = initialInteractionState();
+		let sessionTitle: string | undefined = undefined;
 		const onResize = (): void => {
 			this._terminalRows = process.stdout.rows ?? 24;
 			this.renderScreenUpdate(accumulator.snapshot());
@@ -132,6 +133,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._activeTurn = null;
 			this._viewportOffsetFromBottom = 0;
 			this._historyIndex = null;
+			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 			accumulator.reset();
 
@@ -142,7 +144,7 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				try {
 					const dir = getSessionStoreDir(resolveAgentDir());
-					void writeLastSession(dir, (event as SessionClosedEvent).recoveryData);
+					void writeLastSession(dir, (event as SessionClosedEvent).recoveryData, { title: sessionTitle });
 				} catch {}
 			});
 
@@ -164,6 +166,22 @@ class InteractiveModeHandler implements ModeHandler {
 		const register = (command: SlashCommand): void => {
 			registry.register(command);
 		};
+
+		register({
+			name: "title",
+			description: "Set the current session title",
+			type: "local",
+			async execute(ctx) {
+				const next = ctx.args.trim();
+				if (next.length === 0) {
+					ctx.output.writeError("Usage: /title <text>");
+					return undefined;
+				}
+				sessionTitle = next;
+				ctx.output.writeLine(`Title: ${next}`);
+				return undefined;
+			},
+		});
 
 		register({
 			name: "help",
@@ -190,6 +208,28 @@ class InteractiveModeHandler implements ModeHandler {
 				accumulator.reset();
 				handler._viewportOffsetFromBottom = 0;
 				handler.renderScreenUpdate(accumulator.snapshot());
+				return undefined;
+			},
+		});
+
+		register({
+			name: "sessions",
+			description: "List recent sessions",
+			type: "local",
+			async execute(ctx) {
+				const dir = getSessionStoreDir(resolveAgentDir());
+				const recent = await readRecentSessions(dir);
+				if (recent.length === 0) {
+					ctx.output.writeLine("No recent sessions.");
+					return undefined;
+				}
+				ctx.output.writeLine("Recent sessions:");
+				for (const entry of recent) {
+					const id = entry.recoveryData.sessionId.value;
+					const model = entry.recoveryData.model.id;
+					const title = entry.title ? ` — ${entry.title}` : "";
+					ctx.output.writeLine(`  ${id} (${model})${title}`);
+				}
 				return undefined;
 			},
 		});
@@ -347,11 +387,18 @@ class InteractiveModeHandler implements ModeHandler {
 					return undefined;
 				}
 
-				const agentDir = resolveAgentDir();
-				const dir = getSessionStoreDir(agentDir);
-				const data = await readLastSession(dir);
+				const dir = getSessionStoreDir(resolveAgentDir());
+				const selector = ctx.args.trim();
+				const data =
+					selector.length === 0
+						? await readLastSession(dir)
+						: (await readRecentSessions(dir)).find((entry) => entry.recoveryData.sessionId.value === selector)
+								?.recoveryData ?? null;
+
 				if (!data) {
-					ctx.output.writeError("No previous session found.");
+					ctx.output.writeError(
+						selector.length === 0 ? "No previous session found." : `Session not found: ${selector}`,
+					);
 					return undefined;
 				}
 
