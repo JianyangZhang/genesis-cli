@@ -221,21 +221,24 @@ describe("interactive transcript formatting", () => {
 		expect(formatTurnNotice("thinking", { animationFrame: 1 })).toContain("Thinking..");
 		expect(formatTurnNotice("thinking", { animationFrame: 2 })).toContain("Thinking...");
 		expect(formatTurnNotice("thinking", { elapsedMs: 2500 })).toContain("2s");
+		expect(formatTurnNotice("thinking", { elapsedMs: 105000 })).toContain("1m 45s");
 		expect(
 			formatTurnNotice("thinking", {
 				usage: { input: 1200, output: 345, cacheRead: 0, cacheWrite: 0, totalTokens: 1545 },
 			}),
-		).toContain("↑1.2k");
-		expect(
-			formatTurnNotice("thinking", {
-				usage: { input: 1200, output: 345, cacheRead: 0, cacheWrite: 0, totalTokens: 1545 },
-			}),
-		).toContain("Σ1.5k");
+		).toContain("↓ 345 tokens");
 		expect(formatTurnNotice("thinking", { queuedCount: 2 })).toContain("2 queued");
 		expect(formatTurnNotice("responding", { animationFrame: 0 })).toContain("Responding.");
 		expect(formatTurnNotice("responding", { animationFrame: 1 })).toContain("Responding..");
 		expect(formatTurnNotice("responding", { animationFrame: 2 })).toContain("Responding...");
 		expect(formatTurnNotice("responding", { elapsedMs: 2500 })).toContain("2s");
+		expect(
+			formatTurnNotice("tool", {
+				animationFrame: 0,
+				elapsedMs: 2500,
+				toolLabel: "Running Bash(ls -la)",
+			}),
+		).toContain("Running Bash(ls -la).");
 	});
 
 	it("shows queued prompt previews in the footer", () => {
@@ -269,8 +272,58 @@ describe("interactive transcript formatting", () => {
 		});
 		expect(footer.block).toContain("Last turn");
 		expect(footer.block).toContain("Session");
-		expect(footer.block).toContain("Σ144");
-		expect(footer.block).toContain("Σ267");
+		expect(footer.block).toContain("↓ 24 tokens");
+		expect(footer.block).toContain("↓ 57 tokens");
+	});
+
+	it("shows active tool status in the footer", () => {
+		const footer = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "",
+			cursor: 0,
+			suggestions: [],
+			turnNotice: "tool",
+			turnNoticeAnimationFrame: 1,
+			elapsedMs: 2500,
+			currentTurnUsage: { input: 240, output: 32, cacheRead: 0, cacheWrite: 0, totalTokens: 272 },
+			activeToolLabel: "Running Bash(ls -la)",
+			permission: null,
+		});
+		expect(footer.block).toContain("Running Bash(ls -la)..");
+		expect(footer.block).toContain("↓ 32 tokens");
+	});
+
+	it("shows thinking detail panel hints and expanded content", () => {
+		const collapsed = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "",
+			cursor: 0,
+			suggestions: [],
+			turnNotice: "thinking",
+			turnNoticeAnimationFrame: 0,
+			detailPanelExpanded: false,
+			detailPanelLines: ["Let me plan this carefully."],
+			permission: null,
+		});
+		expect(collapsed.block).toContain("ctrl+o to expand");
+		expect(collapsed.block).not.toContain("Let me plan this carefully.");
+
+		const expanded = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "",
+			cursor: 0,
+			suggestions: [],
+			turnNotice: "thinking",
+			turnNoticeAnimationFrame: 0,
+			detailPanelExpanded: true,
+			detailPanelLines: ["Let me plan this carefully."],
+			permission: null,
+		});
+		expect(expanded.block).toContain("esc to collapse");
+		expect(expanded.block).toContain("Let me plan this carefully.");
 	});
 
 	it("wraps transcript content for streaming redraw", () => {

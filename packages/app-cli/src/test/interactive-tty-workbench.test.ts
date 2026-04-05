@@ -19,6 +19,24 @@ class FakeTtyOutput extends PassThrough {
 	isTTY = true;
 	columns = 80;
 	rows = 24;
+	private raw = "";
+
+	override write(
+		chunk: string | Uint8Array,
+		encoding?: BufferEncoding | ((error: Error | null | undefined) => void),
+		cb?: (error: Error | null | undefined) => void,
+	): boolean {
+		const normalized =
+			typeof chunk === "string"
+				? chunk
+				: Buffer.from(chunk).toString(typeof encoding === "string" ? encoding : "utf8");
+		this.raw += normalized;
+		return super.write(chunk as never, encoding as never, cb);
+	}
+
+	getRawOutput(): string {
+		return this.raw;
+	}
 }
 
 class VirtualScreen {
@@ -264,6 +282,36 @@ class FakeInteractiveSession implements SessionFacade {
 			return;
 		}
 
+		if (input === "expand thinking") {
+			this.emit({
+				id: "thinking-expand-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "thinking_delta",
+				content: "Let me plan this carefully before writing files. ",
+			} as RuntimeEvent);
+			await sleep(200);
+			this.emit({
+				id: "thinking-expand-2",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "thinking_delta",
+				content: "I should first inspect the workspace, then create a single self-contained HTML demo.",
+			} as RuntimeEvent);
+			await sleep(1600);
+			this.emit({
+				id: "text-expand-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "Planned the demo.",
+			} as RuntimeEvent);
+			return;
+		}
+
 		if (input === "queued part one\n\nqueued part two") {
 			this.emit({
 				id: "text-queued-batch-1",
@@ -306,6 +354,41 @@ class FakeInteractiveSession implements SessionFacade {
 
 		if (input === "bash pwd") {
 			this.emitBashExecution("bash-pwd", "pwd", "/tmp");
+			return;
+		}
+
+		if (input === "slow bash pwd") {
+			this.emit({
+				id: "tool-start-bash-pwd-slow",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "tool",
+				type: "tool_started",
+				toolName: "bash",
+				toolCallId: "bash-pwd-slow",
+				parameters: { command: "pwd" },
+			} as RuntimeEvent);
+			await sleep(2200);
+			this.emit({
+				id: "tool-end-bash-pwd-slow",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "tool",
+				type: "tool_completed",
+				toolName: "bash",
+				toolCallId: "bash-pwd-slow",
+				status: "success",
+				durationMs: 2200,
+				result: "/tmp",
+			} as RuntimeEvent);
+			this.emit({
+				id: "tool-text-bash-pwd-slow",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "/tmp",
+			} as RuntimeEvent);
 			return;
 		}
 
@@ -647,7 +730,7 @@ describe("interactive workbench TTY", () => {
 
 			input.write("slow hello\r");
 			await waitFor(() => screen.snapshot().includes("Thinking."));
-			await waitFor(() => screen.snapshot().includes("Σ212"));
+			await waitFor(() => screen.snapshot().includes("↓ 32 tokens"));
 
 			input.write("queued followup\r");
 			await waitFor(() => screen.snapshot().includes("Queued: queued followup"));
@@ -664,8 +747,8 @@ describe("interactive workbench TTY", () => {
 			expect(snapshot).toContain("Queued follow-up reply");
 			expect(snapshot).toContain("Last turn");
 			expect(snapshot).toContain("Session");
-			expect(snapshot).toContain("Σ123");
-			expect(snapshot).toContain("Σ367");
+			expect(snapshot).toContain("↓ 33 tokens");
+			expect(snapshot).toContain("↓ 97 tokens");
 
 			input.write("/exit\r");
 			await startPromise;
@@ -684,7 +767,7 @@ describe("interactive workbench TTY", () => {
 
 			input.write("slow respond\r");
 			await waitFor(() => screen.snapshot().includes("Responding."));
-			await waitFor(() => screen.snapshot().includes("Σ87"));
+			await waitFor(() => screen.snapshot().includes("↓ 12 tokens"));
 			await waitFor(() => {
 				const snapshot = screen.snapshot();
 				return snapshot.includes("Responding..") || snapshot.includes("Responding...");
@@ -746,6 +829,78 @@ describe("interactive workbench TTY", () => {
 			expect(session.getReceivedPrompts()).toContain("slow hello");
 			expect(session.getReceivedContinues()).toEqual(["queued part one\n\nqueued part two"]);
 
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not emit full-screen clear sequences during interactive redraws", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("bash echo hello\r");
+			await waitFor(() => screen.snapshot().includes("choice [Enter/1/2/3]>"));
+			input.write("1\r");
+			await waitFor(() => screen.snapshot().includes("Echo: hello"), 3000);
+
+			expect(output.getRawOutput()).not.toContain("\x1b[2J");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("shows running tool status instead of a stale responding label during tool execution", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("slow bash pwd\r");
+			await waitFor(() => screen.snapshot().includes("Running Bash(pwd)."));
+			await waitFor(() => screen.snapshot().includes("2s"), 3000);
+			expect(screen.snapshot()).not.toContain("Responding");
+			expect(screen.snapshot()).not.toContain("Σ");
+			await waitFor(() => screen.snapshot().includes("/tmp"), 4000);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("toggles the thinking detail panel with ctrl+o and esc", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("expand thinking\r");
+			await waitFor(() => screen.snapshot().includes("ctrl+o to expand"));
+			expect(screen.snapshot()).not.toContain("Let me plan this carefully");
+
+			input.write(Buffer.from([0x0f]));
+			await waitFor(() => screen.snapshot().includes("esc to collapse"));
+			await waitFor(() => screen.snapshot().includes("Let me plan this carefully"));
+
+			input.write("\x1b");
+			await waitFor(() => screen.snapshot().includes("ctrl+o to expand"));
+			expect(screen.snapshot()).not.toContain("Let me plan this carefully");
+
+			await waitFor(() => screen.snapshot().includes("Planned the demo."), 4000);
 			input.write("/exit\r");
 			await startPromise;
 		});

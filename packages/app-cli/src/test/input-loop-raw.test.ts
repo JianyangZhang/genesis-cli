@@ -155,6 +155,22 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("emits ctrl+o in raw mode", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onKey = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onKey });
+		try {
+			const pending = loop.nextLine();
+			input.write(Buffer.from([0x0f]));
+			input.write("\r");
+			await pending;
+			expect(onKey).toHaveBeenCalledWith("ctrlo");
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("applies tab completion through the raw-mode callback", async () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();

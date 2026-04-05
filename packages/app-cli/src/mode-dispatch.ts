@@ -95,6 +95,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
 	private _turnStartedAt: number | null = null;
+	private _detailPanelExpanded = false;
+	private _thinkingBuffer = "";
 	private _activeTurnUsageTotals: UsageSnapshot = emptyUsageSnapshot();
 	private _currentMessageUsage: UsageSnapshot = emptyUsageSnapshot();
 	private _lastTurnUsage: UsageSnapshot | null = null;
@@ -173,6 +175,8 @@ class InteractiveModeHandler implements ModeHandler {
 			this._turnNotice = null;
 			this._turnNoticeAnimationFrame = 0;
 			this._turnStartedAt = null;
+			this._detailPanelExpanded = false;
+			this._thinkingBuffer = "";
 			this._activeTurnUsageTotals = emptyUsageSnapshot();
 			this._currentMessageUsage = emptyUsageSnapshot();
 			this._lastTurnUsage = null;
@@ -927,8 +931,17 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private handleSpecialKey(
-		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc",
+		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc" | "ctrlo",
 	): void {
+		if (key === "ctrlo") {
+			this.toggleDetailPanel();
+			return;
+		}
+		if (key === "esc" && this._detailPanelExpanded) {
+			this._detailPanelExpanded = false;
+			this.renderFooterRegion();
+			return;
+		}
 		if (this._pendingPermissionCallId !== null) {
 			if (key === "up" || key === "shifttab") {
 				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, -1);
@@ -981,6 +994,7 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		if (event.category === "text" && event.type === "thinking_delta") {
+			this._thinkingBuffer += event.content;
 			if (this._turnNotice === null) {
 				this.startTurnFeedback();
 			}
@@ -1141,6 +1155,8 @@ class InteractiveModeHandler implements ModeHandler {
 		this.flushAssistantBuffer(false);
 		this.writeTranscriptText(formatTranscriptUserLine(input), true, false);
 		this._turnStartedAt = Date.now();
+		this._detailPanelExpanded = false;
+		this._thinkingBuffer = "";
 		this._activeTurnUsageTotals = emptyUsageSnapshot();
 		this._currentMessageUsage = emptyUsageSnapshot();
 		this.startTurnFeedback();
@@ -1159,6 +1175,8 @@ class InteractiveModeHandler implements ModeHandler {
 				this._turnNotice = null;
 				this._turnNoticeAnimationFrame = 0;
 				this._turnStartedAt = null;
+				this._detailPanelExpanded = false;
+				this._thinkingBuffer = "";
 				if (hasUsageSnapshot(completedTurnUsage)) {
 					this._lastTurnUsage = completedTurnUsage;
 					this._sessionUsageTotals = addUsageSnapshots(this._sessionUsageTotals, completedTurnUsage);
@@ -1197,19 +1215,31 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 	}
 
+	private toggleDetailPanel(): void {
+		if (this.currentDetailPanelLines().length === 0) {
+			return;
+		}
+		this._detailPanelExpanded = !this._detailPanelExpanded;
+		this.renderFooterRegion();
+	}
+
 	private buildFooterUi(): InteractiveFooterRenderResult {
+		const activeToolLabel = summarizeActiveToolNotice(this._toolCalls);
 		return formatInteractiveFooter({
 			terminalWidth: process.stdout.columns ?? 80,
 			prompt: this._prompt,
 			buffer: this._inputState.buffer,
 			cursor: this._inputState.cursor,
 			suggestions: this._commandSuggestions,
-			turnNotice: this._turnNotice,
+			turnNotice: activeToolLabel !== null ? "tool" : this._turnNotice,
 			turnNoticeAnimationFrame: this._turnNoticeAnimationFrame,
 			elapsedMs: this.currentTurnElapsedMs(),
 			currentTurnUsage: this.currentTurnUsage(),
 			lastTurnUsage: this._lastTurnUsage,
 			sessionUsage: this._sessionUsageTotals,
+			activeToolLabel,
+			detailPanelExpanded: this._detailPanelExpanded,
+			detailPanelLines: this.currentDetailPanelLines(),
 			queuedInputs: this._queuedInputs,
 			permission:
 				this._pendingPermissionCallId !== null && this._pendingPermissionDetails !== null
@@ -1219,6 +1249,17 @@ class InteractiveModeHandler implements ModeHandler {
 						}
 					: null,
 		});
+	}
+
+	private currentDetailPanelLines(): readonly string[] {
+		if (this._thinkingBuffer.trim().length === 0) {
+			return [];
+		}
+		const lines = wrapTranscriptContent(this._thinkingBuffer.trim(), this.terminalWidth()).slice(0, 8);
+		if (lines.length === 8 && measureTerminalDisplayWidth(this._thinkingBuffer.trim()) > 0) {
+			return [...lines, "…"];
+		}
+		return lines;
 	}
 
 	private rerenderInteractiveRegions(): void {
@@ -1344,6 +1385,12 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write(ansiEnableAutoWrap());
 	}
 
+	private clearVisibleScreenRows(): void {
+		for (let row = 1; row <= this.terminalHeight(); row += 1) {
+			this.writeAbsoluteTerminalLine(row, "");
+		}
+	}
+
 	private rememberTranscriptBlock(text: string, newline: boolean): void {
 		const block = newline ? text : text.replace(/\n$/, "");
 		if (block.length === 0) {
@@ -1364,7 +1411,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		process.stdout.write(ansiResetScrollRegion());
 		process.stdout.write(ansiCursorHome());
-		process.stdout.write("\x1b[2J");
+		this.clearVisibleScreenRows();
 		for (let index = 0; index < this._welcomeLines.length; index += 1) {
 			this.writeAbsoluteTerminalLine(
 				index + 1,
@@ -1679,12 +1726,15 @@ export function formatInteractiveFooter(state: {
 	readonly buffer: string;
 	readonly cursor: number;
 	readonly suggestions: readonly string[];
-	readonly turnNotice: "thinking" | "responding" | null;
+	readonly turnNotice: "thinking" | "responding" | "tool" | null;
 	readonly turnNoticeAnimationFrame?: number;
 	readonly elapsedMs?: number | null;
 	readonly currentTurnUsage?: UsageSnapshot | null;
 	readonly lastTurnUsage?: UsageSnapshot | null;
 	readonly sessionUsage?: UsageSnapshot | null;
+	readonly activeToolLabel?: string | null;
+	readonly detailPanelExpanded?: boolean;
+	readonly detailPanelLines?: readonly string[];
 	readonly queuedInputs?: readonly string[];
 	readonly permission: {
 		readonly details: {
@@ -1705,6 +1755,7 @@ export function formatInteractiveFooter(state: {
 				elapsedMs: state.elapsedMs ?? null,
 				usage: state.currentTurnUsage ?? null,
 				queuedCount: state.queuedInputs?.length ?? 0,
+				toolLabel: state.activeToolLabel ?? null,
 			}),
 		);
 	} else {
@@ -1713,6 +1764,16 @@ export function formatInteractiveFooter(state: {
 		}
 		if (hasUsageSnapshot(state.sessionUsage ?? null)) {
 			lines.push(formatUsageSummaryLine("Session", state.sessionUsage!));
+		}
+	}
+	if ((state.detailPanelLines?.length ?? 0) > 0) {
+		lines.push(
+			state.detailPanelExpanded
+				? `${INTERACTIVE_THEME.muted}↳ esc to collapse${INTERACTIVE_THEME.reset}`
+				: `${INTERACTIVE_THEME.muted}↳ ctrl+o to expand${INTERACTIVE_THEME.reset}`,
+		);
+		if (state.detailPanelExpanded) {
+			lines.push(...(state.detailPanelLines ?? []));
 		}
 	}
 	if ((state.queuedInputs?.length ?? 0) > 0) {
@@ -1876,6 +1937,23 @@ function summarizeToolParameters(
 		return (parameters as Record<string, unknown>).pattern as string;
 	}
 	return "";
+}
+
+function summarizeActiveToolNotice(
+	toolCalls: ReadonlyMap<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>,
+): string | null {
+	if (toolCalls.size === 0) {
+		return null;
+	}
+	const [first] = toolCalls.values();
+	if (!first) {
+		return "Running tools";
+	}
+	const title = formatInteractiveToolTitle(first.toolName, first.parameters).replace(/^⏺\s+/, "");
+	if (toolCalls.size === 1) {
+		return `Running ${title}`;
+	}
+	return `Running ${toolCalls.size} tools`;
 }
 
 function normalizeToolResultLines(
@@ -2128,22 +2206,28 @@ function formatQueuedPromptPreviewLines(queuedInputs: readonly string[], termina
 }
 
 export function formatTurnNotice(
-	kind: "thinking" | "responding",
+	kind: "thinking" | "responding" | "tool",
 	options: {
 		readonly animationFrame?: number;
 		readonly queuedCount?: number;
 		readonly usage?: UsageSnapshot | null;
 		readonly elapsedMs?: number | null;
+		readonly toolLabel?: string | null;
 	} = {},
 ): string {
 	const DIM = "\x1b[2m";
 	const CYAN = "\x1b[36m";
 	const RESET = "\x1b[0m";
 	const suffix = ".".repeat(((options.animationFrame ?? 0) % 3) + 1);
-	const label = kind === "thinking" ? `Thinking${suffix}` : `Responding${suffix}`;
+	const label =
+		kind === "thinking"
+			? `Thinking${suffix}`
+			: kind === "responding"
+				? `Responding${suffix}`
+				: `${options.toolLabel ?? "Running tools"}${suffix}`;
 	const meta: string[] = [];
 	if ((options.elapsedMs ?? 0) >= TURN_NOTICE_ELAPSED_THRESHOLD_MS) {
-		meta.push(`${Math.floor((options.elapsedMs ?? 0) / 1000)}s`);
+		meta.push(formatElapsedLabel(options.elapsedMs ?? 0));
 	}
 	const usageLabel = formatUsageCompact(options.usage ?? null);
 	if (usageLabel.length > 0) {
@@ -2166,13 +2250,25 @@ function formatUsageCompact(usage: UsageSnapshot | null): string {
 	if (!hasUsageSnapshot(usage)) {
 		return "";
 	}
-	const parts: string[] = [];
-	if (usage.input > 0) parts.push(`↑${formatTokenCount(usage.input)}`);
-	if (usage.output > 0) parts.push(`↓${formatTokenCount(usage.output)}`);
-	if (usage.cacheRead > 0) parts.push(`R${formatTokenCount(usage.cacheRead)}`);
-	if (usage.cacheWrite > 0) parts.push(`W${formatTokenCount(usage.cacheWrite)}`);
-	parts.push(`Σ${formatTokenCount(usage.totalTokens)}`);
-	return parts.join(" ");
+	if (usage.output > 0) {
+		return `↓ ${formatTokenCount(usage.output)} tokens`;
+	}
+	return "";
+}
+
+function formatElapsedLabel(elapsedMs: number): string {
+	const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+	if (totalSeconds < 60) {
+		return `${totalSeconds}s`;
+	}
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	if (minutes < 60) {
+		return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+	}
+	const hours = Math.floor(minutes / 60);
+	const remainingMinutes = minutes % 60;
+	return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
 }
 
 function formatTokenCount(count: number): string {

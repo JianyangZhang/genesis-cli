@@ -24,7 +24,18 @@ export interface InputLoopOptions {
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
 	/** Called for special keys (rawMode only). */
 	readonly onKey?: (
-		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc" | "ctrlc",
+		key:
+			| "up"
+			| "down"
+			| "pageup"
+			| "pagedown"
+			| "wheelup"
+			| "wheeldown"
+			| "tab"
+			| "shifttab"
+			| "esc"
+			| "ctrlc"
+			| "ctrlo",
 	) => void;
 	/** Called when Tab is pressed in rawMode; may replace the current buffer. */
 	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
@@ -122,7 +133,18 @@ function createRawInputLoop(options: {
 	readonly output: NodeJS.WritableStream & { isTTY?: boolean };
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
 	readonly onKey?: (
-		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc" | "ctrlc",
+		key:
+			| "up"
+			| "down"
+			| "pageup"
+			| "pagedown"
+			| "wheelup"
+			| "wheeldown"
+			| "tab"
+			| "shifttab"
+			| "esc"
+			| "ctrlc"
+			| "ctrlo",
 	) => void;
 	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
@@ -290,6 +312,10 @@ function createRawInputLoop(options: {
 				} else {
 					onKey?.("tab");
 				}
+				continue;
+			}
+			if (code === 15) {
+				onKey?.("ctrlo");
 				continue;
 			}
 			if (code === 27) {
