@@ -24,6 +24,8 @@ export interface InputLoopOptions {
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
 	/** Called for special keys (rawMode only). */
 	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc" | "ctrlc") => void;
+	/** Called when Tab is pressed in rawMode; may replace the current buffer. */
+	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
 	/** Called for terminal focus changes (rawMode only). */
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
 }
@@ -49,6 +51,7 @@ export function createInputLoop(options: InputLoopOptions = {}): InputLoop {
 			output,
 			onInputStateChange: options.onInputStateChange,
 			onKey: options.onKey,
+			onTabComplete: options.onTabComplete,
 			onTerminalEvent: options.onTerminalEvent,
 		});
 	}
@@ -114,9 +117,10 @@ function createRawInputLoop(options: {
 	readonly output: NodeJS.WritableStream & { isTTY?: boolean };
 	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
 	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "esc" | "ctrlc") => void;
+	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
 }): InputLoop {
-	const { prompt, input, output, onInputStateChange, onKey, onTerminalEvent } = options;
+	const { prompt, input, output, onInputStateChange, onKey, onTabComplete, onTerminalEvent } = options;
 	const sgrMousePattern = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`);
 
 	let closed = false;
@@ -259,6 +263,10 @@ function createRawInputLoop(options: {
 				return;
 			}
 			if (code === 9) {
+				const nextState = onTabComplete?.({ buffer, cursor });
+				if (nextState) {
+					setState(nextState);
+				}
 				continue;
 			}
 			if (code === 27) {

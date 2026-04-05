@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	acceptFirstSlashSuggestion,
 	computeSlashSuggestions,
 	formatSlashSuggestionHint,
 	formatTranscriptAssistantLine,
@@ -85,5 +86,16 @@ describe("slash command hints", () => {
 		const hint = formatSlashSuggestionHint(["help", "status"], 30);
 		expect(hint).toContain("/help");
 		expect(hint).toContain("/status");
+	});
+
+	it("accepts the first slash suggestion on tab", () => {
+		expect(acceptFirstSlashSuggestion({ buffer: "/st", cursor: 3 }, ["status", "sessions"])).toEqual({
+			buffer: "/status ",
+			cursor: 8,
+		});
+	});
+
+	it("does not accept a suggestion once arguments have started", () => {
+		expect(acceptFirstSlashSuggestion({ buffer: "/status now", cursor: 11 }, ["status"])).toBeNull();
 	});
 });

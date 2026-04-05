@@ -137,6 +137,32 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("applies tab completion through the raw-mode callback", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const states: Array<{ buffer: string; cursor: number }> = [];
+		const loop = createInputLoop({
+			input,
+			output,
+			prompt: "",
+			rawMode: true,
+			onInputStateChange: (state) => {
+				states.push(state);
+			},
+			onTabComplete: () => ({ buffer: "/status ", cursor: 8 }),
+		});
+		try {
+			const pending = loop.nextLine();
+			input.write("/st");
+			input.write("\t");
+			input.write("\r");
+			await expect(pending).resolves.toBe("/status ");
+			expect(states).toContainEqual({ buffer: "/status ", cursor: 8 });
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("restores raw mode and pauses stdin on close", () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();

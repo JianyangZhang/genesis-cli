@@ -746,6 +746,15 @@ class InteractiveModeHandler implements ModeHandler {
 				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listAll());
 				this.renderPromptLine();
 			},
+			onTabComplete: (state) => {
+				const nextState = acceptFirstSlashSuggestion(state, this._commandSuggestions);
+				if (nextState) {
+					this._inputState = nextState;
+					this._commandSuggestions = computeSlashSuggestions(nextState.buffer, registry.listAll());
+					this.renderPromptLine();
+				}
+				return nextState;
+			},
 			onKey: (key) => {
 				if (key === "ctrlc") {
 					if (this._pendingPermissionCallId !== null) {
@@ -1194,6 +1203,22 @@ export function formatSlashSuggestionHint(suggestions: readonly string[], remain
 		hint += segment;
 	}
 	return hint.length > 0 ? `${DIM}${hint}${RESET}` : "";
+}
+
+export function acceptFirstSlashSuggestion(
+	state: { buffer: string; cursor: number },
+	suggestions: readonly string[],
+): { buffer: string; cursor: number } | null {
+	if (suggestions.length === 0) return null;
+	if (state.cursor !== state.buffer.length) return null;
+	const trimmed = state.buffer.trimStart();
+	if (!trimmed.startsWith("/")) return null;
+	if (trimmed.slice(1).includes(" ")) return null;
+	const nextBuffer = `/${suggestions[0]} `;
+	return {
+		buffer: nextBuffer,
+		cursor: nextBuffer.length,
+	};
 }
 
 export function formatTranscriptUserLine(content: string): string {
