@@ -214,6 +214,10 @@ class InteractiveModeHandler implements ModeHandler {
 			registry.register(command);
 		};
 
+		for (const cmd of createBuiltinCommands()) {
+			register(cmd);
+		}
+
 		register({
 			name: "title",
 			description: "Set the current session title",
@@ -235,14 +239,42 @@ class InteractiveModeHandler implements ModeHandler {
 			description: "Show available commands",
 			type: "local",
 			async execute(ctx) {
-				const all = registry
-					.listAll()
-					.slice()
-					.sort((a, b) => a.name.localeCompare(b.name));
-				ctx.output.writeLine("Commands:");
-				for (const cmd of all) {
-					ctx.output.writeLine(`  /${cmd.name} — ${cmd.description}`);
+				const query = ctx.args.trim().replace(/^\/+/, "");
+				const all = registry.listAll().slice();
+
+				if (query.length > 0) {
+					const cmd = all.find((c) => c.name === query) ?? null;
+					if (!cmd) {
+						ctx.output.writeError(`Unknown command: /${query}`);
+						ctx.output.writeLine("Type /help to see all commands.");
+						return undefined;
+					}
+					ctx.output.writeLine(`/${cmd.name}`);
+					ctx.output.writeLine(`  ${cmd.description}`);
+					ctx.output.writeLine(`  Type: ${cmd.type}`);
+					return undefined;
 				}
+
+				all.sort((a, b) => a.name.localeCompare(b.name));
+				const local = all.filter((c) => c.type === "local");
+				const prompt = all.filter((c) => c.type === "prompt");
+				const ui = all.filter((c) => c.type === "ui");
+
+				ctx.output.writeLine("Commands:");
+				const renderGroup = (label: string, items: readonly SlashCommand[]): void => {
+					if (items.length === 0) return;
+					ctx.output.writeLine(`\n${label} (${items.length}):`);
+					for (const cmd of items) {
+						ctx.output.writeLine(`  /${cmd.name} — ${cmd.description}`);
+					}
+				};
+				renderGroup("Local", local);
+				renderGroup("Prompt", prompt);
+				renderGroup("UI", ui);
+
+				ctx.output.writeLine("\nTips:");
+				ctx.output.writeLine("  /help <name>  Show details for a command");
+				ctx.output.writeLine("  Ctrl+C        Abort the current turn (or exit if idle)");
 				return undefined;
 			},
 		});
@@ -702,7 +734,7 @@ class InteractiveModeHandler implements ModeHandler {
 					continue;
 				}
 				if (resolution && resolution.type === "not_found") {
-					sink.writeError(`Unknown command: /${resolution.name}`);
+					sink.writeError(`Unknown command: /${resolution.name}. Type /help for a list.`);
 					line = await inputLoop.nextLine();
 					continue;
 				}
