@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createAppRuntime, PiMonoSessionAdapter, type CliMode, type ModelDescriptor } from "@genesis-cli/runtime";
 import { ensureAgentDirBootstrapped } from "./bootstrap.js";
@@ -15,6 +16,7 @@ export interface CliOptions {
 	readonly toolSet: readonly string[];
 	readonly thinkingLevel?: ThinkingLevel;
 	readonly bootstrapOverrides?: BootstrapOverrides;
+	readonly configSources: Readonly<Record<string, { layer: string; detail: string }>>;
 }
 
 interface BootstrapOverrides {
@@ -66,7 +68,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 		return;
 	}
 
-	const options = resolveCliOptions(parsed.flags);
+	const options = await resolveCliOptions(parsed.flags);
 	await ensureAgentDirBootstrapped({
 		agentDir: options.agentDir,
 		provider: options.model.provider,
@@ -85,6 +87,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 	const runtime = createAppRuntime({
 		workingDirectory: options.workingDirectory,
 		agentDir: options.agentDir,
+		configSources: options.configSources,
 		mode: options.mode,
 		model: options.model,
 		toolSet: options.toolSet,
@@ -106,21 +109,134 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 	}
 }
 
-function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): CliOptions {
+interface FileConfig {
+	readonly provider?: string;
+	readonly model?: string;
+	readonly displayName?: string;
+	readonly tools?: string | readonly string[];
+	readonly thinking?: ThinkingLevel;
+	readonly bootstrap?: {
+		readonly baseUrl?: string;
+		readonly api?: string;
+	};
+}
+
+type SourceLayer = "default" | "agent" | "project" | "env" | "cli";
+
+async function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): Promise<CliOptions> {
 	const workingDirectory = resolve(readStringFlag(flags, "cwd", process.cwd()));
 	const agentDir = resolve(readStringFlag(flags, "agent-dir", resolve(".genesis-local/pi-agent")));
+
+	const agentConfigPath = resolve(agentDir, "config.json");
+	const projectConfigPath = resolve(workingDirectory, ".genesis/config.json");
+	const agentConfig = await readOptionalJson(agentConfigPath);
+	const projectConfig = await readOptionalJson(projectConfigPath);
+
 	const mode = readModeFlag(flags, "mode", "interactive");
-	const provider = readStringFlag(flags, "provider", process.env.GENESIS_MODEL_PROVIDER ?? "zai");
-	const modelId = readStringFlag(flags, "model", process.env.GENESIS_MODEL_ID ?? "glm-5.1");
-	const displayName = readOptionalStringFlag(flags, "display-name", process.env.GENESIS_MODEL_DISPLAY_NAME);
-	const toolSet = splitCsv(readStringFlag(flags, "tools", process.env.GENESIS_TOOL_SET ?? "read,bash,edit,write"));
-	const thinkingLevel = readOptionalStringFlag(flags, "thinking", process.env.GENESIS_THINKING_LEVEL) as
-		| ThinkingLevel
-		| undefined;
-	const bootstrapBaseUrl = normalizeOptionalString(
-		readOptionalStringFlag(flags, "bootstrap-base-url", process.env.GENESIS_BOOTSTRAP_BASE_URL),
+
+	const sources: Record<string, { layer: SourceLayer; detail: string }> = {};
+	sources.cwd = typeof flags.cwd === "string" ? { layer: "cli", detail: "--cwd" } : { layer: "default", detail: "process.cwd()" };
+	sources.agentDir =
+		typeof flags["agent-dir"] === "string"
+			? { layer: "cli", detail: "--agent-dir" }
+			: { layer: "default", detail: ".genesis-local/pi-agent" };
+
+	const provider = pickString(
+		[
+			{ value: asOptionalString(flags.provider), layer: "cli", detail: "--provider" },
+			{ value: process.env.GENESIS_MODEL_PROVIDER, layer: "env", detail: "GENESIS_MODEL_PROVIDER" },
+			{ value: projectConfig?.provider, layer: "project", detail: projectConfigPath },
+			{ value: agentConfig?.provider, layer: "agent", detail: agentConfigPath },
+		],
+		"zai",
+		{ layer: "default", detail: "default" },
+		(value, source) => {
+			sources.provider = source;
+			return value;
+		},
 	);
-	const bootstrapApi = normalizeOptionalString(readOptionalStringFlag(flags, "bootstrap-api", process.env.GENESIS_BOOTSTRAP_API));
+
+	const modelId = pickString(
+		[
+			{ value: asOptionalString(flags.model), layer: "cli", detail: "--model" },
+			{ value: process.env.GENESIS_MODEL_ID, layer: "env", detail: "GENESIS_MODEL_ID" },
+			{ value: projectConfig?.model, layer: "project", detail: projectConfigPath },
+			{ value: agentConfig?.model, layer: "agent", detail: agentConfigPath },
+		],
+		"glm-5.1",
+		{ layer: "default", detail: "default" },
+		(value, source) => {
+			sources.model = source;
+			return value;
+		},
+	);
+
+	const displayName = pickOptionalString(
+		[
+			{ value: asOptionalString(flags["display-name"]), layer: "cli", detail: "--display-name" },
+			{ value: process.env.GENESIS_MODEL_DISPLAY_NAME, layer: "env", detail: "GENESIS_MODEL_DISPLAY_NAME" },
+			{ value: projectConfig?.displayName, layer: "project", detail: projectConfigPath },
+			{ value: agentConfig?.displayName, layer: "agent", detail: agentConfigPath },
+		],
+		(value, source) => {
+			sources.displayName = source;
+			return value;
+		},
+	);
+
+	const toolSetRaw = pickTools(
+		[
+			{ value: asOptionalString(flags.tools), layer: "cli", detail: "--tools" },
+			{ value: process.env.GENESIS_TOOL_SET, layer: "env", detail: "GENESIS_TOOL_SET" },
+			{ value: projectConfig?.tools, layer: "project", detail: projectConfigPath },
+			{ value: agentConfig?.tools, layer: "agent", detail: agentConfigPath },
+		],
+		"read,bash,edit,write",
+		{ layer: "default", detail: "default" },
+		(value, source) => {
+			sources.tools = source;
+			return value;
+		},
+	);
+	const toolSet = splitCsv(toolSetRaw);
+
+	const thinkingLevel = pickOptionalString(
+		[
+			{ value: asOptionalString(flags.thinking), layer: "cli", detail: "--thinking" },
+			{ value: process.env.GENESIS_THINKING_LEVEL, layer: "env", detail: "GENESIS_THINKING_LEVEL" },
+			{ value: projectConfig?.thinking, layer: "project", detail: projectConfigPath },
+			{ value: agentConfig?.thinking, layer: "agent", detail: agentConfigPath },
+		],
+		(value, source) => {
+			sources.thinking = source;
+			return value;
+		},
+	) as ThinkingLevel | undefined;
+
+	const bootstrapBaseUrl = pickOptionalString(
+		[
+			{ value: asOptionalString(flags["bootstrap-base-url"]), layer: "cli", detail: "--bootstrap-base-url" },
+			{ value: process.env.GENESIS_BOOTSTRAP_BASE_URL, layer: "env", detail: "GENESIS_BOOTSTRAP_BASE_URL" },
+			{ value: projectConfig?.bootstrap?.baseUrl, layer: "project", detail: projectConfigPath },
+			{ value: agentConfig?.bootstrap?.baseUrl, layer: "agent", detail: agentConfigPath },
+		],
+		(value, source) => {
+			sources["bootstrap.baseUrl"] = source;
+			return value;
+		},
+	);
+	const bootstrapApi = pickOptionalString(
+		[
+			{ value: asOptionalString(flags["bootstrap-api"]), layer: "cli", detail: "--bootstrap-api" },
+			{ value: process.env.GENESIS_BOOTSTRAP_API, layer: "env", detail: "GENESIS_BOOTSTRAP_API" },
+			{ value: projectConfig?.bootstrap?.api, layer: "project", detail: projectConfigPath },
+			{ value: agentConfig?.bootstrap?.api, layer: "agent", detail: agentConfigPath },
+		],
+		(value, source) => {
+			sources["bootstrap.api"] = source;
+			return value;
+		},
+	);
 
 	return {
 		mode,
@@ -152,6 +268,7 @@ function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): C
 				),
 			},
 		},
+		configSources: sources,
 	};
 }
 
@@ -159,6 +276,74 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
 	return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function asOptionalString(value: string | boolean | undefined): string | undefined {
+	if (typeof value !== "string") return undefined;
+	return value;
+}
+
+function pickString(
+	candidates: readonly { value: string | undefined; layer: SourceLayer; detail: string }[],
+	fallback: string,
+	fallbackSource: { layer: SourceLayer; detail: string },
+	onPicked: (value: string, source: { layer: SourceLayer; detail: string }) => string,
+): string {
+	for (const candidate of candidates) {
+		const value = normalizeOptionalString(candidate.value);
+		if (value !== undefined) {
+			return onPicked(value, { layer: candidate.layer, detail: candidate.detail });
+		}
+	}
+	return onPicked(fallback, fallbackSource);
+}
+
+function pickOptionalString(
+	candidates: readonly { value: string | undefined; layer: SourceLayer; detail: string }[],
+	onPicked: (value: string | undefined, source: { layer: SourceLayer; detail: string }) => string | undefined,
+): string | undefined {
+	for (const candidate of candidates) {
+		const value = normalizeOptionalString(candidate.value);
+		if (value !== undefined) {
+			return onPicked(value, { layer: candidate.layer, detail: candidate.detail });
+		}
+	}
+	return onPicked(undefined, { layer: "default", detail: "default" });
+}
+
+function pickTools(
+	candidates: readonly { value: string | readonly string[] | undefined; layer: SourceLayer; detail: string }[],
+	fallback: string,
+	fallbackSource: { layer: SourceLayer; detail: string },
+	onPicked: (value: string, source: { layer: SourceLayer; detail: string }) => string,
+): string {
+	for (const candidate of candidates) {
+		const raw = candidate.value;
+		if (Array.isArray(raw)) {
+			const joined = raw.filter((v) => typeof v === "string" && v.trim().length > 0).join(",");
+			if (joined.length > 0) {
+				return onPicked(joined, { layer: candidate.layer, detail: candidate.detail });
+			}
+			continue;
+		}
+		if (typeof raw === "string") {
+			const value = normalizeOptionalString(raw);
+			if (value !== undefined) {
+				return onPicked(value, { layer: candidate.layer, detail: candidate.detail });
+			}
+		}
+	}
+	return onPicked(fallback, fallbackSource);
+}
+
+async function readOptionalJson(filePath: string): Promise<FileConfig | null> {
+	try {
+		const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+		if (!parsed || typeof parsed !== "object") return null;
+		return parsed as FileConfig;
+	} catch {
+		return null;
+	}
 }
 
 function readModeFlag(

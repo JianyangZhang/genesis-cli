@@ -135,6 +135,7 @@ export interface RuntimeContext {
 	readonly sessionId: SessionId;
 	readonly workingDirectory: string;
 	readonly agentDir?: string;
+	readonly configSources?: Readonly<Record<string, { layer: string; detail: string }>>;
 	readonly mode: CliMode;
 	readonly model: ModelDescriptor;
 	readonly toolSet: ToolSetDescriptor;

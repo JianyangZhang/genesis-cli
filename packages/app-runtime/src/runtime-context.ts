@@ -22,6 +22,7 @@ export interface RuntimeContextParams {
 	readonly sessionId: SessionId;
 	readonly workingDirectory: string;
 	readonly agentDir?: string;
+	readonly configSources?: Readonly<Record<string, { layer: string; detail: string }>>;
 	readonly mode: CliMode;
 	readonly model: ModelDescriptor;
 	readonly toolSet: ToolSetDescriptor;
@@ -42,6 +43,7 @@ export function createRuntimeContext(params: RuntimeContextParams): RuntimeConte
 		sessionId: params.sessionId,
 		workingDirectory: params.workingDirectory,
 		agentDir: params.agentDir,
+		configSources: params.configSources,
 		mode: params.mode,
 		model: params.model,
 		toolSet: params.toolSet,

@@ -270,6 +270,17 @@ class InteractiveModeHandler implements ModeHandler {
 			description: "Show effective config",
 			type: "local",
 			async execute(ctx) {
+				const sources = ctx.session.context.configSources ?? {};
+				ctx.output.writeLine("Precedence: default < agent < project < env < cli");
+				const keys = Object.keys(sources).sort((a, b) => a.localeCompare(b));
+				if (keys.length > 0) {
+					ctx.output.writeLine("Sources:");
+					for (const key of keys) {
+						const source = sources[key]!;
+						ctx.output.writeLine(`  ${key}: ${source.layer} (${source.detail})`);
+					}
+				}
+
 				const agentDir = resolveAgentDir();
 				const modelsPath = join(agentDir, "models.json");
 				ctx.output.writeLine(`agentDir: ${agentDir}`);
