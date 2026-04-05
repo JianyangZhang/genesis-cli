@@ -1,6 +1,6 @@
 {
   "name": "@pickle-pee/tools",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Tool catalog, risk classification, permission labels, and execution wrappers",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

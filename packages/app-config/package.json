@@ -1,6 +1,6 @@
 {
   "name": "@pickle-pee/config",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Configuration layering, resource loading, and skill/template management",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

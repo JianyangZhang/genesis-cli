@@ -1,6 +1,6 @@
 {
   "name": "@pickle-pee/pi-ai",
-  "version": "0.65.1",
+  "version": "0.65.2",
   "type": "module",
   "description": "Vendored minimal pi-ai surface for Genesis (no provider SDK dependencies).",
   "main": "./dist/index.js",
