@@ -184,6 +184,39 @@ class FakeInteractiveSession implements SessionFacade {
 			return;
 		}
 
+		if (input === "slow hello") {
+			this.emit({
+				id: "thinking-slow-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "thinking_delta",
+				content: "...",
+			} as RuntimeEvent);
+			await sleep(900);
+			this.emit({
+				id: "text-slow-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "First delayed reply",
+			} as RuntimeEvent);
+			return;
+		}
+
+		if (input === "queued followup") {
+			this.emit({
+				id: "text-queued-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "Queued follow-up reply",
+			} as RuntimeEvent);
+			return;
+		}
+
 		if (input === "bash echo hello") {
 			if (this.sessionApprovedCommands.has("echo hello")) {
 				this.emitBashExecution("bash-echo-2", "echo hello", "Echo: hello");
@@ -435,6 +468,10 @@ async function waitFor(check: () => boolean, timeoutMs = 1000): Promise<void> {
 	}
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function withPatchedProcessTty<T>(
 	input: FakeTtyInput,
 	output: FakeTtyOutput,
@@ -509,6 +546,37 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
 			const snapshot = screen.snapshot();
 			expect(countOccurrences(snapshot, "⏺ Hi from Genesis")).toBe(1);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("animates thinking and previews queued prompts before the next turn starts", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("slow hello\r");
+			await waitFor(() => screen.snapshot().includes("Thinking."));
+
+			input.write("queued followup\r");
+			await waitFor(() => screen.snapshot().includes("Queued: queued followup"));
+			await waitFor(() => {
+				const snapshot = screen.snapshot();
+				return snapshot.includes("Thinking..") || snapshot.includes("Thinking...");
+			}, 2000);
+			await waitFor(() => screen.snapshot().includes("First delayed reply"), 3000);
+			await waitFor(() => screen.snapshot().includes("Queued follow-up reply"), 3000);
+
+			const snapshot = screen.snapshot();
+			expect(snapshot).toContain("queued followup");
+			expect(snapshot).toContain("Queued follow-up reply");
 
 			input.write("/exit\r");
 			await startPromise;

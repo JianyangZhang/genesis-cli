@@ -217,8 +217,28 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("formats turn notices for thinking and responding", () => {
-		expect(formatTurnNotice("thinking")).toContain("Thinking");
+		expect(formatTurnNotice("thinking", { animationFrame: 0 })).toContain("Thinking.");
+		expect(formatTurnNotice("thinking", { animationFrame: 1 })).toContain("Thinking..");
+		expect(formatTurnNotice("thinking", { animationFrame: 2 })).toContain("Thinking...");
+		expect(formatTurnNotice("thinking", { queuedCount: 2 })).toContain("2 queued");
 		expect(formatTurnNotice("responding")).toContain("Responding");
+	});
+
+	it("shows queued prompt previews in the footer", () => {
+		const footer = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "",
+			cursor: 0,
+			suggestions: [],
+			turnNotice: "thinking",
+			turnNoticeAnimationFrame: 1,
+			queuedInputs: ["second prompt", "third prompt"],
+			permission: null,
+		});
+		expect(footer.block).toContain("second prompt");
+		expect(footer.block).toContain("third prompt");
+		expect(footer.block).toContain("2 queued");
 	});
 
 	it("wraps transcript content for streaming redraw", () => {

@@ -82,6 +82,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private _streamingDisplayRows = 0;
 	private _renderedStreamingStartRow: number | null = null;
 	private _turnNotice: "thinking" | "responding" | null = null;
+	private _turnNoticeAnimationFrame = 0;
+	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
 	private readonly _queuedInputs: string[] = [];
@@ -152,7 +154,9 @@ class InteractiveModeHandler implements ModeHandler {
 			this._streamingReservedRows = 0;
 			this._streamingDisplayRows = 0;
 			this._renderedStreamingStartRow = null;
+			this.stopTurnNoticeAnimation();
 			this._turnNotice = null;
+			this._turnNoticeAnimationFrame = 0;
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
 			this._queuedInputs.length = 0;
@@ -869,6 +873,7 @@ class InteractiveModeHandler implements ModeHandler {
 				// Regular prompt
 				if (this._activeTurn !== null) {
 					this._queuedInputs.push(trimmed);
+					this.renderFooterRegion();
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -958,6 +963,8 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		if (event.category === "text" && event.type === "text_delta") {
 			if (this._turnNotice !== "responding") {
+				this.stopTurnNoticeAnimation();
+				this._turnNoticeAnimationFrame = 0;
 				this._turnNotice = "responding";
 			}
 			this._assistantBuffer = mergeStreamingText(this._assistantBuffer, event.content);
@@ -998,7 +1005,31 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this._turnNotice = "thinking";
+		this._turnNoticeAnimationFrame = 0;
+		this.startTurnNoticeAnimation();
 		this.renderPromptLine();
+	}
+
+	private startTurnNoticeAnimation(): void {
+		if (this._turnNoticeTimer !== null) {
+			return;
+		}
+		this._turnNoticeTimer = setInterval(() => {
+			if (this._turnNotice !== "thinking") {
+				return;
+			}
+			this._turnNoticeAnimationFrame = (this._turnNoticeAnimationFrame + 1) % 3;
+			this.renderFooterRegion();
+		}, 400);
+		this._turnNoticeTimer.unref?.();
+	}
+
+	private stopTurnNoticeAnimation(): void {
+		if (this._turnNoticeTimer === null) {
+			return;
+		}
+		clearInterval(this._turnNoticeTimer);
+		this._turnNoticeTimer = null;
 	}
 
 	private renderStreamingAssistantBlock(): void {
@@ -1083,9 +1114,11 @@ class InteractiveModeHandler implements ModeHandler {
 				sink.writeError(`Error: ${err}`);
 			})
 			.finally(() => {
+				this.stopTurnNoticeAnimation();
 				this._activeTurn = null;
 				this.flushAssistantBuffer(false);
 				this._turnNotice = null;
+				this._turnNoticeAnimationFrame = 0;
 				const nextQueued = this._queuedInputs.shift();
 				if (nextQueued) {
 					this.startPromptTurn(session, nextQueued, sink);
@@ -1103,6 +1136,8 @@ class InteractiveModeHandler implements ModeHandler {
 			cursor: this._inputState.cursor,
 			suggestions: this._commandSuggestions,
 			turnNotice: this._turnNotice,
+			turnNoticeAnimationFrame: this._turnNoticeAnimationFrame,
+			queuedInputs: this._queuedInputs,
 			permission:
 				this._pendingPermissionCallId !== null && this._pendingPermissionDetails !== null
 					? {
@@ -1550,6 +1585,8 @@ export function formatInteractiveFooter(state: {
 	readonly cursor: number;
 	readonly suggestions: readonly string[];
 	readonly turnNotice: "thinking" | "responding" | null;
+	readonly turnNoticeAnimationFrame?: number;
+	readonly queuedInputs?: readonly string[];
 	readonly permission: {
 		readonly details: {
 			toolName: string;
@@ -1563,7 +1600,15 @@ export function formatInteractiveFooter(state: {
 	const separator = formatInteractiveInputSeparator(computeInteractiveFooterSeparatorWidth(state.terminalWidth));
 	const lines: string[] = [];
 	if (state.turnNotice !== null) {
-		lines.push(formatTurnNotice(state.turnNotice));
+		lines.push(
+			formatTurnNotice(state.turnNotice, {
+				animationFrame: state.turnNoticeAnimationFrame ?? 0,
+				queuedCount: state.queuedInputs?.length ?? 0,
+			}),
+		);
+	}
+	if ((state.queuedInputs?.length ?? 0) > 0) {
+		lines.push(...formatQueuedPromptPreviewLines(state.queuedInputs ?? [], state.terminalWidth));
 	}
 	lines.push(separator);
 	if (state.permission !== null) {
@@ -1958,11 +2003,43 @@ function truncatePlainTerminalText(text: string, width: number): string {
 	return output;
 }
 
-export function formatTurnNotice(kind: "thinking" | "responding"): string {
+function formatQueuedPromptPreviewLines(queuedInputs: readonly string[], terminalWidth: number): readonly string[] {
+	const DIM = "\x1b[2m";
+	const YELLOW = "\x1b[33m";
+	const RESET = "\x1b[0m";
+	const maxVisible = 2;
+	const previewWidth = Math.max(12, terminalWidth - 18);
+	const lines = queuedInputs.slice(0, maxVisible).map((input, index) => {
+		const label = queuedInputs.length > 1 ? `↳ Queued ${index + 1}: ` : "↳ Queued: ";
+		return `${DIM}${YELLOW}${label}${RESET}${truncatePlainTerminalText(input, previewWidth)}`;
+	});
+	if (queuedInputs.length > maxVisible) {
+		lines.push(`${DIM}${YELLOW}↳ +${queuedInputs.length - maxVisible} more queued${RESET}`);
+	}
+	return lines;
+}
+
+export function formatTurnNotice(
+	kind: "thinking" | "responding",
+	options: {
+		readonly animationFrame?: number;
+		readonly queuedCount?: number;
+		readonly tokenCount?: number;
+	} = {},
+): string {
 	const DIM = "\x1b[2m";
 	const CYAN = "\x1b[36m";
 	const RESET = "\x1b[0m";
-	return kind === "thinking" ? `${DIM}${CYAN}· Thinking…${RESET}` : `${DIM}${CYAN}· Responding…${RESET}`;
+	const suffix = kind === "thinking" ? ".".repeat(((options.animationFrame ?? 0) % 3) + 1) : "...";
+	const label = kind === "thinking" ? `Thinking${suffix}` : `Responding${suffix}`;
+	const meta: string[] = [];
+	if (typeof options.tokenCount === "number" && Number.isFinite(options.tokenCount)) {
+		meta.push(`${options.tokenCount} tokens`);
+	}
+	if ((options.queuedCount ?? 0) > 0) {
+		meta.push(`${options.queuedCount} queued`);
+	}
+	return `${DIM}${CYAN}· ${label}${meta.length > 0 ? ` (${meta.join(" · ")})` : ""}${RESET}`;
 }
 
 export function mergeStreamingText(existing: string, incoming: string): string {
