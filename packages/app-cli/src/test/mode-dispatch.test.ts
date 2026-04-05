@@ -115,8 +115,26 @@ describe("interactive transcript formatting", () => {
 				{ command: "pwd" },
 			),
 		).toContain("⎿");
-		expect(formatInteractiveToolResult("write", undefined, { file_path: "/tmp/test.txt" })).toContain(
-			"Updated test.txt",
+		expect(
+			formatInteractiveToolResult("write", undefined, {
+				file_path: "/tmp/test.txt",
+				content: "hello\nworld",
+			}),
+		).toContain("Wrote 2 lines to test.txt");
+		expect(
+			formatInteractiveToolEvent({
+				id: "tool-2",
+				category: "tool",
+				type: "tool_started",
+				timestamp: Date.now(),
+				sessionId: { value: "s1" },
+				toolName: "write",
+				toolCallId: "call-2",
+				parameters: { file_path: "/tmp/test.txt", content: "hello\nworld" },
+			}),
+		).toContain("│ hello");
+		expect(formatInteractiveToolResult("edit", undefined, { file_path: "/tmp/test.txt", new_string: "x" })).toContain(
+			"Applied edit to test.txt",
 		);
 	});
 
@@ -130,7 +148,7 @@ describe("interactive transcript formatting", () => {
 			1,
 		);
 		expect(block).toContain("⏺ Write(test.txt)");
-		expect(block).toContain("❯ 2. Yes, allow during this session");
+		expect(block).toContain("❯ \u001b[7m2. Yes, allow during this session\u001b[0m");
 		expect(block).toContain("  1. Yes");
 	});
 

@@ -1257,7 +1257,12 @@ export function formatInteractiveToolEvent(
 ): string {
 	if (event.category !== "tool") return "";
 	if (event.type === "tool_started") {
-		return formatInteractiveToolTitle(event.toolName, event.parameters);
+		return [
+			formatInteractiveToolTitle(event.toolName, event.parameters),
+			formatInteractiveToolPreview(event.toolName, event.parameters),
+		]
+			.filter((part) => part.length > 0)
+			.join("\n");
 	}
 	if (event.type === "tool_completed") {
 		return formatInteractiveToolResult(event.toolName, event.result, startedParameters);
@@ -1301,6 +1306,11 @@ export function permissionDecisionFromSelection(selectedIndex: number): "allow_o
 
 function formatPermissionChoiceLine(index: number, selectedIndex: number, label: string): string {
 	const prefix = index === selectedIndex ? "❯" : " ";
+	if (index === selectedIndex) {
+		const INVERSE = "\x1b[7m";
+		const RESET = "\x1b[0m";
+		return `${prefix} ${INVERSE}${index + 1}. ${label}${RESET}`;
+	}
 	return `${prefix} ${index + 1}. ${label}`;
 }
 
@@ -1312,7 +1322,8 @@ function formatPermissionQuestion(details: {
 }): string {
 	if (details.toolName === "write" || details.toolName === "edit") {
 		const target = details.targetPath ? basename(details.targetPath) : "this file";
-		return `Do you want to make this edit to ${target}?`;
+		const action = details.toolName === "write" ? "create or overwrite" : "edit";
+		return `Do you want to ${action} ${target}?`;
 	}
 	return `Allow ${details.toolName} (${details.riskLevel})${details.reason ? ` — ${details.reason}` : ""}?`;
 }
@@ -1334,6 +1345,19 @@ export function formatInteractiveToolResult(
 	const lines = normalizeToolResultLines(toolName, result, startedParameters);
 	if (lines.length === 0) return "";
 	return lines.map((line, index) => `${index === 0 ? "  ⎿" : "   "} ${line}`).join("\n");
+}
+
+function formatInteractiveToolPreview(toolName: string, parameters: Readonly<Record<string, unknown>>): string {
+	if (toolName !== "write" && toolName !== "edit") return "";
+	const previewSource =
+		typeof parameters.content === "string"
+			? parameters.content
+			: typeof parameters.new_string === "string"
+				? parameters.new_string
+				: "";
+	if (previewSource.trim().length === 0) return "";
+	const previewLines = previewSource.trimEnd().split("\n").slice(0, 3);
+	return previewLines.map((line, index) => `${index === 0 ? "  │" : "  │"} ${truncatePreviewLine(line)}`).join("\n");
 }
 
 function interactiveToolDisplayName(toolName: string): string {
@@ -1392,7 +1416,17 @@ function normalizeToolResultLines(
 					: typeof startedParameters.path === "string"
 						? basename(startedParameters.path)
 						: "file";
-			return [`Updated ${target}`];
+			const previewSource =
+				typeof startedParameters.content === "string"
+					? startedParameters.content
+					: typeof startedParameters.new_string === "string"
+						? startedParameters.new_string
+						: "";
+			const lineCount = previewSource.length > 0 ? previewSource.split("\n").length : null;
+			if (toolName === "write") {
+				return [`Wrote ${lineCount ?? 1} lines to ${target}`];
+			}
+			return [`Applied edit to ${target}${lineCount ? ` (${lineCount} lines)` : ""}`];
 		}
 		if (toolName === "bash" && typeof startedParameters.command === "string") {
 			return [`Ran: ${startedParameters.command}`];
@@ -1404,6 +1438,10 @@ function normalizeToolResultLines(
 		return lines.slice(0, 4);
 	}
 	return result.trimEnd().split("\n").slice(0, 6);
+}
+
+function truncatePreviewLine(line: string): string {
+	return measureTerminalDisplayWidth(line) <= 72 ? line : `${line.slice(0, 69)}...`;
 }
 
 export function computeSlashSuggestions(input: string, commands: readonly SlashCommand[]): readonly string[] {
