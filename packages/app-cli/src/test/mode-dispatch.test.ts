@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
+	computeFooterCursorColumn,
+	computeFooterCursorRowsFromEnd,
+	computeFooterCursorRowsUp,
 	computeInteractiveFooterSeparatorWidth,
 	computePromptCursorRowsUp,
 	computeSlashSuggestions,
 	countRenderedTerminalRows,
+	formatInteractiveFooter,
 	formatInteractiveInputSeparator,
 	formatInteractivePermissionBlock,
 	formatInteractivePromptBuffer,
@@ -45,6 +49,44 @@ describe("interactive transcript formatting", () => {
 
 	it("formats a full-width separator for the input area", () => {
 		expect(formatInteractiveInputSeparator(5)).toContain("─────");
+	});
+
+	it("formats the footer from a unified composer state", () => {
+		const footer = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "/he",
+			cursor: 3,
+			suggestions: ["help"],
+			turnNotice: "thinking",
+			permission: null,
+		});
+		expect(footer.block).toContain("Thinking");
+		expect(footer.block).toContain("❯ /he");
+		expect(footer.lines).toHaveLength(4);
+		expect(footer.cursorLineIndex).toBe(2);
+	});
+
+	it("formats permission choices inside the unified footer", () => {
+		const footer = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "2",
+			cursor: 1,
+			suggestions: [],
+			turnNotice: "responding",
+			permission: {
+				details: {
+					toolName: "write",
+					riskLevel: "L2",
+					targetPath: "/tmp/test.txt",
+				},
+				selectedIndex: 1,
+			},
+		});
+		expect(footer.block).toContain("Responding");
+		expect(footer.block).toContain("Write(test.txt)");
+		expect(footer.block).toContain("choice [Enter/1/2/3]> 2");
 	});
 
 	it("keeps footer separators inside a safe terminal margin", () => {
@@ -135,6 +177,9 @@ describe("interactive transcript formatting", () => {
 	it("counts rendered footer rows after terminal resize", () => {
 		expect(countRenderedTerminalRows(["──────────"], 4)).toBe(3);
 		expect(computePromptCursorRowsUp(["──────────", "❯ hello", "──────────"], 4, 6)).toBe(4);
+		expect(computeFooterCursorRowsUp(["· Thinking…", "──────────", "❯ hello", "──────────"], 4, 2, 6)).toBe(7);
+		expect(computeFooterCursorRowsFromEnd(["· Thinking…", "──────────", "❯ hello", "──────────"], 4, 2, 6)).toBe(3);
+		expect(computeFooterCursorColumn(4, 6)).toBe(2);
 	});
 
 	it("merges overlapping streaming chunks without duplicating text", () => {

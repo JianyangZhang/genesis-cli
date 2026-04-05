@@ -85,8 +85,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
 	private readonly _queuedInputs: string[] = [];
 	private _pendingPermissionSelection = 0;
-	private _renderedPromptUi: { lines: readonly string[]; cursorColumn: number } | null = null;
-	private _renderedPermissionBlock: readonly string[] | null = null;
+	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -152,8 +151,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._toolCalls.clear();
 			this._queuedInputs.length = 0;
 			this._pendingPermissionSelection = 0;
-			this._renderedPromptUi = null;
-			this._renderedPermissionBlock = null;
+			this._renderedFooterUi = null;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -920,9 +918,9 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderPromptLine(): void {
-		const ui = this.buildPromptUi();
+		const ui = this.buildFooterUi();
 		this.clearFooterUi();
-		this.writePromptUi(ui);
+		this.writeFooterUi(ui);
 	}
 
 	private handleSpecialKey(
@@ -948,12 +946,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.renderPromptLine();
 			return;
 		}
-		const block = formatInteractivePermissionBlock(this._pendingPermissionDetails, this._pendingPermissionSelection);
-		this.clearFooterUi();
-		process.stdout.write(block);
-		process.stdout.write("\n");
-		this._renderedPermissionBlock = block.split("\n");
-		this.writePromptUi(this.buildPromptUi());
+		this.renderPromptLine();
 	}
 
 	private handleTranscriptEvent(event: RuntimeEvent): void {
@@ -989,7 +982,6 @@ class InteractiveModeHandler implements ModeHandler {
 		if (event.category === "text" && event.type === "text_delta") {
 			if (this._turnNotice !== "responding") {
 				this._turnNotice = "responding";
-				this.writeTranscriptText(formatTurnNotice("responding"), true, false);
 			}
 			this._assistantBuffer = mergeStreamingText(this._assistantBuffer, event.content);
 			this.renderStreamingAssistantBlock();
@@ -1023,13 +1015,13 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this._turnNotice = "thinking";
-		this.writeTranscriptText(formatTurnNotice("thinking"), true);
+		this.renderPromptLine();
 	}
 
 	private renderStreamingAssistantBlock(): void {
 		const rendered = formatTranscriptAssistantLine(this._assistantBuffer);
 		const lines = wrapTranscriptContent(rendered, process.stdout.columns ?? 80);
-		const linesUp = this._streamRenderLineCount + (this._renderedPromptUi !== null ? 1 : 0);
+		const linesUp = this._streamRenderLineCount + (this._renderedFooterUi !== null ? 1 : 0);
 		process.stdout.write("\r");
 		if (linesUp > 0) {
 			process.stdout.write(ansiMoveUp(linesUp));
@@ -1042,7 +1034,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
-		if (this._renderedPromptUi !== null || this._renderedPermissionBlock !== null) {
+		if (this._renderedFooterUi !== null) {
 			this.clearFooterUi();
 		} else {
 			process.stdout.write(ansiClearLine());
@@ -1102,56 +1094,57 @@ class InteractiveModeHandler implements ModeHandler {
 			});
 	}
 
-	private buildPromptUi(): { block: string; prompt: string } {
-		const buffer = this._inputState.buffer;
-		const prompt = this._pendingPermissionCallId !== null ? "choice [Enter/1/2/3]> " : this._prompt;
-		const separator = formatInteractiveInputSeparator(
-			computeInteractiveFooterSeparatorWidth(process.stdout.columns ?? 80),
-		);
-		const hint = formatSlashSuggestionHint(
-			this._commandSuggestions,
-			(process.stdout.columns ?? 80) - computePromptCursorColumn(prompt, buffer, buffer.length),
-		);
-		const promptLine = `${prompt}${formatInteractivePromptBuffer(buffer, this._pendingPermissionCallId !== null)}${hint}`;
-		return {
-			block: `${separator}\n${promptLine}\n${separator}`,
-			prompt,
-		};
+	private buildFooterUi(): InteractiveFooterRenderResult {
+		return formatInteractiveFooter({
+			terminalWidth: process.stdout.columns ?? 80,
+			prompt: this._prompt,
+			buffer: this._inputState.buffer,
+			cursor: this._inputState.cursor,
+			suggestions: this._commandSuggestions,
+			turnNotice: this._turnNotice,
+			permission:
+				this._pendingPermissionCallId !== null && this._pendingPermissionDetails !== null
+					? {
+							details: this._pendingPermissionDetails,
+							selectedIndex: this._pendingPermissionSelection,
+						}
+					: null,
+		});
 	}
 
-	private writePromptUi(ui: { block: string; prompt: string }): void {
-		const lines = ui.block.split("\n");
+	private writeFooterUi(ui: InteractiveFooterRenderResult): void {
 		process.stdout.write(ui.block);
-		process.stdout.write("\r");
-		process.stdout.write(ansiMoveUp(1));
-		process.stdout.write(
-			ansiMoveRight(computePromptCursorColumn(ui.prompt, this._inputState.buffer, this._inputState.cursor)),
+		const rowsUpFromEnd = computeFooterCursorRowsFromEnd(
+			ui.lines,
+			process.stdout.columns ?? 80,
+			ui.cursorLineIndex,
+			ui.cursorColumn,
 		);
-		process.stdout.write(ansiShowCursor());
-		this._renderedPromptUi = {
-			lines,
-			cursorColumn: computePromptCursorColumn(ui.prompt, this._inputState.buffer, this._inputState.cursor),
-		};
-		if (this._pendingPermissionCallId === null) {
-			this._renderedPermissionBlock = null;
+		process.stdout.write("\r");
+		if (rowsUpFromEnd > 0) {
+			process.stdout.write(ansiMoveUp(rowsUpFromEnd));
 		}
+		process.stdout.write(ansiMoveRight(computeFooterCursorColumn(process.stdout.columns ?? 80, ui.cursorColumn)));
+		process.stdout.write(ansiShowCursor());
+		this._renderedFooterUi = ui;
 	}
 
 	private clearFooterUi(): void {
 		const width = Math.max(1, process.stdout.columns ?? 80);
-		const promptRowsUp =
-			this._renderedPromptUi === null
+		const rowsUp =
+			this._renderedFooterUi === null
 				? 0
-				: computePromptCursorRowsUp(this._renderedPromptUi.lines, width, this._renderedPromptUi.cursorColumn);
-		const permissionRows =
-			this._renderedPermissionBlock === null ? 0 : countRenderedTerminalRows(this._renderedPermissionBlock, width);
-		const rowsUp = promptRowsUp + permissionRows;
+				: computeFooterCursorRowsUp(
+						this._renderedFooterUi.lines,
+						width,
+						this._renderedFooterUi.cursorLineIndex,
+						this._renderedFooterUi.cursorColumn,
+					);
 		if (rowsUp > 0) {
 			process.stdout.write(ansiMoveUp(rowsUp));
 			process.stdout.write(ansiClearBelow());
 		}
-		this._renderedPromptUi = null;
-		this._renderedPermissionBlock = null;
+		this._renderedFooterUi = null;
 	}
 }
 
@@ -1337,15 +1330,65 @@ export function formatInteractivePermissionBlock(
 	},
 	selectedIndex = 0,
 ): string {
-	const lines = [
-		formatInteractiveToolTitle(details.toolName, details.targetPath ? { file_path: details.targetPath } : {}),
-	];
-	lines.push("────────────────────────────────────────");
-	lines.push(formatPermissionQuestion(details));
-	lines.push(formatPermissionChoiceLine(0, selectedIndex, "Yes"));
-	lines.push(formatPermissionChoiceLine(1, selectedIndex, "Yes, allow during this session"));
-	lines.push(formatPermissionChoiceLine(2, selectedIndex, "No"));
+	const lines = formatInteractivePermissionBodyLines(details, selectedIndex);
+	lines.splice(1, 0, "────────────────────────────────────────");
 	return lines.join("\n");
+}
+
+export interface InteractiveFooterRenderResult {
+	readonly block: string;
+	readonly lines: readonly string[];
+	readonly cursorLineIndex: number;
+	readonly cursorColumn: number;
+}
+
+export function formatInteractiveFooter(state: {
+	readonly terminalWidth: number;
+	readonly prompt: string;
+	readonly buffer: string;
+	readonly cursor: number;
+	readonly suggestions: readonly string[];
+	readonly turnNotice: "thinking" | "responding" | null;
+	readonly permission: {
+		readonly details: {
+			toolName: string;
+			riskLevel: string;
+			reason?: string;
+			targetPath?: string;
+		};
+		readonly selectedIndex: number;
+	} | null;
+}): InteractiveFooterRenderResult {
+	const separator = formatInteractiveInputSeparator(computeInteractiveFooterSeparatorWidth(state.terminalWidth));
+	const lines: string[] = [];
+	if (state.turnNotice !== null) {
+		lines.push(formatTurnNotice(state.turnNotice));
+	}
+	lines.push(separator);
+	if (state.permission !== null) {
+		lines.push(...formatInteractivePermissionBodyLines(state.permission.details, state.permission.selectedIndex));
+		const prompt = "choice [Enter/1/2/3]> ";
+		lines.push(`${prompt}${state.buffer}`);
+		lines.push(separator);
+		return {
+			block: lines.join("\n"),
+			lines,
+			cursorLineIndex: lines.length - 2,
+			cursorColumn: computePromptCursorColumn(prompt, state.buffer, state.cursor),
+		};
+	}
+	const hint = formatSlashSuggestionHint(
+		state.suggestions,
+		state.terminalWidth - computePromptCursorColumn(state.prompt, state.buffer, state.buffer.length),
+	);
+	lines.push(`${state.prompt}${formatInteractivePromptBuffer(state.buffer, false)}${hint}`);
+	lines.push(separator);
+	return {
+		block: lines.join("\n"),
+		lines,
+		cursorLineIndex: lines.length - 2,
+		cursorColumn: computePromptCursorColumn(state.prompt, state.buffer, state.cursor),
+	};
 }
 
 export function movePermissionSelection(current: number, direction: -1 | 1): number {
@@ -1365,6 +1408,24 @@ function formatPermissionChoiceLine(index: number, selectedIndex: number, label:
 		return `${prefix} ${INTERACTIVE_THEME.selectedBg}${INTERACTIVE_THEME.selectedFg}${index + 1}. ${label}${INTERACTIVE_THEME.reset}`;
 	}
 	return `${prefix} ${index + 1}. ${label}`;
+}
+
+function formatInteractivePermissionBodyLines(
+	details: {
+		toolName: string;
+		riskLevel: string;
+		reason?: string;
+		targetPath?: string;
+	},
+	selectedIndex: number,
+): string[] {
+	return [
+		formatInteractiveToolTitle(details.toolName, details.targetPath ? { file_path: details.targetPath } : {}),
+		formatPermissionQuestion(details),
+		formatPermissionChoiceLine(0, selectedIndex, "Yes"),
+		formatPermissionChoiceLine(1, selectedIndex, "Yes, allow during this session"),
+		formatPermissionChoiceLine(2, selectedIndex, "No"),
+	];
 }
 
 function formatPermissionQuestion(details: {
@@ -1591,6 +1652,11 @@ export function computeInteractiveFooterSeparatorWidth(terminalWidth: number): n
 	return Math.max(20, terminalWidth - 2);
 }
 
+export function computeFooterCursorColumn(width: number, cursorColumn: number): number {
+	const safeWidth = Math.max(1, width);
+	return Math.max(0, cursorColumn % safeWidth);
+}
+
 export function countRenderedTerminalRows(lines: readonly string[], width: number): number {
 	const safeWidth = Math.max(1, width);
 	let total = 0;
@@ -1607,6 +1673,29 @@ export function computePromptCursorRowsUp(lines: readonly string[], width: numbe
 	const rowsBeforePrompt = countRenderedTerminalRows(lines.slice(0, 1), safeWidth);
 	const promptRowOffset = Math.floor(Math.max(0, cursorColumn) / safeWidth);
 	return rowsBeforePrompt + promptRowOffset;
+}
+
+export function computeFooterCursorRowsUp(
+	lines: readonly string[],
+	width: number,
+	cursorLineIndex: number,
+	cursorColumn: number,
+): number {
+	const safeWidth = Math.max(1, width);
+	const rowsBeforeCursor = countRenderedTerminalRows(lines.slice(0, cursorLineIndex), safeWidth);
+	const cursorRowOffset = Math.floor(Math.max(0, cursorColumn) / safeWidth);
+	return rowsBeforeCursor + cursorRowOffset;
+}
+
+export function computeFooterCursorRowsFromEnd(
+	lines: readonly string[],
+	width: number,
+	cursorLineIndex: number,
+	cursorColumn: number,
+): number {
+	const totalRows = countRenderedTerminalRows(lines, width);
+	const rowsUp = computeFooterCursorRowsUp(lines, width, cursorLineIndex, cursorColumn);
+	return Math.max(0, totalRows - rowsUp - 1);
 }
 
 export function formatTurnNotice(kind: "thinking" | "responding"): string {
