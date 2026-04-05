@@ -18,6 +18,12 @@ export interface InputLoopOptions {
 	readonly input?: NodeJS.ReadableStream;
 	/** Output stream for prompt display. Defaults to process.stdout. */
 	readonly output?: NodeJS.WritableStream;
+	/** Enable raw-mode line editing when TTY is available. Defaults to false. */
+	readonly rawMode?: boolean;
+	/** Called whenever the current input state changes (rawMode only). */
+	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
+	/** Called for special keys (rawMode only). */
+	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc") => void;
 }
 
 export interface InputLoop {
@@ -32,7 +38,17 @@ export interface InputLoop {
 // ---------------------------------------------------------------------------
 
 export function createInputLoop(options: InputLoopOptions = {}): InputLoop {
-	const { prompt = "> ", input = process.stdin, output = process.stdout } = options;
+	const { prompt = "> ", input = process.stdin, output = process.stdout, rawMode = false } = options;
+
+	if (rawMode && isTtyReadable(input) && isTtyWritable(output)) {
+		return createRawInputLoop({
+			prompt,
+			input,
+			output,
+			onInputStateChange: options.onInputStateChange,
+			onKey: options.onKey,
+		});
+	}
 
 	let closed = false;
 	const rl = readline.createInterface({
@@ -82,4 +98,215 @@ export function createInputLoop(options: InputLoopOptions = {}): InputLoop {
 			}
 		},
 	};
+}
+
+function createRawInputLoop(options: {
+	readonly prompt: string;
+	readonly input: NodeJS.ReadableStream & { isTTY?: boolean; setRawMode?: (enabled: boolean) => void; resume(): void };
+	readonly output: NodeJS.WritableStream & { isTTY?: boolean };
+	readonly onInputStateChange?: (state: { buffer: string; cursor: number }) => void;
+	readonly onKey?: (key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc") => void;
+}): InputLoop {
+	const { prompt, input, output, onInputStateChange, onKey } = options;
+
+	let closed = false;
+	let buffer = "";
+	let cursor = 0;
+	let pendingResolve: ((value: string | null) => void) | null = null;
+	let escapeBuffer = "";
+	let escapeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	const emitState = (): void => {
+		onInputStateChange?.({ buffer, cursor });
+	};
+
+	const setState = (next: { buffer: string; cursor: number }): void => {
+		buffer = next.buffer;
+		cursor = Math.max(0, Math.min(next.cursor, buffer.length));
+		emitState();
+	};
+
+	const flushPrompt = (): void => {
+		output.write(prompt);
+		if (buffer.length > 0) {
+			output.write(buffer);
+		}
+	};
+
+	const insertText = (text: string): void => {
+		const next = `${buffer.slice(0, cursor)}${text}${buffer.slice(cursor)}`;
+		setState({ buffer: next, cursor: cursor + text.length });
+	};
+
+	const backspace = (): void => {
+		if (cursor <= 0) return;
+		const next = `${buffer.slice(0, cursor - 1)}${buffer.slice(cursor)}`;
+		setState({ buffer: next, cursor: cursor - 1 });
+	};
+
+	const moveCursor = (delta: number): void => {
+		setState({ buffer, cursor: cursor + delta });
+	};
+
+	const setCursor = (next: number): void => {
+		setState({ buffer, cursor: next });
+	};
+
+	const clearBuffer = (): void => {
+		setState({ buffer: "", cursor: 0 });
+	};
+
+	const handleEscapeSequence = (seq: string): void => {
+		if (seq === "\u001b[A") {
+			onKey?.("up");
+			return;
+		}
+		if (seq === "\u001b[B") {
+			onKey?.("down");
+			return;
+		}
+		if (seq === "\u001b[D") {
+			moveCursor(-1);
+			return;
+		}
+		if (seq === "\u001b[C") {
+			moveCursor(1);
+			return;
+		}
+		if (seq === "\u001b[H" || seq === "\u001b[1~") {
+			setCursor(0);
+			onKey?.("home");
+			return;
+		}
+		if (seq === "\u001b[F" || seq === "\u001b[4~") {
+			setCursor(buffer.length);
+			onKey?.("end");
+			return;
+		}
+		if (seq === "\u001b[5~") {
+			onKey?.("pageup");
+			return;
+		}
+		if (seq === "\u001b[6~") {
+			onKey?.("pagedown");
+			return;
+		}
+		if (seq === "\u001b[3~") {
+			if (cursor >= buffer.length) return;
+			const next = `${buffer.slice(0, cursor)}${buffer.slice(cursor + 1)}`;
+			setState({ buffer: next, cursor });
+			return;
+		}
+	}
+
+	const onData = (chunk: Buffer): void => {
+		if (closed) return;
+
+		const str = chunk.toString("utf8");
+		for (const ch of str) {
+			if (escapeBuffer.length > 0) {
+				escapeBuffer += ch;
+				if (isEscapeSequenceComplete(escapeBuffer)) {
+					handleEscapeSequence(escapeBuffer);
+					escapeBuffer = "";
+				}
+				continue;
+			}
+
+			const code = ch.charCodeAt(0);
+			if (code === 3) {
+				close();
+				if (pendingResolve) {
+					const resolve = pendingResolve;
+					pendingResolve = null;
+					resolve(null);
+				}
+				return;
+			}
+			if (code === 9) {
+				continue;
+			}
+			if (code === 27) {
+				escapeBuffer = ch;
+				if (escapeTimeout) {
+					clearTimeout(escapeTimeout);
+				}
+				escapeTimeout = setTimeout(() => {
+					if (escapeBuffer === "\u001b") {
+						escapeBuffer = "";
+						onKey?.("esc");
+						clearBuffer();
+					}
+				}, 25);
+				continue;
+			}
+			if (ch === "\r" || ch === "\n") {
+				if (pendingResolve) {
+					const resolve = pendingResolve;
+					pendingResolve = null;
+					const line = buffer;
+					clearBuffer();
+					output.write("\n");
+					resolve(line);
+				}
+				continue;
+			}
+			if (code === 127) {
+				backspace();
+				continue;
+			}
+			if (code >= 32) {
+				insertText(ch);
+			}
+		}
+	};
+
+	const close = (): void => {
+		if (closed) return;
+		closed = true;
+		try {
+			input.setRawMode?.(false);
+		} catch {}
+		if (escapeTimeout) {
+			clearTimeout(escapeTimeout);
+			escapeTimeout = null;
+		}
+		input.off("data", onData);
+	};
+
+	input.setRawMode?.(true);
+	input.resume();
+	input.on("data", onData);
+
+	return {
+		nextLine(): Promise<string | null> {
+			if (closed) return Promise.resolve(null);
+			if (pendingResolve) return Promise.resolve(null);
+			return new Promise<string | null>((resolve) => {
+				pendingResolve = resolve;
+				emitState();
+				flushPrompt();
+			});
+		},
+		close,
+	};
+}
+
+function isTtyReadable(stream: NodeJS.ReadableStream): stream is NodeJS.ReadableStream & { isTTY: boolean } {
+	return Boolean((stream as { isTTY?: boolean }).isTTY);
+}
+
+function isTtyWritable(stream: NodeJS.WritableStream): stream is NodeJS.WritableStream & { isTTY: boolean } {
+	return Boolean((stream as { isTTY?: boolean }).isTTY);
+}
+
+function isEscapeSequenceComplete(sequence: string): boolean {
+	if (sequence === "\u001b") {
+		return false;
+	}
+	const last = sequence[sequence.length - 1];
+	if (last === "~") {
+		return true;
+	}
+	return last >= "A" && last <= "Z";
 }

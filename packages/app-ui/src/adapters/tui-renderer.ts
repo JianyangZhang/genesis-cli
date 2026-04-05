@@ -130,6 +130,14 @@ export function ansiMoveUp(lines: number): string {
 	return `${ESC}${lines}A`;
 }
 
+export function ansiMoveRight(columns: number): string {
+	return `${ESC}${columns}C`;
+}
+
+export function ansiMoveLeft(columns: number): string {
+	return `${ESC}${columns}D`;
+}
+
 /** Clear the current line. */
 export function ansiClearLine(): string {
 	return `${ESC}2K\r`;
@@ -163,6 +171,14 @@ export function ansiHideCursor(): string {
 /** Show the cursor. */
 export function ansiShowCursor(): string {
 	return `${ESC}?25h`;
+}
+
+export function ansiEnterAlternateScreen(): string {
+	return `${ESC}?1049h`;
+}
+
+export function ansiExitAlternateScreen(): string {
+	return `${ESC}?1049l`;
 }
 
 // ---------------------------------------------------------------------------

@@ -18,8 +18,12 @@ export type {
 export {
 	ansiClearBelow,
 	ansiClearLine,
+	ansiEnterAlternateScreen,
+	ansiExitAlternateScreen,
 	ansiHideCursor,
+	ansiMoveLeft,
 	ansiMoveUp,
+	ansiMoveRight,
 	ansiResetCursor,
 	ansiRestoreCursor,
 	ansiSaveCursor,

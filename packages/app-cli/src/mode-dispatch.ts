@@ -9,8 +9,12 @@ import type { AppRuntime, CliMode, RuntimeEvent, SessionFacade } from "@genesis-
 import type { InteractionState, OutputSink, TuiScreenLayout } from "@genesis-cli/ui";
 import {
 	ansiClearBelow,
+	ansiClearLine,
+	ansiEnterAlternateScreen,
+	ansiExitAlternateScreen,
 	ansiHideCursor,
 	ansiMoveUp,
+	ansiMoveRight,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createLayoutAccumulator,
@@ -79,8 +83,16 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastRenderedLines = 0;
 	private _pendingPermissionCallId: string | null = null;
 	private _activeTurn: Promise<void> | null = null;
+	private readonly _prompt = "genesis> ";
+	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
+	private _viewportOffsetFromBottom = 0;
+	private _terminalRows = process.stdout.rows ?? 24;
 
 	async start(runtime: AppRuntime): Promise<void> {
+		if (!process.stdin.isTTY || !process.stdout.isTTY) {
+			throw new Error("Interactive mode requires a TTY. Use --mode print|json|rpc instead.");
+		}
+
 		const session = runtime.createSession();
 		const sink = createStdoutSink();
 
@@ -93,6 +105,11 @@ class InteractiveModeHandler implements ModeHandler {
 		// Layout accumulator for TUI
 		const accumulator = createLayoutAccumulator(() => session.state);
 		let interactionState: InteractionState = initialInteractionState();
+		const onResize = (): void => {
+			this._terminalRows = process.stdout.rows ?? 24;
+			this.renderScreenUpdate(accumulator.snapshot());
+		};
+		process.stdout.on("resize", onResize);
 
 		// Subscribe to session events
 		session.events.onCategory("*", (event: RuntimeEvent) => {
@@ -113,10 +130,19 @@ class InteractiveModeHandler implements ModeHandler {
 
 		// Input loop
 		const inputLoop: InputLoop = createInputLoop({
-			prompt: "genesis> ",
+			prompt: "",
+			rawMode: true,
+			onInputStateChange: (state) => {
+				this._inputState = state;
+				this.renderPromptLine();
+			},
+			onKey: (key) => {
+				const snapshot = accumulator.snapshot();
+				this.handleSpecialKey(key, snapshot);
+			},
 		});
 
-		process.stdout.write(ansiHideCursor());
+		process.stdout.write(ansiEnterAlternateScreen());
 		this.renderWelcome(session);
 		this.renderScreenUpdate(accumulator.snapshot());
 
@@ -178,16 +204,20 @@ class InteractiveModeHandler implements ModeHandler {
 				line = await inputLoop.nextLine();
 			}
 		} finally {
+			process.stdout.off("resize", onResize);
 			inputLoop.close();
 			process.stdout.write(ansiShowCursor());
+			process.stdout.write(ansiExitAlternateScreen());
 			await session.close();
 		}
 	}
 
 	private renderWelcome(session: SessionFacade): void {
 		const model = session.state.model.displayName ?? session.state.model.id;
-		process.stdout.write(`\nGenesis CLI — model: ${model}\n`);
-		process.stdout.write("Type /help for commands, or start chatting.\n\n");
+		process.stdout.write(ansiHideCursor());
+		process.stdout.write(ansiClearBelow());
+		process.stdout.write(`Genesis CLI — model: ${model}\n`);
+		process.stdout.write("Type /help for commands, or start chatting.\n");
 	}
 
 	private renderScreenUpdate(snapshot: TuiScreenLayout): void {
@@ -196,9 +226,75 @@ class InteractiveModeHandler implements ModeHandler {
 			process.stdout.write(ansiMoveUp(this._lastRenderedLines));
 		}
 		process.stdout.write(ansiClearBelow());
-		const rendered = renderScreen(snapshot, width);
+		const rendered = renderScreen(this.applyViewport(snapshot), width);
+		process.stdout.write(ansiHideCursor());
 		process.stdout.write(`${rendered}\n`);
-		this._lastRenderedLines = rendered.split("\n").length;
+		this._lastRenderedLines = rendered.split("\n").length + 1;
+		this.renderPromptLine();
+	}
+
+	private applyViewport(snapshot: TuiScreenLayout): TuiScreenLayout {
+		const maxConversationLines = Math.max(0, this._terminalRows - 3);
+		const lines = snapshot.conversation.lines;
+		if (lines.length <= maxConversationLines) {
+			return snapshot;
+		}
+		const maxOffset = Math.max(0, lines.length - maxConversationLines);
+		const offset = Math.max(0, Math.min(this._viewportOffsetFromBottom, maxOffset));
+		const start = Math.max(0, lines.length - maxConversationLines - offset);
+		const end = Math.min(lines.length, start + maxConversationLines);
+		return {
+			...snapshot,
+			conversation: {
+				...snapshot.conversation,
+				lines: lines.slice(start, end),
+			},
+		};
+	}
+
+	private renderPromptLine(): void {
+		process.stdout.write(ansiClearLine());
+		const buffer = this._inputState.buffer;
+		process.stdout.write(this._prompt);
+		if (buffer.length > 0) {
+			process.stdout.write(buffer);
+		}
+		process.stdout.write("\r");
+		process.stdout.write(ansiMoveRight(this._prompt.length + this._inputState.cursor));
+		process.stdout.write(ansiShowCursor());
+	}
+
+	private handleSpecialKey(key: "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "esc", snapshot: TuiScreenLayout): void {
+		const maxConversationLines = Math.max(0, this._terminalRows - 3);
+		const maxOffset = Math.max(0, snapshot.conversation.lines.length - maxConversationLines);
+
+		if (this._inputState.buffer.length > 0) {
+			return;
+		}
+		if (key === "up") {
+			this._viewportOffsetFromBottom = Math.min(maxOffset, this._viewportOffsetFromBottom + 1);
+			this.renderScreenUpdate(snapshot);
+			return;
+		}
+		if (key === "down") {
+			this._viewportOffsetFromBottom = Math.max(0, this._viewportOffsetFromBottom - 1);
+			this.renderScreenUpdate(snapshot);
+			return;
+		}
+		if (key === "pageup") {
+			this._viewportOffsetFromBottom = Math.min(maxOffset, this._viewportOffsetFromBottom + Math.max(1, Math.floor(maxConversationLines / 2)));
+			this.renderScreenUpdate(snapshot);
+			return;
+		}
+		if (key === "pagedown") {
+			this._viewportOffsetFromBottom = Math.max(0, this._viewportOffsetFromBottom - Math.max(1, Math.floor(maxConversationLines / 2)));
+			this.renderScreenUpdate(snapshot);
+			return;
+		}
+		if (key === "end") {
+			this._viewportOffsetFromBottom = 0;
+			this.renderScreenUpdate(snapshot);
+		}
 	}
 }
 
