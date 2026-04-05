@@ -152,6 +152,8 @@ class FakeInteractiveSession implements SessionFacade {
 	readonly events = createEventBus();
 	readonly plan = null;
 	private readonly sessionApprovedCommands = new Set<string>();
+	private readonly receivedPrompts: string[] = [];
+	private readonly receivedContinues: string[] = [];
 	private pendingPermission: {
 		callId: string;
 		toolName: string;
@@ -163,7 +165,16 @@ class FakeInteractiveSession implements SessionFacade {
 		return this.pendingPermission !== null;
 	}
 
+	getReceivedPrompts(): readonly string[] {
+		return this.receivedPrompts;
+	}
+
+	getReceivedContinues(): readonly string[] {
+		return this.receivedContinues;
+	}
+
 	async prompt(input: string): Promise<void> {
+		this.receivedPrompts.push(input);
 		if (input === "hello") {
 			this.emit({
 				id: "thinking-1",
@@ -218,6 +229,50 @@ class FakeInteractiveSession implements SessionFacade {
 				content: "Queued follow-up reply",
 			} as RuntimeEvent);
 			this.emitUsage("usage-queued-final", { input: 90, output: 33, totalTokens: 123 }, true);
+			return;
+		}
+
+		if (input === "slow respond") {
+			this.emit({
+				id: "thinking-respond-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "thinking_delta",
+				content: "...",
+			} as RuntimeEvent);
+			await sleep(100);
+			this.emit({
+				id: "text-respond-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "Draft reply",
+			} as RuntimeEvent);
+			await sleep(950);
+			this.emit({
+				id: "text-respond-2",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "Draft reply finished",
+			} as RuntimeEvent);
+			this.emitUsage("usage-respond-final", { input: 75, output: 28, totalTokens: 103 }, true);
+			return;
+		}
+
+		if (input === "queued part one\n\nqueued part two") {
+			this.emit({
+				id: "text-queued-batch-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: "Queued batch reply",
+			} as RuntimeEvent);
+			this.emitUsage("usage-queued-batch-final", { input: 110, output: 41, totalTokens: 151 }, true);
 			return;
 		}
 
@@ -342,6 +397,7 @@ class FakeInteractiveSession implements SessionFacade {
 	}
 
 	async continue(input: string): Promise<void> {
+		this.receivedContinues.push(input);
 		return this.prompt(input);
 	}
 
@@ -609,6 +665,57 @@ describe("interactive workbench TTY", () => {
 			expect(snapshot).toContain("Session");
 			expect(snapshot).toContain("Σ123");
 			expect(snapshot).toContain("Σ367");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("animates responding dots during a streaming reply", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("slow respond\r");
+			await waitFor(() => screen.snapshot().includes("Responding."));
+			await waitFor(() => {
+				const snapshot = screen.snapshot();
+				return snapshot.includes("Responding..") || snapshot.includes("Responding...");
+			}, 2000);
+			await waitFor(() => screen.snapshot().includes("Draft reply finished"), 3000);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("batches all queued inputs into a single continuation turn", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("slow hello\r");
+			await waitFor(() => screen.snapshot().includes("Thinking."));
+
+			input.write("queued part one\r");
+			await waitFor(() => screen.snapshot().includes("Queued: queued part one"));
+
+			input.write("queued part two\r");
+			await waitFor(() => screen.snapshot().includes("Queued 2: queued part two"));
+
+			await waitFor(() => screen.snapshot().includes("Queued batch reply"), 4000);
+			expect(session.getReceivedPrompts()).toContain("slow hello");
+			expect(session.getReceivedContinues()).toEqual(["queued part one\n\nqueued part two"]);
 
 			input.write("/exit\r");
 			await startPromise;

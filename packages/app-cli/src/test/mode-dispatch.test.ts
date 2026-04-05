@@ -232,7 +232,9 @@ describe("interactive transcript formatting", () => {
 			}),
 		).toContain("Σ1.5k");
 		expect(formatTurnNotice("thinking", { queuedCount: 2 })).toContain("2 queued");
-		expect(formatTurnNotice("responding")).toContain("Responding");
+		expect(formatTurnNotice("responding", { animationFrame: 0 })).toContain("Responding.");
+		expect(formatTurnNotice("responding", { animationFrame: 1 })).toContain("Responding..");
+		expect(formatTurnNotice("responding", { animationFrame: 2 })).toContain("Responding...");
 	});
 
 	it("shows queued prompt previews in the footer", () => {

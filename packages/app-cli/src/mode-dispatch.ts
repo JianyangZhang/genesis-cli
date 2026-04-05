@@ -1040,7 +1040,7 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this._turnNoticeTimer = setInterval(() => {
-			if (this._turnNotice !== "thinking") {
+			if (this._turnNotice === null) {
 				return;
 			}
 			this._turnNoticeAnimationFrame = (this._turnNoticeAnimationFrame + 1) % 3;
@@ -1129,16 +1129,25 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private startPromptTurn(session: SessionFacade, prompt: string, sink: OutputSink): void {
+		this.startUserTurn(session, prompt, sink, "prompt");
+	}
+
+	private startQueuedContinueTurn(session: SessionFacade, input: string, sink: OutputSink): void {
+		this.startUserTurn(session, input, sink, "continue");
+	}
+
+	private startUserTurn(session: SessionFacade, input: string, sink: OutputSink, mode: "prompt" | "continue"): void {
 		this.flushAssistantBuffer(false);
-		this.writeTranscriptText(formatTranscriptUserLine(prompt), true, false);
+		this.writeTranscriptText(formatTranscriptUserLine(input), true, false);
 		this._turnStartedAt = Date.now();
 		this._activeTurnUsageTotals = emptyUsageSnapshot();
 		this._currentMessageUsage = emptyUsageSnapshot();
 		this.startTurnFeedback();
-		this.rememberHistory(prompt);
-		this._activeTurn = session
-			.prompt(prompt)
-			.catch((err) => {
+		this.rememberHistory(input);
+		const sendTurn =
+			mode === "continue" ? (value: string) => session.continue(value) : (value: string) => session.prompt(value);
+		this._activeTurn = sendTurn(input)
+			.catch((err: unknown) => {
 				sink.writeError(`Error: ${err}`);
 			})
 			.finally(() => {
@@ -1155,13 +1164,22 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				this._activeTurnUsageTotals = emptyUsageSnapshot();
 				this._currentMessageUsage = emptyUsageSnapshot();
-				const nextQueued = this._queuedInputs.shift();
-				if (nextQueued) {
-					this.startPromptTurn(session, nextQueued, sink);
+				const queuedInputBatch = this.drainQueuedInputs();
+				if (queuedInputBatch !== null) {
+					this.startQueuedContinueTurn(session, queuedInputBatch, sink);
 					return;
 				}
 				this.fullRedrawInteractiveScreen();
 			});
+	}
+
+	private drainQueuedInputs(): string | null {
+		if (this._queuedInputs.length === 0) {
+			return null;
+		}
+		const queued = [...this._queuedInputs];
+		this._queuedInputs.length = 0;
+		return queued.join("\n\n");
 	}
 
 	private buildFooterUi(): InteractiveFooterRenderResult {
