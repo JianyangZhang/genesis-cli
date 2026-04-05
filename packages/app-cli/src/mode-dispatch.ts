@@ -906,9 +906,8 @@ class InteractiveModeHandler implements ModeHandler {
 			const padding = Math.max(0, contentWidth - plain.length);
 			return `│${text}${" ".repeat(padding)}│`;
 		};
-		process.stdout.write(
-			`╭─── ${BOLD}${CYAN}Genesis CLI${RESET} ${DIM}v${version}${RESET} ${"─".repeat(Math.max(0, width - 23 - version.length))}╮\n`,
-		);
+		process.stdout.write(formatWelcomeTopBorder(width, version));
+		process.stdout.write("\n");
 		process.stdout.write(fill());
 		process.stdout.write("\n");
 		process.stdout.write(center(`${BOLD}Welcome back!${RESET}`));
@@ -1272,6 +1271,12 @@ function runGit(
 
 function stripAnsiWelcome(text: string): string {
 	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+}
+
+export function formatWelcomeTopBorder(width: number, version: string): string {
+	const label = `╭─── ${INTERACTIVE_THEME.bold}${INTERACTIVE_THEME.brand}Genesis CLI${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.muted}v${version}${INTERACTIVE_THEME.reset} `;
+	const plainWidth = stripAnsiWelcome(label).length;
+	return `${label}${"─".repeat(Math.max(0, width - plainWidth - 1))}╮`;
 }
 
 export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {

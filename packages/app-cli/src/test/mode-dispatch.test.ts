@@ -12,6 +12,7 @@ import {
 	formatTranscriptAssistantLine,
 	formatTranscriptUserLine,
 	formatTurnNotice,
+	formatWelcomeTopBorder,
 	mergeStreamingText,
 	movePermissionSelection,
 	permissionDecisionFromSelection,
@@ -38,6 +39,13 @@ describe("interactive transcript formatting", () => {
 
 	it("formats a full-width separator for the input area", () => {
 		expect(formatInteractiveInputSeparator(5)).toContain("─────");
+	});
+
+	it("closes the welcome card top border at the requested width", () => {
+		const line = formatWelcomeTopBorder(40, "0.0.0");
+		const visible = line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+		expect(visible).toHaveLength(40);
+		expect(visible.endsWith("╮")).toBe(true);
 	});
 
 	it("suppresses session lifecycle events", () => {
