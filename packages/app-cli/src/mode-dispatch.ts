@@ -86,6 +86,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _queuedInputs: string[] = [];
 	private _pendingPermissionSelection = 0;
 	private _permissionUiLineCount = 0;
+	private _promptUiLineCount = 0;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -152,6 +153,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._queuedInputs.length = 0;
 			this._pendingPermissionSelection = 0;
 			this._permissionUiLineCount = 0;
+			this._promptUiLineCount = 0;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -757,6 +759,7 @@ class InteractiveModeHandler implements ModeHandler {
 		inputLoop = createInputLoop({
 			prompt: "",
 			rawMode: true,
+			submitNewline: false,
 			onInputStateChange: (state) => {
 				this._inputState = state;
 				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listAll());
@@ -931,25 +934,19 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderPromptLine(): void {
-		process.stdout.write(ansiClearLine());
-		const buffer = this._inputState.buffer;
-		const prompt = this._pendingPermissionCallId !== null ? "choice [Enter/1/2/3]> " : this._prompt;
-		process.stdout.write(prompt);
-		if (buffer.length > 0) {
-			process.stdout.write(formatInteractivePromptBuffer(buffer, this._pendingPermissionCallId !== null));
+		const ui = this.buildPromptUi();
+		let linesUp = 0;
+		if (this._pendingPermissionCallId === null && this._permissionUiLineCount > 0) {
+			linesUp = this._permissionUiLineCount + 1;
+			this._permissionUiLineCount = 0;
+		} else if (this._promptUiLineCount > 0) {
+			linesUp = 1;
 		}
-		const hint = formatSlashSuggestionHint(
-			this._commandSuggestions,
-			(process.stdout.columns ?? 80) - computePromptCursorColumn(prompt, buffer, buffer.length),
-		);
-		if (hint.length > 0) {
-			process.stdout.write(hint);
+		if (linesUp > 0) {
+			process.stdout.write(ansiMoveUp(linesUp));
+			process.stdout.write(ansiClearBelow());
 		}
-		process.stdout.write("\r");
-		process.stdout.write(
-			ansiMoveRight(computePromptCursorColumn(prompt, this._inputState.buffer, this._inputState.cursor)),
-		);
-		process.stdout.write(ansiShowCursor());
+		this.writePromptUi(ui);
 	}
 
 	private handleSpecialKey(
@@ -976,14 +973,15 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		const block = formatInteractivePermissionBlock(this._pendingPermissionDetails, this._pendingPermissionSelection);
-		if (this._permissionUiLineCount > 0) {
-			process.stdout.write(ansiMoveUp(this._permissionUiLineCount + 1));
+		const linesUp = this._permissionUiLineCount + (this._promptUiLineCount > 0 ? 1 : 0);
+		if (linesUp > 0) {
+			process.stdout.write(ansiMoveUp(linesUp));
 			process.stdout.write(ansiClearBelow());
 		}
 		process.stdout.write(block);
 		process.stdout.write("\n");
 		this._permissionUiLineCount = block.split("\n").length;
-		this.renderPromptLine();
+		this.writePromptUi(this.buildPromptUi());
 	}
 
 	private handleTranscriptEvent(event: RuntimeEvent): void {
@@ -1059,9 +1057,10 @@ class InteractiveModeHandler implements ModeHandler {
 	private renderStreamingAssistantBlock(): void {
 		const rendered = formatTranscriptAssistantLine(this._assistantBuffer);
 		const lines = wrapTranscriptContent(rendered, process.stdout.columns ?? 80);
+		const linesUp = this._streamRenderLineCount + (this._promptUiLineCount > 0 ? 1 : 0);
 		process.stdout.write("\r");
-		if (this._streamRenderLineCount > 0) {
-			process.stdout.write(ansiMoveUp(this._streamRenderLineCount));
+		if (linesUp > 0) {
+			process.stdout.write(ansiMoveUp(linesUp));
 		}
 		process.stdout.write(ansiClearBelow());
 		process.stdout.write(lines.join("\n"));
@@ -1071,7 +1070,13 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
-		process.stdout.write(ansiClearLine());
+		if (this._promptUiLineCount > 0) {
+			process.stdout.write(ansiMoveUp(1));
+			process.stdout.write(ansiClearBelow());
+			this._promptUiLineCount = 0;
+		} else {
+			process.stdout.write(ansiClearLine());
+		}
 		process.stdout.write(text);
 		if (newline) {
 			process.stdout.write("\n");
@@ -1106,6 +1111,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private startPromptTurn(session: SessionFacade, prompt: string, sink: OutputSink): void {
 		this.flushAssistantBuffer(false);
+		this.writeTranscriptText(formatTranscriptUserLine(prompt), true, false);
 		this.startTurnFeedback();
 		this.rememberHistory(prompt);
 		this._activeTurn = session
@@ -1124,6 +1130,32 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				this.renderPromptLine();
 			});
+	}
+
+	private buildPromptUi(): { block: string; prompt: string } {
+		const buffer = this._inputState.buffer;
+		const prompt = this._pendingPermissionCallId !== null ? "choice [Enter/1/2/3]> " : this._prompt;
+		const separator = formatInteractiveInputSeparator(Math.max(20, (process.stdout.columns ?? 80) - 1));
+		const hint = formatSlashSuggestionHint(
+			this._commandSuggestions,
+			(process.stdout.columns ?? 80) - computePromptCursorColumn(prompt, buffer, buffer.length),
+		);
+		const promptLine = `${prompt}${formatInteractivePromptBuffer(buffer, this._pendingPermissionCallId !== null)}${hint}`;
+		return {
+			block: `${separator}\n${promptLine}\n${separator}`,
+			prompt,
+		};
+	}
+
+	private writePromptUi(ui: { block: string; prompt: string }): void {
+		process.stdout.write(ui.block);
+		process.stdout.write("\r");
+		process.stdout.write(ansiMoveUp(1));
+		process.stdout.write(
+			ansiMoveRight(computePromptCursorColumn(ui.prompt, this._inputState.buffer, this._inputState.cursor)),
+		);
+		process.stdout.write(ansiShowCursor());
+		this._promptUiLineCount = 3;
 	}
 }
 
@@ -1519,7 +1551,7 @@ export function acceptFirstSlashSuggestion(
 }
 
 export function formatTranscriptUserLine(content: string): string {
-	return formatInteractivePromptBuffer(content, false);
+	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.promptFg} ${content} ${INTERACTIVE_THEME.reset}`;
 }
 
 export function formatTranscriptAssistantLine(content: string): string {
@@ -1528,7 +1560,11 @@ export function formatTranscriptAssistantLine(content: string): string {
 
 export function formatInteractivePromptBuffer(content: string, plain = false): string {
 	if (plain) return content;
-	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.promptFg} ${content} ${INTERACTIVE_THEME.reset}`;
+	return content;
+}
+
+export function formatInteractiveInputSeparator(width: number): string {
+	return `${INTERACTIVE_THEME.muted}${"─".repeat(Math.max(1, width))}${INTERACTIVE_THEME.reset}`;
 }
 
 export function formatTurnNotice(kind: "thinking" | "responding"): string {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
 	computeSlashSuggestions,
+	formatInteractiveInputSeparator,
 	formatInteractivePermissionBlock,
 	formatInteractivePromptBuffer,
 	formatInteractiveToolEvent,
@@ -31,8 +32,12 @@ describe("interactive transcript formatting", () => {
 		expect(line).toContain("Hello");
 	});
 
-	it("formats the interactive prompt buffer with a lighter gray background", () => {
-		expect(formatInteractivePromptBuffer("Hello")).toContain("\x1b[48;5;250m");
+	it("keeps the live interactive prompt buffer unstyled", () => {
+		expect(formatInteractivePromptBuffer("Hello")).toBe("Hello");
+	});
+
+	it("formats a full-width separator for the input area", () => {
+		expect(formatInteractiveInputSeparator(5)).toContain("─────");
 	});
 
 	it("suppresses session lifecycle events", () => {

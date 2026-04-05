@@ -181,6 +181,25 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("can suppress the automatic newline on submit for custom prompt renderers", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		let rendered = "";
+		output.on("data", (chunk) => {
+			rendered += chunk.toString("utf8");
+		});
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, submitNewline: false });
+		try {
+			const pending = loop.nextLine();
+			input.write("hello");
+			input.write("\r");
+			await expect(pending).resolves.toBe("hello");
+			expect(rendered).not.toContain("\n");
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("restores raw mode and pauses stdin on close", () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();
