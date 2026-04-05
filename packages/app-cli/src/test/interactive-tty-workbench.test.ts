@@ -694,6 +694,32 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
+	it("keeps thinking visible when queued backlog appears after responding has started", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("slow respond\r");
+			await waitFor(() => screen.snapshot().includes("Responding."));
+
+			input.write("queued after responding\r");
+			await waitFor(() => screen.snapshot().includes("Queued: queued after responding"));
+
+			const snapshot = screen.snapshot();
+			expect(snapshot).toContain("Thinking");
+			expect(snapshot).not.toContain("Responding");
+
+			await waitFor(() => screen.snapshot().includes("Draft reply finished"), 3000);
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
 	it("batches all queued inputs into a single continuation turn", async () => {
 		const session = new FakeInteractiveSession();
 		const runtime = createFakeRuntime(session);

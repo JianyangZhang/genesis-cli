@@ -893,6 +893,7 @@ class InteractiveModeHandler implements ModeHandler {
 				// Regular prompt
 				if (this._activeTurn !== null) {
 					this._queuedInputs.push(trimmed);
+					this.preserveThinkingNoticeForQueuedBacklog();
 					this.renderFooterRegion();
 					line = await inputLoop.nextLine();
 					continue;
@@ -1180,6 +1181,20 @@ class InteractiveModeHandler implements ModeHandler {
 		const queued = [...this._queuedInputs];
 		this._queuedInputs.length = 0;
 		return queued.join("\n\n");
+	}
+
+	private preserveThinkingNoticeForQueuedBacklog(): void {
+		if (this._activeTurn === null) {
+			return;
+		}
+		if (this._turnNotice === "responding") {
+			this._turnNotice = "thinking";
+			this.startTurnNoticeAnimation();
+			return;
+		}
+		if (this._turnNotice === null) {
+			this.startTurnFeedback();
+		}
 	}
 
 	private buildFooterUi(): InteractiveFooterRenderResult {
