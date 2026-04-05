@@ -126,8 +126,13 @@ function renderPermissionLine(line: {
 	readonly targetPath?: string;
 }): string {
 	const path = line.targetPath ? ` ${DIM}${line.targetPath}${RESET}` : "";
-	const reason = line.reason ? ` — ${truncate(line.reason, 60)}` : "";
-	return `${YELLOW}⚠ Permission required${RESET} (${line.riskLevel}): ${line.toolName}${path}${reason}`;
+	const first = `${YELLOW}⚠ Permission required${RESET} (${line.riskLevel}): ${line.toolName}${path}`;
+	const details: string[] = [];
+	if (line.reason && line.reason.trim().length > 0) {
+		details.push(`  ${DIM}Reason:${RESET} ${truncate(line.reason, 120)}`);
+	}
+	details.push(`  ${DIM}Reply:${RESET} y once · Y session · n deny  ${DIM}(Ctrl+C to deny)${RESET}`);
+	return [first, ...details].join("\n");
 }
 
 function renderPermissionResultLine(line: {
