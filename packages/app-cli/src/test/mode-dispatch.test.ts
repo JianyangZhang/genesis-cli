@@ -5,6 +5,7 @@ import {
 	computeFooterCursorColumn,
 	computeFooterCursorRowsFromEnd,
 	computeFooterCursorRowsUp,
+	computeFooterStartRow,
 	computeInteractiveEphemeralRows,
 	computeInteractiveFooterSeparatorWidth,
 	computePromptCursorRowsUp,
@@ -208,6 +209,11 @@ describe("interactive transcript formatting", () => {
 	it("keeps only the visible transcript tail for full-screen redraw", () => {
 		expect(computeVisibleTranscriptLines(["one\ntwo", "three", "four"], 10, 2)).toEqual(["three", "four"]);
 		expect(computeVisibleTranscriptLines(["abcdef"], 3, 2)).toEqual(["abc", "def"]);
+	});
+
+	it("keeps the compact footer below the welcome card and bottom-anchors active layouts", () => {
+		expect(computeFooterStartRow(11, 40, 4, true)).toBe(12);
+		expect(computeFooterStartRow(11, 40, 4, false)).toBe(37);
 	});
 
 	it("counts rendered footer rows after terminal resize", () => {

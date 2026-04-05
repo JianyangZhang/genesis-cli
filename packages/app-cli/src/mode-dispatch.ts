@@ -811,7 +811,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 		ttySession.enter();
 		this.renderWelcome(sessionRef.current);
-		this.renderPromptLine();
+		this.fullRedrawInteractiveScreen();
 
 		try {
 			let line = await inputLoop.nextLine();
@@ -888,7 +888,6 @@ class InteractiveModeHandler implements ModeHandler {
 			provider: session.state.model.provider,
 			greeting: pickWelcomeGreeting(),
 		});
-		process.stdout.write(`${this._welcomeLines.join("\n")}\n`);
 	}
 
 	private renderPromptLine(): void {
@@ -1113,7 +1112,7 @@ class InteractiveModeHandler implements ModeHandler {
 		const ui = this.buildFooterUi();
 		const footerHeight = ui.lines.length;
 		const compact = this.shouldUseCompactFooterLayout();
-		const startRow = compact ? this._welcomeLines.length + 1 : this.transcriptBottomRow(footerHeight) + 1;
+		const startRow = computeFooterStartRow(this._welcomeLines.length, this.terminalHeight(), footerHeight, compact);
 		if (!compact) {
 			this.applyTranscriptViewport(footerHeight);
 		}
@@ -1978,4 +1977,16 @@ export function computeVisibleTranscriptLines(
 		return flattened;
 	}
 	return flattened.slice(flattened.length - maxRows);
+}
+
+export function computeFooterStartRow(
+	welcomeLineCount: number,
+	terminalHeight: number,
+	footerHeight: number,
+	compact: boolean,
+): number {
+	if (compact) {
+		return welcomeLineCount + 1;
+	}
+	return Math.max(1, terminalHeight - footerHeight + 1);
 }
