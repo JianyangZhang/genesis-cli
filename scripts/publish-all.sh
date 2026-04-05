@@ -62,6 +62,26 @@ smoke_check_runtime_adapter() {
   )
 }
 
+resolve_installed_runtime_adapter() {
+  local global_root
+  global_root="$(npm root -g)"
+
+  local candidates=(
+    "$global_root/@pickle-pee/runtime/dist/adapters/pi-mono-session-adapter.js"
+    "$global_root/@pickle-pee/genesis-cli/node_modules/@pickle-pee/runtime/dist/adapters/pi-mono-session-adapter.js"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  echo "Unable to locate the installed runtime adapter under $global_root" >&2
+  exit 1
+}
+
 package_version() {
   local package_name="$1"
   npm pkg get version -w "$package_name" | tr -d '"'
@@ -122,7 +142,7 @@ run_verify() {
     npm install -g @pickle-pee/genesis-cli
   )
 
-  smoke_check_runtime_adapter "$(npm root -g)/@pickle-pee/runtime/dist/adapters/pi-mono-session-adapter.js"
+  smoke_check_runtime_adapter "$(resolve_installed_runtime_adapter)"
   genesis -v
   genesis --version
 }
