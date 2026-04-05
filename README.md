@@ -61,9 +61,11 @@ Current precedence:
 ### 2. Global Install
 
 ```bash
-npm install -g @pickle-pee/genesis-cli
+npm install -g @pickle-pee/genesis-cli@latest
 genesis --version
 ```
+
+If you are upgrading an existing global install, prefer explicitly using `@latest` so npm refreshes the published CLI you expect.
 
 ### 3. Run
 
@@ -75,6 +77,7 @@ Expected result:
 
 - `genesis --version` prints the installed CLI version
 - `genesis` starts the interactive workbench
+- when upgrading globally, `npm install -g @pickle-pee/genesis-cli@latest` and `genesis --version` should agree on the latest published version
 
 On first launch:
 
@@ -137,13 +140,14 @@ npm run test:live:pi-mono
 ```bash
 npm run version:bump:patch
 git add package-lock.json packages/*/package.json
-git commit -m "release 0.0.1"
+git commit -m "release 0.0.2"
 npm run publish:all
 ```
 
 - release automation lives in `scripts/bump-version.mjs` and `scripts/publish-all.sh`
 - `publish:check` includes a runtime-adapter smoke test from a temporary directory, so startup cannot silently depend on the monorepo root
 - npm may still require browser confirmation when the account uses 2FA for writes
+- after publish, verify the installed CLI with `npm install -g @pickle-pee/genesis-cli@latest` and `genesis --version`
 
 ### Other Entry Points
 

@@ -357,7 +357,7 @@ class FakeInteractiveSession implements SessionFacade {
 
 		if (input === "scroll history") {
 			const formatHistoryLine = (index: number): string => `History line ${String(index + 1).padStart(2, "0")}`;
-			const firstBatch = Array.from({ length: 20 }, (_, index) => formatHistoryLine(index)).join("\n");
+			const firstBatch = Array.from({ length: 30 }, (_, index) => formatHistoryLine(index)).join("\n");
 			this.emit({
 				id: "text-scroll-history-1",
 				timestamp: Date.now(),
@@ -367,7 +367,7 @@ class FakeInteractiveSession implements SessionFacade {
 				content: firstBatch,
 			} as RuntimeEvent);
 			await sleep(700);
-			const secondBatch = Array.from({ length: 20 }, (_, index) => `\n${formatHistoryLine(index + 20)}`).join("");
+			const secondBatch = Array.from({ length: 30 }, (_, index) => `\n${formatHistoryLine(index + 30)}`).join("");
 			this.emit({
 				id: "text-scroll-history-2",
 				timestamp: Date.now(),
@@ -1085,7 +1085,7 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes("❯"));
 
 			input.write("scroll history\r");
-			await waitFor(() => screen.snapshot().includes("History line 20"));
+			await waitFor(() => screen.snapshot().includes("History line 30"));
 			expect(screen.snapshot()).not.toContain("History line 01");
 			expect(screen.snapshot()).not.toContain("Genesis CLI");
 
@@ -1097,12 +1097,12 @@ describe("interactive workbench TTY", () => {
 
 			await sleep(900);
 			expect(screen.snapshot()).toContain("History line 01");
-			expect(screen.snapshot()).not.toContain("History line 40");
+			expect(screen.snapshot()).not.toContain("History line 60");
 
 			for (let index = 0; index < 10; index += 1) {
 				input.write("\u001b[6~");
 			}
-			await waitFor(() => screen.snapshot().includes("History line 40"));
+			await waitFor(() => screen.snapshot().includes("History line 60"));
 
 			input.write("/exit\r");
 			await startPromise;

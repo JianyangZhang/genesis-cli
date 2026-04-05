@@ -61,9 +61,11 @@ Genesis 的目标，是成为一个真正像软件搭档一样工作的开源代
 ### 2. 全局安装
 
 ```bash
-npm install -g @pickle-pee/genesis-cli
+npm install -g @pickle-pee/genesis-cli@latest
 genesis --version
 ```
+
+如果你是在升级已全局安装过的版本，建议显式带上 `@latest`，避免 npm 继续沿用旧的已安装结果。
 
 ### 3. 启动
 
@@ -75,6 +77,7 @@ genesis
 
 - `genesis --version` 输出当前安装的 CLI 版本
 - `genesis` 启动交互式工作台
+- 全局升级时，`npm install -g @pickle-pee/genesis-cli@latest` 与 `genesis --version` 应该对得上最新发布版本
 
 首次进入后：
 
@@ -137,13 +140,14 @@ npm run test:live:pi-mono
 ```bash
 npm run version:bump:patch
 git add package-lock.json packages/*/package.json
-git commit -m "release 0.0.1"
+git commit -m "release 0.0.2"
 npm run publish:all
 ```
 
 - 发布脚本位于 `scripts/bump-version.mjs` 与 `scripts/publish-all.sh`
 - `publish:check` 会在临时目录里做 runtime adapter 冒烟，防止“离开 monorepo 根目录就启动失败”
 - 若 npm 账号开启写操作 2FA，发布时仍可能需要浏览器确认
+- 发布后建议用 `npm install -g @pickle-pee/genesis-cli@latest` 和 `genesis --version` 再做一次最终安装验证
 
 ### 其他入口
 

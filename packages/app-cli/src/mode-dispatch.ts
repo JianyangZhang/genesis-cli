@@ -1589,6 +1589,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.terminalWidth(),
 			availableRows,
 			this._transcriptScrollOffset,
+			this._welcomeLines.length,
 		);
 		this._renderedTranscriptViewportLines = visibleLines.map((line) => stripAnsiWelcome(line));
 		for (let row = transcriptTopRow; row <= transcriptBottomRow; row += 1) {
@@ -1666,7 +1667,11 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentTranscriptDisplayRows(): number {
-		return computeTranscriptDisplayRows(this.currentRenderedTranscriptBlocks(), this.terminalWidth());
+		return computeTranscriptDisplayRows(
+			this.currentRenderedTranscriptBlocks(),
+			this.terminalWidth(),
+			this._welcomeLines.length,
+		);
 	}
 
 	private currentRenderedTranscriptBlocks(): readonly string[] {
@@ -2673,11 +2678,12 @@ export function computeVisibleTranscriptLines(
 	width: number,
 	maxRows: number,
 	offsetFromBottom = 0,
+	unwrappedLeadingBlockCount = 0,
 ): readonly string[] {
 	if (maxRows <= 0 || blocks.length === 0) {
 		return [];
 	}
-	const flattened = flattenTranscriptLines(blocks, width);
+	const flattened = flattenTranscriptLines(blocks, width, unwrappedLeadingBlockCount);
 	if (flattened.length <= maxRows) {
 		return flattened;
 	}
@@ -2775,8 +2781,12 @@ function copyTextToClipboard(text: string): void {
 	});
 }
 
-export function computeTranscriptDisplayRows(blocks: readonly string[], width: number): number {
-	return flattenTranscriptLines(blocks, width).length;
+export function computeTranscriptDisplayRows(
+	blocks: readonly string[],
+	width: number,
+	unwrappedLeadingBlockCount = 0,
+): number {
+	return flattenTranscriptLines(blocks, width, unwrappedLeadingBlockCount).length;
 }
 
 export function materializeAssistantTranscriptBlock(buffer: string): string | null {
@@ -2822,10 +2832,14 @@ export function computeFooterStartRow(
 	return Math.min(naturalStartRow, bottomAnchoredStartRow);
 }
 
-function flattenTranscriptLines(blocks: readonly string[], width: number): string[] {
+function flattenTranscriptLines(blocks: readonly string[], width: number, unwrappedLeadingBlockCount = 0): string[] {
 	const flattened: string[] = [];
-	for (const block of blocks) {
+	for (const [index, block] of blocks.entries()) {
 		for (const logicalLine of block.split("\n")) {
+			if (index < unwrappedLeadingBlockCount) {
+				flattened.push(logicalLine);
+				continue;
+			}
 			flattened.push(...wrapTranscriptContent(logicalLine, width));
 		}
 	}

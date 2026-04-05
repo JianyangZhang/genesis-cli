@@ -42,11 +42,7 @@ export interface InputLoopOptions {
 	/** Called for terminal focus changes (rawMode only). */
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
 	/** Called for mouse button events (rawMode only). */
-	readonly onMouse?: (event: {
-		kind: "leftdown" | "leftdrag" | "leftup";
-		row: number;
-		column: number;
-	}) => void;
+	readonly onMouse?: (event: { kind: "leftdown" | "leftdrag" | "leftup"; row: number; column: number }) => void;
 	/** Whether pressing Enter should emit a terminal newline in raw mode. Defaults to true. */
 	readonly submitNewline?: boolean;
 }
@@ -155,11 +151,7 @@ function createRawInputLoop(options: {
 	) => void;
 	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
-	readonly onMouse?: (event: {
-		kind: "leftdown" | "leftdrag" | "leftup";
-		row: number;
-		column: number;
-	}) => void;
+	readonly onMouse?: (event: { kind: "leftdown" | "leftdrag" | "leftup"; row: number; column: number }) => void;
 	readonly submitNewline?: boolean;
 }): InputLoop {
 	const {

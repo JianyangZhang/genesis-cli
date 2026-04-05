@@ -184,6 +184,18 @@ describe("interactive transcript formatting", () => {
 		expect(lines.at(-2)).toContain("Start: Enter");
 	});
 
+	it("does not wrap fixed-width welcome rows inside transcript layout", () => {
+		const lines = buildWelcomeLines({
+			terminalWidth: 40,
+			version: "0.0.2",
+			model: "GLM-5.1",
+			provider: "zai",
+			greeting: "A wise man will hear.",
+		});
+		expect(computeTranscriptDisplayRows(lines.slice(0, 10), 40, 10)).toBe(10);
+		expect(computeVisibleTranscriptLines(lines.slice(0, 3), 40, 3, 0, 3)).toHaveLength(3);
+	});
+
 	it("exposes eight coding-friendly bible greetings and picks them deterministically", () => {
 		expect(WELCOME_BIBLE_GREETINGS).toHaveLength(8);
 		expect(pickWelcomeGreeting(0)).toBe(WELCOME_BIBLE_GREETINGS[0]);
