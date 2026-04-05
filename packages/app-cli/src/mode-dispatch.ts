@@ -11,10 +11,7 @@ import { basename, join } from "node:path";
 import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@genesis-cli/runtime";
 import type { InteractionState, OutputSink, SlashCommand } from "@genesis-cli/ui";
 import {
-	ansiClearBelow,
 	ansiClearLine,
-	ansiMoveRight,
-	ansiMoveUp,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createSlashCommandRegistry,
@@ -80,6 +77,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _changedPaths = new Set<string>();
 	private _assistantBuffer = "";
 	private _renderedStreaming: InteractiveStreamingRenderResult | null = null;
+	private _streamingReservedRows = 0;
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
@@ -146,6 +144,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._changedPaths.clear();
 			this._assistantBuffer = "";
 			this._renderedStreaming = null;
+			this._streamingReservedRows = 0;
 			this._turnNotice = null;
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
@@ -872,6 +871,7 @@ class InteractiveModeHandler implements ModeHandler {
 		} finally {
 			process.stdout.off("resize", onResize);
 			inputLoop.close();
+			process.stdout.write(ansiResetScrollRegion());
 			ttySession.restore();
 			sessionRef.current.events.removeAllListeners();
 			await sessionRef.current.close();
@@ -918,9 +918,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderPromptLine(): void {
-		const ui = this.buildFooterUi();
-		this.clearFooterUi();
-		this.writeFooterUi(ui);
+		this.renderFooterRegion();
 	}
 
 	private handleSpecialKey(
@@ -946,7 +944,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.renderPromptLine();
 			return;
 		}
-		this.renderPromptLine();
+		this.renderFooterRegion();
 	}
 
 	private handleTranscriptEvent(event: RuntimeEvent): void {
@@ -1005,6 +1003,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		this._assistantBuffer = "";
 		this._renderedStreaming = null;
+		this._streamingReservedRows = 0;
 		if (redrawPrompt) {
 			this.renderPromptLine();
 		}
@@ -1021,28 +1020,31 @@ class InteractiveModeHandler implements ModeHandler {
 	private renderStreamingAssistantBlock(): void {
 		const rendered = formatTranscriptAssistantLine(this._assistantBuffer);
 		const lines = wrapTranscriptContent(rendered, process.stdout.columns ?? 80);
-		this.clearInteractiveEphemeralUi();
-		process.stdout.write(lines.join("\n"));
-		process.stdout.write("\n");
+		const renderedWidth = this.terminalWidth();
+		const rows = countRenderedTerminalRows(lines, renderedWidth);
+		this.renderFooterRegion();
+		this.reserveStreamingRows(rows);
+		const startRow = this.transcriptBottomRow() - this._streamingReservedRows + 1;
+		this.clearTranscriptRows(startRow, this.transcriptBottomRow());
+		this.writeLinesAtRow(startRow, lines, renderedWidth);
 		this._renderedStreaming = {
 			lines,
-			renderedWidth: Math.max(1, process.stdout.columns ?? 80),
+			renderedWidth,
+			startRow,
+			reservedRows: this._streamingReservedRows,
 		};
-		this.writeFooterUi(this.buildFooterUi());
+		this.renderFooterRegion();
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
-		if (this._renderedFooterUi !== null || this._renderedStreaming !== null) {
-			this.clearInteractiveEphemeralUi();
-		} else {
-			process.stdout.write(ansiClearLine());
-		}
-		process.stdout.write(text);
-		if (newline) {
-			process.stdout.write("\n");
+		this.flushAssistantBuffer(false);
+		const logicalLines = text.split("\n");
+		const outputLines = newline ? logicalLines : logicalLines.slice(0, -1).concat(logicalLines.at(-1) ?? "");
+		if (outputLines.length > 0) {
+			this.appendTranscriptLines(outputLines);
 		}
 		if (redrawPrompt) {
-			this.renderPromptLine();
+			this.renderFooterRegion();
 		}
 	}
 
@@ -1110,58 +1112,99 @@ class InteractiveModeHandler implements ModeHandler {
 		});
 	}
 
-	private writeFooterUi(ui: InteractiveFooterRenderResult): void {
-		process.stdout.write(ui.block);
-		process.stdout.write("\n");
-		const rowsUpFromEnd = computeFooterCursorRowsFromEnd(
-			ui.lines,
-			process.stdout.columns ?? 80,
-			ui.cursorLineIndex,
-			ui.cursorColumn,
-		);
-		process.stdout.write("\r");
-		if (rowsUpFromEnd + 1 > 0) {
-			process.stdout.write(ansiMoveUp(rowsUpFromEnd + 1));
-		}
-		process.stdout.write(ansiMoveRight(computeFooterCursorColumn(process.stdout.columns ?? 80, ui.cursorColumn)));
-		process.stdout.write(ansiShowCursor());
-		this._renderedFooterUi = ui;
-	}
-
-	private clearFooterUi(): void {
-		const rowsUp =
-			this._renderedFooterUi === null
-				? 0
-				: computeFooterCursorRowsUp(
-						this._renderedFooterUi.lines,
-						this._renderedFooterUi.renderedWidth,
-						this._renderedFooterUi.cursorLineIndex,
-						this._renderedFooterUi.cursorColumn,
-					);
-		if (rowsUp > 0) {
-			process.stdout.write(ansiMoveUp(rowsUp));
-			process.stdout.write(ansiClearBelow());
-		}
-		this._renderedFooterUi = null;
-	}
-
-	private clearInteractiveEphemeralUi(): void {
-		const rowsUp = computeInteractiveEphemeralRows(this._renderedStreaming, this._renderedFooterUi);
-		if (rowsUp > 0) {
-			process.stdout.write("\r");
-			process.stdout.write(ansiMoveUp(rowsUp));
-			process.stdout.write(ansiClearBelow());
-		}
-		this._renderedFooterUi = null;
-		this._renderedStreaming = null;
-	}
-
 	private rerenderInteractiveRegions(): void {
-		if (this._assistantBuffer.length > 0) {
+		this.renderFooterRegion();
+		if (this._renderedStreaming !== null || this._assistantBuffer.length > 0) {
 			this.renderStreamingAssistantBlock();
+		}
+	}
+
+	private terminalWidth(): number {
+		return Math.max(1, process.stdout.columns ?? 80);
+	}
+
+	private terminalHeight(): number {
+		return Math.max(6, process.stdout.rows ?? 24);
+	}
+
+	private transcriptBottomRow(footerHeight = this.currentFooterHeight()): number {
+		return Math.max(1, this.terminalHeight() - footerHeight);
+	}
+
+	private currentFooterHeight(): number {
+		return this._renderedFooterUi?.lines.length ?? this.buildFooterUi().lines.length;
+	}
+
+	private renderFooterRegion(): void {
+		const ui = this.buildFooterUi();
+		const footerHeight = ui.lines.length;
+		const startRow = this.transcriptBottomRow(footerHeight) + 1;
+		this.applyTranscriptViewport(footerHeight);
+		for (let index = 0; index < footerHeight; index += 1) {
+			const row = startRow + index;
+			const line = fitTerminalLine(ui.lines[index] ?? "", this.terminalWidth());
+			process.stdout.write(ansiCursorTo(row, 1));
+			process.stdout.write(ansiClearLine());
+			process.stdout.write(line);
+		}
+		const oldHeight = this._renderedFooterUi?.lines.length ?? 0;
+		for (let index = footerHeight; index < oldHeight; index += 1) {
+			process.stdout.write(ansiCursorTo(startRow + index, 1));
+			process.stdout.write(ansiClearLine());
+		}
+		process.stdout.write(
+			ansiCursorTo(
+				startRow + ui.cursorLineIndex,
+				computeFooterCursorColumn(this.terminalWidth(), ui.cursorColumn) + 1,
+			),
+		);
+		process.stdout.write(ansiShowCursor());
+		this._renderedFooterUi = { ...ui, renderedWidth: this.terminalWidth() };
+	}
+
+	private applyTranscriptViewport(footerHeight: number): void {
+		process.stdout.write(ansiSetScrollRegion(1, this.transcriptBottomRow(footerHeight)));
+	}
+
+	private appendTranscriptLines(lines: readonly string[]): void {
+		this.renderFooterRegion();
+		this.applyTranscriptViewport(this.currentFooterHeight());
+		for (const rawLine of lines) {
+			const wrapped = wrapTranscriptContent(rawLine, this.terminalWidth());
+			for (const line of wrapped) {
+				process.stdout.write(ansiCursorTo(this.transcriptBottomRow(), 1));
+				process.stdout.write("\n");
+				process.stdout.write(ansiClearLine());
+				process.stdout.write(line);
+			}
+		}
+		this.renderFooterRegion();
+	}
+
+	private reserveStreamingRows(rows: number): void {
+		if (rows <= this._streamingReservedRows) {
 			return;
 		}
-		this.renderPromptLine();
+		this.applyTranscriptViewport(this.currentFooterHeight());
+		for (let index = this._streamingReservedRows; index < rows; index += 1) {
+			process.stdout.write(ansiCursorTo(this.transcriptBottomRow(), 1));
+			process.stdout.write("\n");
+		}
+		this._streamingReservedRows = rows;
+	}
+
+	private clearTranscriptRows(startRow: number, endRow: number): void {
+		for (let row = startRow; row <= endRow; row += 1) {
+			process.stdout.write(ansiCursorTo(row, 1));
+			process.stdout.write(ansiClearLine());
+		}
+	}
+
+	private writeLinesAtRow(startRow: number, lines: readonly string[], width: number): void {
+		for (let index = 0; index < lines.length; index += 1) {
+			process.stdout.write(ansiCursorTo(startRow + index, 1));
+			process.stdout.write(fitTerminalLine(lines[index] ?? "", width));
+		}
 	}
 }
 
@@ -1363,6 +1406,8 @@ export interface InteractiveFooterRenderResult {
 export interface InteractiveStreamingRenderResult {
 	readonly lines: readonly string[];
 	readonly renderedWidth: number;
+	readonly startRow: number;
+	readonly reservedRows: number;
 }
 
 export function formatInteractiveFooter(state: {
@@ -1674,7 +1719,7 @@ export function formatInteractiveInputSeparator(width: number): string {
 }
 
 export function computeInteractiveFooterSeparatorWidth(terminalWidth: number): number {
-	return Math.max(20, terminalWidth - 2);
+	return Math.max(20, terminalWidth);
 }
 
 export function computeFooterCursorColumn(width: number, cursorColumn: number): number {
@@ -1733,6 +1778,43 @@ export function computeInteractiveEphemeralRows(
 			: computeFooterCursorRowsUp(footer.lines, footer.renderedWidth, footer.cursorLineIndex, footer.cursorColumn);
 	const streamingRows = streaming === null ? 0 : countRenderedTerminalRows(streaming.lines, streaming.renderedWidth);
 	return footerRowsUp + streamingRows;
+}
+
+function ansiCursorTo(row: number, column: number): string {
+	return `\x1b[${Math.max(1, row)};${Math.max(1, column)}H`;
+}
+
+function ansiSetScrollRegion(top: number, bottom: number): string {
+	return `\x1b[${Math.max(1, top)};${Math.max(1, bottom)}r`;
+}
+
+function ansiResetScrollRegion(): string {
+	return "\x1b[r";
+}
+
+function fitTerminalLine(line: string, width: number): string {
+	const safeWidth = Math.max(1, width);
+	const visibleWidth = measureTerminalDisplayWidth(stripAnsiWelcome(line));
+	if (visibleWidth <= safeWidth) {
+		return `${line}${" ".repeat(safeWidth - visibleWidth)}`;
+	}
+	const truncated = truncatePlainTerminalText(stripAnsiWelcome(line), safeWidth);
+	return `${truncated}${" ".repeat(Math.max(0, safeWidth - measureTerminalDisplayWidth(truncated)))}`;
+}
+
+function truncatePlainTerminalText(text: string, width: number): string {
+	const safeWidth = Math.max(1, width);
+	let output = "";
+	let used = 0;
+	for (const ch of text) {
+		const charWidth = measureTerminalDisplayWidth(ch);
+		if (used + charWidth > safeWidth) {
+			break;
+		}
+		output += ch;
+		used += charWidth;
+	}
+	return output;
 }
 
 export function formatTurnNotice(kind: "thinking" | "responding"): string {

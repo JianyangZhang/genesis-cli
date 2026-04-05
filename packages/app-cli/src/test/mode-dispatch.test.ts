@@ -90,8 +90,8 @@ describe("interactive transcript formatting", () => {
 		expect(footer.block).toContain("choice [Enter/1/2/3]> 2");
 	});
 
-	it("keeps footer separators inside a safe terminal margin", () => {
-		expect(computeInteractiveFooterSeparatorWidth(80)).toBe(78);
+	it("sizes footer separators to the current terminal width", () => {
+		expect(computeInteractiveFooterSeparatorWidth(80)).toBe(80);
 		expect(computeInteractiveFooterSeparatorWidth(10)).toBe(20);
 	});
 
@@ -186,6 +186,8 @@ describe("interactive transcript formatting", () => {
 				{
 					lines: ["⏺ hello", "world"],
 					renderedWidth: 4,
+					startRow: 10,
+					reservedRows: 5,
 				},
 				{
 					block: "──────────\n❯ hi\n──────────",
