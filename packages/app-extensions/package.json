@@ -1,7 +1,6 @@
 {
   "name": "@pickle-pee/extensions",
   "version": "0.0.0",
-  "private": true,
   "description": "Built-in extensions, Bridge/IDE adapters, and extension point management",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,5 +10,12 @@
   "dependencies": {
     "@pickle-pee/config": "*",
     "@pickle-pee/runtime": "*"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }

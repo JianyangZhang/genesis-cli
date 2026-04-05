@@ -1,7 +1,6 @@
 {
   "name": "@pickle-pee/evaluation",
   "version": "0.0.0",
-  "private": true,
   "description": "Smoke scenarios, protocol verification, regression baselines, and subagent acceptance tests",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,5 +11,12 @@
   "dependencies": {
     "@pickle-pee/runtime": "*",
     "@pickle-pee/tools": "*"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }
