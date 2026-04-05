@@ -42,27 +42,7 @@ genesis
 - `genesis --version` 输出当前安装的 CLI 版本
 - `genesis` 启动交互式工作台
 
-### 交互式命令行
-
-```bash
-git clone https://github.com/JianyangZhang/genesis-cli.git
-cd genesis-cli
-npm ci
-npm run build
-cp .env.example .env.local
-npm run chat:live
-```
-
-运行前提：
-
-- Node.js 20.0.0+
-- `.env.local` 中已经配置可用的 `GENESIS_API_KEY`
-
-启动成功判定：
-
-- 终端出现 `Genesis CLI` 欢迎卡片，并显示 `❯ ` 提示符
-
-快速验证：
+首次运行验证：
 
 - 输入 `/help`，确认 slash 命令列表出现
 - 输入 `/exit` 或 `/quit` 退出
@@ -164,6 +144,26 @@ npm run check
 - 当前 Vitest 仅输出结果汇总到标准输出，覆盖率脚本仍待补充
 
 ### 本地开发
+
+本地跑仓库：
+
+```bash
+git clone https://github.com/JianyangZhang/genesis-cli.git
+cd genesis-cli
+npm ci
+npm run build
+cp .env.example .env.local
+npm run chat:live
+```
+
+运行前提：
+
+- Node.js 20.0.0+
+- `.env.local` 中已经配置可用的 `GENESIS_API_KEY`
+
+启动成功判定：
+
+- 终端出现 `Genesis CLI` 欢迎卡片，并显示 `❯ ` 提示符
 
 常用命令：
 

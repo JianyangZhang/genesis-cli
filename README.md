@@ -42,27 +42,7 @@ Expected result:
 - `genesis --version` prints the installed CLI version
 - `genesis` starts the interactive workbench
 
-### Interactive CLI
-
-```bash
-git clone https://github.com/JianyangZhang/genesis-cli.git
-cd genesis-cli
-npm ci
-npm run build
-cp .env.example .env.local
-npm run chat:live
-```
-
-Requirements:
-
-- Node.js 20.0.0+
-- a valid `GENESIS_API_KEY` in `.env.local`
-
-Startup success signal:
-
-- the `Genesis CLI` welcome card appears and the prompt `❯ ` is shown
-
-Quick verification:
+First-run verification:
 
 - run `/help` and confirm that slash commands are listed
 - exit with `/exit` or `/quit`
@@ -164,6 +144,26 @@ Notes:
 - Vitest currently prints summaries to stdout; coverage reporting is still a TODO
 
 ### Local Work
+
+Run the repository locally:
+
+```bash
+git clone https://github.com/JianyangZhang/genesis-cli.git
+cd genesis-cli
+npm ci
+npm run build
+cp .env.example .env.local
+npm run chat:live
+```
+
+Requirements:
+
+- Node.js 20.0.0+
+- a valid `GENESIS_API_KEY` in `.env.local`
+
+Startup success signal:
+
+- the `Genesis CLI` welcome card appears and the prompt `❯ ` is shown
 
 Useful commands:
 

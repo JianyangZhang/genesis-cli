@@ -11,7 +11,7 @@
 		"check": "npm run check:lint && npm run check:format && npm run check:types",
 		"check:lint": "biome lint packages/",
 		"check:format": "biome check --formatter-enabled=true --linter-enabled=false packages/",
-		"check:types": "tsc --build --clean && tsc --build && node -e \"const fs = require('node:fs'); ['packages/pi-ai/src/index.d.ts', 'packages/pi-ai/src/index.js', 'packages/pi-ai/src/index.js.map'].forEach((path) => fs.rmSync(path, { force: true }));\"",
+		"check:types": "tsc --build --clean && tsc --build",
 		"test:live:pi-mono": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run packages/app-runtime/src/test/pi-mono-live.test.ts",
 		"test:tui": "./scripts/test-tui-regressions.sh",
 		"test": "npm run build && vitest run --passWithNoTests",
