@@ -107,6 +107,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
 	private _renderedFooterStartRow: number | null = null;
 	private _welcomeLines: readonly string[] = [];
+	private _transcriptScrollOffset = 0;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -187,6 +188,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._pendingPermissionSelection = 0;
 			this._renderedFooterUi = null;
 			this._renderedFooterStartRow = null;
+			this._transcriptScrollOffset = 0;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -950,6 +952,11 @@ class InteractiveModeHandler implements ModeHandler {
 				return;
 			}
 		}
+		const transcriptScrollDelta = transcriptScrollDeltaForKey(key, this.currentTranscriptViewportRows());
+		if (transcriptScrollDelta !== 0) {
+			this.scrollTranscript(transcriptScrollDelta);
+			return;
+		}
 		if (this._pendingPermissionCallId !== null) {
 			if (key === "up" || key === "shifttab") {
 				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, -1);
@@ -1015,7 +1022,9 @@ class InteractiveModeHandler implements ModeHandler {
 				this._turnNotice = "responding";
 				this.startTurnNoticeAnimation();
 			}
+			const previousRows = this.currentTranscriptDisplayRows();
 			this._assistantBuffer = mergeStreamingText(this._assistantBuffer, event.content);
+			this.adjustTranscriptScrollForGrowth(previousRows, this.currentTranscriptDisplayRows());
 			this.fullRedrawInteractiveScreen();
 			return;
 		}
@@ -1037,7 +1046,9 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
 		if (assistantBlock !== null) {
+			const previousRows = this.currentTranscriptDisplayRows();
 			this.rememberAssistantTranscriptBlock(assistantBlock);
+			this.adjustTranscriptScrollForGrowth(previousRows, this.currentTranscriptDisplayRows());
 		}
 		this._assistantBuffer = "";
 		if (redrawPrompt) {
@@ -1079,7 +1090,9 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
 		this.flushAssistantBuffer(false);
+		const previousRows = this.currentTranscriptDisplayRows();
 		this.rememberTranscriptBlock(text, newline);
+		this.adjustTranscriptScrollForGrowth(previousRows, this.currentTranscriptDisplayRows());
 		const logicalLines = text.split("\n");
 		const outputLines = newline ? logicalLines : logicalLines.slice(0, -1).concat(logicalLines.at(-1) ?? "");
 		if (outputLines.length > 0) {
@@ -1212,6 +1225,20 @@ class InteractiveModeHandler implements ModeHandler {
 		this.renderFooterRegion();
 	}
 
+	private scrollTranscript(delta: number): void {
+		const maxScroll = this.currentTranscriptMaxScroll();
+		if (delta === 0 || maxScroll <= 0) {
+			return;
+		}
+		const next = Math.max(0, Math.min(maxScroll, this._transcriptScrollOffset + delta));
+		if (next === this._transcriptScrollOffset) {
+			return;
+		}
+		this._transcriptScrollOffset = next;
+		this.renderTranscriptViewport();
+		this.renderFooterRegion();
+	}
+
 	private buildFooterUi(): InteractiveFooterRenderResult {
 		const activeToolLabel = summarizeActiveToolNotice(this._toolCalls);
 		const detailPanel = this.currentDetailPanelViewport();
@@ -1300,7 +1327,21 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private rerenderInteractiveRegions(): void {
+		this.clampTranscriptScrollOffset();
 		this.fullRedrawInteractiveScreen();
+	}
+
+	private adjustTranscriptScrollForGrowth(previousRows: number, nextRows: number): void {
+		if (this._transcriptScrollOffset === 0) {
+			return;
+		}
+		const delta = Math.max(0, nextRows - previousRows);
+		if (delta === 0) {
+			this.clampTranscriptScrollOffset();
+			return;
+		}
+		this._transcriptScrollOffset += delta;
+		this.clampTranscriptScrollOffset();
 	}
 
 	private updateTurnUsage(usage: UsageSnapshot, isFinal: boolean): void {
@@ -1331,6 +1372,30 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private terminalHeight(): number {
 		return Math.max(6, process.stdout.rows ?? 24);
+	}
+
+	private currentTranscriptViewportRows(): number {
+		const footerUi = this.buildFooterUi();
+		const transcriptTopRow = this._welcomeLines.length + 1;
+		const transcriptBottomRow =
+			computeFooterStartRow(
+				this._welcomeLines.length,
+				this.terminalHeight(),
+				footerUi.lines.length,
+				this.currentTranscriptDisplayRows(),
+			) - 1;
+		return Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
+	}
+
+	private currentTranscriptMaxScroll(): number {
+		return Math.max(0, this.currentTranscriptDisplayRows() - this.currentTranscriptViewportRows());
+	}
+
+	private clampTranscriptScrollOffset(): void {
+		this._transcriptScrollOffset = Math.max(
+			0,
+			Math.min(this._transcriptScrollOffset, this.currentTranscriptMaxScroll()),
+		);
 	}
 
 	private transcriptBottomRow(footerHeight = this.currentFooterHeight()): number {
@@ -1428,6 +1493,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._welcomeLines.length === 0) {
 			return;
 		}
+		this.clampTranscriptScrollOffset();
 		process.stdout.write(ansiResetScrollRegion());
 		process.stdout.write(ansiCursorHome());
 		this.clearVisibleScreenRows();
@@ -1458,6 +1524,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.currentRenderedTranscriptBlocks(),
 			this.terminalWidth(),
 			availableRows,
+			this._transcriptScrollOffset,
 		);
 		for (let row = transcriptTopRow; row <= transcriptBottomRow; row += 1) {
 			const index = row - transcriptTopRow;
@@ -1998,6 +2065,24 @@ function detailPanelScrollDeltaForKey(
 	}
 }
 
+function transcriptScrollDeltaForKey(
+	key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc" | "ctrlo",
+	viewportSize: number,
+): number {
+	switch (key) {
+		case "pageup":
+			return Math.max(1, viewportSize - 1);
+		case "pagedown":
+			return -Math.max(1, viewportSize - 1);
+		case "wheelup":
+			return 3;
+		case "wheeldown":
+			return -3;
+		default:
+			return 0;
+	}
+}
+
 export function createDebouncedCallback(
 	callback: () => void,
 	delayMs: number,
@@ -2440,6 +2525,7 @@ export function computeVisibleTranscriptLines(
 	blocks: readonly string[],
 	width: number,
 	maxRows: number,
+	offsetFromBottom = 0,
 ): readonly string[] {
 	if (maxRows <= 0 || blocks.length === 0) {
 		return [];
@@ -2448,7 +2534,11 @@ export function computeVisibleTranscriptLines(
 	if (flattened.length <= maxRows) {
 		return flattened;
 	}
-	return flattened.slice(flattened.length - maxRows);
+	const maxOffset = Math.max(0, flattened.length - maxRows);
+	const clampedOffset = Math.max(0, Math.min(offsetFromBottom, maxOffset));
+	const end = flattened.length - clampedOffset;
+	const start = Math.max(0, end - maxRows);
+	return flattened.slice(start, end);
 }
 
 export function computeTranscriptDisplayRows(blocks: readonly string[], width: number): number {

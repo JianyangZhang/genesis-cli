@@ -355,6 +355,31 @@ class FakeInteractiveSession implements SessionFacade {
 			return;
 		}
 
+		if (input === "scroll history") {
+			const formatHistoryLine = (index: number): string => `History line ${String(index + 1).padStart(2, "0")}`;
+			const firstBatch = Array.from({ length: 20 }, (_, index) => formatHistoryLine(index)).join("\n");
+			this.emit({
+				id: "text-scroll-history-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: firstBatch,
+			} as RuntimeEvent);
+			await sleep(700);
+			const secondBatch = Array.from({ length: 20 }, (_, index) => `\n${formatHistoryLine(index + 20)}`).join("");
+			this.emit({
+				id: "text-scroll-history-2",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "text_delta",
+				content: secondBatch,
+			} as RuntimeEvent);
+			this.emitUsage("usage-scroll-history-final", { input: 240, output: 320, totalTokens: 560 }, true);
+			return;
+		}
+
 		if (input === "queued part one\n\nqueued part two") {
 			this.emit({
 				id: "text-queued-batch-1",
@@ -1046,6 +1071,40 @@ describe("interactive workbench TTY", () => {
 			input.write("/exit\r");
 			await startPromise;
 			expect(output.getRawOutput()).toContain("\x1b[?1049l");
+		});
+	}, 10000);
+
+	it("keeps scrolled transcript history visible while new output arrives", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("scroll history\r");
+			await waitFor(() => screen.snapshot().includes("History line 20"));
+			expect(screen.snapshot()).not.toContain("History line 01");
+
+			for (let index = 0; index < 10; index += 1) {
+				input.write("\u001b[5~");
+			}
+			await waitFor(() => screen.snapshot().includes("History line 01"));
+			expect(screen.snapshot()).toContain("Genesis CLI");
+
+			await sleep(900);
+			expect(screen.snapshot()).toContain("History line 01");
+			expect(screen.snapshot()).not.toContain("History line 40");
+
+			for (let index = 0; index < 10; index += 1) {
+				input.write("\u001b[6~");
+			}
+			await waitFor(() => screen.snapshot().includes("History line 40"));
+
+			input.write("/exit\r");
+			await startPromise;
 		});
 	}, 10000);
 

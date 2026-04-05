@@ -401,6 +401,8 @@ describe("interactive transcript formatting", () => {
 	it("keeps only the visible transcript tail for full-screen redraw", () => {
 		expect(computeVisibleTranscriptLines(["one\ntwo", "three", "four"], 10, 2)).toEqual(["three", "four"]);
 		expect(computeVisibleTranscriptLines(["abcdef"], 3, 2)).toEqual(["abc", "def"]);
+		expect(computeVisibleTranscriptLines(["one", "two", "three", "four"], 10, 2, 1)).toEqual(["two", "three"]);
+		expect(computeVisibleTranscriptLines(["one", "two", "three", "four"], 10, 2, 99)).toEqual(["one", "two"]);
 		expect(computeTranscriptDisplayRows(["one\ntwo", "three"], 10)).toBe(3);
 	});
 
