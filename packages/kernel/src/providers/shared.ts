@@ -72,6 +72,16 @@ export async function* iterateSseData(
 				}
 			}
 		}
+		if (buffer.length > 0) {
+			const payload = buffer
+				.split("\n")
+				.filter((line) => line.startsWith("data:"))
+				.map((line) => line.slice(5).trimStart())
+				.join("\n");
+			if (payload.length > 0) {
+				yield payload;
+			}
+		}
 	} finally {
 		reader.releaseLock();
 	}

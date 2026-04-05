@@ -65,7 +65,7 @@ export function streamOpenAiCompletions(
 			});
 
 			if (!response.ok) {
-				throw new Error(`${response.status} ${await response.text()}`);
+				throw new Error(await formatOpenAiError(response));
 			}
 			if (!response.body) {
 				throw new Error("Provider returned an empty response body.");
@@ -227,6 +227,31 @@ export function streamOpenAiCompletions(
 	})();
 
 	return stream;
+}
+
+async function formatOpenAiError(response: Response): Promise<string> {
+	const statusLine = `${response.status} ${response.statusText}`.trim();
+	let bodyText = "";
+	try {
+		bodyText = await response.text();
+	} catch {
+		return statusLine;
+	}
+	if (!bodyText || bodyText.trim().length === 0) {
+		return statusLine;
+	}
+	const parsed = safeParseJson(bodyText) as unknown;
+	if (isRecord(parsed)) {
+		const error = isRecord(parsed.error) ? parsed.error : undefined;
+		const message =
+			asString(error?.message) ??
+			asString((parsed as Record<string, unknown>).message) ??
+			asString((parsed as Record<string, unknown>).error_message);
+		if (message) {
+			return `${statusLine} ${message}`;
+		}
+	}
+	return `${statusLine} ${bodyText}`;
 }
 
 function buildRequestBody(

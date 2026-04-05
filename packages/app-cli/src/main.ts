@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createAppRuntime, PiMonoSessionAdapter, type CliMode, type ModelDescriptor } from "@genesis-cli/runtime";
+import { ensureAgentDirBootstrapped } from "./bootstrap.js";
 import { createModeHandler } from "./mode-dispatch.js";
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -14,18 +14,15 @@ export interface CliOptions {
 	readonly model: ModelDescriptor;
 	readonly toolSet: readonly string[];
 	readonly thinkingLevel?: ThinkingLevel;
-	readonly bootstrap?: BootstrapConfig;
+	readonly bootstrapOverrides?: BootstrapOverrides;
 }
 
-interface BootstrapConfig {
-	readonly provider: string;
-	readonly modelId: string;
-	readonly displayName?: string;
-	readonly baseUrl: string;
-	readonly api: string;
-	readonly apiKeyEnv: string;
-	readonly authHeader: boolean;
-	readonly reasoning: boolean;
+interface BootstrapOverrides {
+	readonly baseUrl?: string;
+	readonly api?: string;
+	readonly apiKeyEnv?: string;
+	readonly authHeader?: boolean;
+	readonly reasoning?: boolean;
 	readonly compat?: {
 		readonly supportsDeveloperRole?: boolean;
 		readonly supportsReasoningEffort?: boolean;
@@ -70,9 +67,20 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 	}
 
 	const options = resolveCliOptions(parsed.flags);
-	if (options.bootstrap) {
-		await ensureBootstrappedAgentDir(options.agentDir, options.bootstrap);
-	}
+	await ensureAgentDirBootstrapped({
+		agentDir: options.agentDir,
+		provider: options.model.provider,
+		modelId: options.model.id,
+		displayName: options.model.displayName,
+		thinkingLevel: options.thinkingLevel,
+		bootstrapBaseUrl: options.bootstrapOverrides?.baseUrl,
+		bootstrapApi: options.bootstrapOverrides?.api,
+		bootstrapApiKeyEnv: options.bootstrapOverrides?.apiKeyEnv,
+		bootstrapAuthHeader: options.bootstrapOverrides?.authHeader,
+		bootstrapReasoning: options.bootstrapOverrides?.reasoning,
+		supportsDeveloperRole: options.bootstrapOverrides?.compat?.supportsDeveloperRole,
+		supportsReasoningEffort: options.bootstrapOverrides?.compat?.supportsReasoningEffort,
+	});
 
 	const runtime = createAppRuntime({
 		workingDirectory: options.workingDirectory,
@@ -108,8 +116,10 @@ function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): C
 	const thinkingLevel = readOptionalStringFlag(flags, "thinking", process.env.GENESIS_THINKING_LEVEL) as
 		| ThinkingLevel
 		| undefined;
-	const bootstrapBaseUrl = readOptionalStringFlag(flags, "bootstrap-base-url", process.env.GENESIS_BOOTSTRAP_BASE_URL);
-	const bootstrapApi = readStringFlag(flags, "bootstrap-api", process.env.GENESIS_BOOTSTRAP_API ?? "openai-completions");
+	const bootstrapBaseUrl = normalizeOptionalString(
+		readOptionalStringFlag(flags, "bootstrap-base-url", process.env.GENESIS_BOOTSTRAP_BASE_URL),
+	);
+	const bootstrapApi = normalizeOptionalString(readOptionalStringFlag(flags, "bootstrap-api", process.env.GENESIS_BOOTSTRAP_API));
 
 	return {
 		mode,
@@ -122,91 +132,32 @@ function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): C
 		},
 		toolSet,
 		thinkingLevel,
-		bootstrap:
-			bootstrapBaseUrl !== undefined
-				? {
-						provider,
-						modelId,
-						displayName,
-						baseUrl: bootstrapBaseUrl,
-						api: bootstrapApi,
-						apiKeyEnv: readStringFlag(
-							flags,
-							"bootstrap-api-key-env",
-							process.env.GENESIS_BOOTSTRAP_API_KEY_ENV ?? "GENESIS_API_KEY",
-						),
-						authHeader: readBooleanFlag(
-							flags,
-							"bootstrap-auth-header",
-							process.env.GENESIS_BOOTSTRAP_AUTH_HEADER,
-							defaultBootstrapAuthHeader(bootstrapApi),
-						),
-						reasoning: readBooleanFlag(
-							flags,
-							"bootstrap-reasoning",
-							process.env.GENESIS_BOOTSTRAP_REASONING,
-							thinkingLevel !== "off",
-						),
-						compat: {
-							supportsDeveloperRole: readOptionalBooleanFlag(
-								flags,
-								"bootstrap-supports-developer-role",
-								process.env.GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE,
-							),
-							supportsReasoningEffort: readOptionalBooleanFlag(
-								flags,
-								"bootstrap-supports-reasoning-effort",
-								process.env.GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT,
-							),
-						},
-					}
-				: undefined,
-	};
-}
-
-async function ensureBootstrappedAgentDir(agentDir: string, bootstrap: BootstrapConfig): Promise<void> {
-	await mkdir(agentDir, { recursive: true });
-	const modelsPath = resolve(agentDir, "models.json");
-	const existing = await readJsonFile(modelsPath);
-	const providers = existing?.providers && typeof existing.providers === "object" ? existing.providers : {};
-
-	const compat: Record<string, boolean> = {};
-	if (bootstrap.compat?.supportsDeveloperRole !== undefined) {
-		compat.supportsDeveloperRole = bootstrap.compat.supportsDeveloperRole;
-	}
-	if (bootstrap.compat?.supportsReasoningEffort !== undefined) {
-		compat.supportsReasoningEffort = bootstrap.compat.supportsReasoningEffort;
-	}
-
-	providers[bootstrap.provider] = {
-		...(providers[bootstrap.provider] as Record<string, unknown> | undefined),
-		baseUrl: bootstrap.baseUrl,
-		api: bootstrap.api,
-		apiKey: bootstrap.apiKeyEnv,
-		authHeader: bootstrap.authHeader,
-		models: [
-			{
-				id: bootstrap.modelId,
-				name: bootstrap.displayName ?? bootstrap.modelId,
-				reasoning: bootstrap.reasoning,
-				input: ["text"],
-				contextWindow: 128000,
-				maxTokens: 16384,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				...(Object.keys(compat).length > 0 ? { compat } : {}),
+		bootstrapOverrides: {
+			...(bootstrapBaseUrl !== undefined ? { baseUrl: bootstrapBaseUrl } : {}),
+			...(bootstrapApi !== undefined ? { api: bootstrapApi } : {}),
+			apiKeyEnv: readOptionalStringFlag(flags, "bootstrap-api-key-env", process.env.GENESIS_BOOTSTRAP_API_KEY_ENV),
+			authHeader: readOptionalBooleanFlag(flags, "bootstrap-auth-header", process.env.GENESIS_BOOTSTRAP_AUTH_HEADER),
+			reasoning: readOptionalBooleanFlag(flags, "bootstrap-reasoning", process.env.GENESIS_BOOTSTRAP_REASONING),
+			compat: {
+				supportsDeveloperRole: readOptionalBooleanFlag(
+					flags,
+					"bootstrap-supports-developer-role",
+					process.env.GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE,
+				),
+				supportsReasoningEffort: readOptionalBooleanFlag(
+					flags,
+					"bootstrap-supports-reasoning-effort",
+					process.env.GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT,
+				),
 			},
-		],
+		},
 	};
-
-	await writeFile(modelsPath, `${JSON.stringify({ providers }, null, 2)}\n`, "utf8");
 }
 
-async function readJsonFile(filePath: string): Promise<{ providers?: Record<string, unknown> } | null> {
-	try {
-		return JSON.parse(await readFile(filePath, "utf8")) as { providers?: Record<string, unknown> };
-	} catch {
-		return null;
-	}
+function normalizeOptionalString(value: string | undefined): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function readModeFlag(
@@ -275,10 +226,6 @@ function splitCsv(value: string): readonly string[] {
 		.split(",")
 		.map((entry) => entry.trim())
 		.filter((entry) => entry.length > 0);
-}
-
-function defaultBootstrapAuthHeader(api: string): boolean {
-	return api !== "anthropic-messages";
 }
 
 function printHelp(): void {
