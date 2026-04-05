@@ -151,10 +151,11 @@ class FakeInteractiveSession implements SessionFacade {
 	} as unknown as SessionFacade["context"];
 	readonly events = createEventBus();
 	readonly plan = null;
-	private bashApprovedForSession = false;
+	private readonly sessionApprovedCommands = new Set<string>();
 	private pendingPermission: {
 		callId: string;
 		toolName: string;
+		command?: string;
 		resolve: () => void;
 	} | null = null;
 
@@ -183,9 +184,9 @@ class FakeInteractiveSession implements SessionFacade {
 			return;
 		}
 
-		if (input === "bash pwd") {
-			if (this.bashApprovedForSession) {
-				this.emitBashExecution("bash-pwd-2");
+		if (input === "bash echo hello") {
+			if (this.sessionApprovedCommands.has("echo hello")) {
+				this.emitBashExecution("bash-echo-2", "echo hello", "Echo: hello");
 				return;
 			}
 			this.emit({
@@ -195,13 +196,76 @@ class FakeInteractiveSession implements SessionFacade {
 				category: "permission",
 				type: "permission_requested",
 				toolName: "bash",
-				toolCallId: "bash-pwd-1",
+				toolCallId: "bash-echo-1",
 				riskLevel: "L3",
 			} as RuntimeEvent);
 			await new Promise<void>((resolve) => {
-				this.pendingPermission = { callId: "bash-pwd-1", toolName: "bash", resolve };
+				this.pendingPermission = {
+					callId: "bash-echo-1",
+					toolName: "bash",
+					command: "echo hello",
+					resolve,
+				};
 			});
-			this.emitBashExecution("bash-pwd-1");
+			this.emitBashExecution("bash-echo-1", "echo hello", "Echo: hello");
+			return;
+		}
+
+		if (input === "bash pwd") {
+			this.emitBashExecution("bash-pwd", "pwd", "/tmp");
+			return;
+		}
+
+		if (input === "bash ls") {
+			this.emitBashExecution("bash-ls", "ls", "README.md\npackages");
+			return;
+		}
+
+		if (input === "bash cat README.md") {
+			this.emitBashExecution("bash-cat", "cat README.md", "# Genesis CLI");
+			return;
+		}
+
+		if (input === "bash head -n 5 README.md") {
+			this.emitBashExecution("bash-head", "head -n 5 README.md", "# Genesis CLI");
+			return;
+		}
+
+		if (input === 'bash tail -f "logs/app.log"') {
+			this.emitBashExecution("bash-tail", 'tail -f "logs/app.log"', "tailing logs/app.log");
+			return;
+		}
+
+		if (input === "bash wc -l README.md") {
+			this.emitBashExecution("bash-wc", "wc -l README.md", "42 README.md");
+			return;
+		}
+
+		if (input === 'bash grep -n "Genesis CLI" README.md') {
+			this.emitBashExecution("bash-grep", 'grep -n "Genesis CLI" README.md', "1:# Genesis CLI");
+			return;
+		}
+
+		if (input === 'bash rg -n "createToolGovernor" packages') {
+			this.emitBashExecution(
+				"bash-rg",
+				'rg -n "createToolGovernor" packages',
+				"packages/app-runtime/src/governance/tool-governor.ts:1:createToolGovernor",
+			);
+			return;
+		}
+
+		if (input === 'bash find . -name "*.ts" -type f') {
+			this.emitBashExecution("bash-find", 'find . -name "*.ts" -type f', "./packages/app-cli/src/mode-dispatch.ts");
+			return;
+		}
+
+		if (input === 'bash fd -t f "governor" packages') {
+			this.emitBashExecution(
+				"bash-fd",
+				'fd -t f "governor" packages',
+				"packages/app-runtime/src/governance/tool-governor.ts",
+			);
 			return;
 		}
 
@@ -255,8 +319,12 @@ class FakeInteractiveSession implements SessionFacade {
 		if (!this.pendingPermission || this.pendingPermission.callId !== callId) {
 			throw new Error(`Unexpected permission resolution: ${callId}`);
 		}
-		if (decision === "allow_for_session" && this.pendingPermission.toolName === "bash") {
-			this.bashApprovedForSession = true;
+		if (
+			decision === "allow_for_session" &&
+			this.pendingPermission.toolName === "bash" &&
+			this.pendingPermission.command
+		) {
+			this.sessionApprovedCommands.add(this.pendingPermission.command);
 		}
 		const toolName = this.pendingPermission.toolName;
 		this.emit({
@@ -284,7 +352,7 @@ class FakeInteractiveSession implements SessionFacade {
 		this.events.emit(event);
 	}
 
-	private emitBashExecution(callId: string): void {
+	private emitBashExecution(callId: string, command: string, result: string): void {
 		this.emit({
 			id: `tool-start-${callId}`,
 			timestamp: Date.now(),
@@ -293,7 +361,7 @@ class FakeInteractiveSession implements SessionFacade {
 			type: "tool_started",
 			toolName: "bash",
 			toolCallId: callId,
-			parameters: { command: "pwd" },
+			parameters: { command },
 		} as RuntimeEvent);
 		this.emit({
 			id: `tool-end-${callId}`,
@@ -305,7 +373,7 @@ class FakeInteractiveSession implements SessionFacade {
 			toolCallId: callId,
 			status: "success",
 			durationMs: 10,
-			result: "/tmp",
+			result,
 		} as RuntimeEvent);
 		this.emit({
 			id: `tool-text-${callId}`,
@@ -313,7 +381,7 @@ class FakeInteractiveSession implements SessionFacade {
 			sessionId: this.id,
 			category: "text",
 			type: "text_delta",
-			content: "Current directory: /tmp",
+			content: result,
 		} as RuntimeEvent);
 	}
 
@@ -457,17 +525,207 @@ describe("interactive workbench TTY", () => {
 			const startPromise = createModeHandler("interactive").start(runtime);
 			await waitFor(() => screen.snapshot().includes("❯"));
 
-			input.write("bash pwd\r");
+			input.write("bash echo hello\r");
 			await waitFor(() => session.isWaitingForPermission());
 			await waitFor(() => screen.snapshot().includes("choice [Enter/1/2/3]>"));
-			expect(screen.snapshot()).toContain("bash pwd");
+			expect(screen.snapshot()).toContain("bash echo hello");
 
 			input.write("2\r");
-			await waitFor(() => screen.snapshot().includes("Current directory: /tmp"));
+			await waitFor(() => screen.snapshot().includes("Echo: hello"));
 			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
 
+			input.write("bash echo hello\r");
+			await waitFor(() => countOccurrences(screen.snapshot(), "Echo: hello") >= 2);
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash pwd", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
 			input.write("bash pwd\r");
-			await waitFor(() => screen.snapshot().includes("Bash(pwd)"));
+			await waitFor(() => screen.snapshot().includes("/tmp"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash ls", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("bash ls\r");
+			await waitFor(() => screen.snapshot().includes("README.md"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash cat", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("bash cat README.md\r");
+			await waitFor(() => screen.snapshot().includes("# Genesis CLI"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash head", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("bash head -n 5 README.md\r");
+			await waitFor(() => screen.snapshot().includes("# Genesis CLI"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash tail", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write('bash tail -f "logs/app.log"\r');
+			await waitFor(() => screen.snapshot().includes("tailing logs/app.log"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash wc", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("bash wc -l README.md\r");
+			await waitFor(() => screen.snapshot().includes("42 README.md"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash grep", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write('bash grep -n "Genesis CLI" README.md\r');
+			await waitFor(() => screen.snapshot().includes("1:# Genesis CLI"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash rg", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write('bash rg -n "createToolGovernor" packages\r');
+			await waitFor(() => screen.snapshot().includes("createToolGovernor"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash find", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write('bash find . -name "*.ts" -type f\r');
+			await waitFor(() => screen.snapshot().includes("./packages/app-cli/src/mode-dispatch.ts"));
+			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not show a permission prompt for bash fd", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write('bash fd -t f "governor" packages\r');
+			await waitFor(() => screen.snapshot().includes("tool-governor.ts"));
 			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
 
 			input.write("/exit\r");

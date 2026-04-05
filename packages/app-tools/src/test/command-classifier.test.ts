@@ -123,13 +123,36 @@ describe("isReadOnlyShellCommand", () => {
 		expect(isReadOnlyShellCommand("ls -lah src")).toBe(true);
 	});
 
-	it("allows common readonly file and search commands", () => {
+	it("allows cat as a readonly shell command", () => {
 		expect(isReadOnlyShellCommand("cat README.md")).toBe(true);
+	});
+
+	it("allows head as a readonly shell command", () => {
 		expect(isReadOnlyShellCommand("head -n 20 README.md")).toBe(true);
+	});
+
+	it("allows tail as a readonly shell command", () => {
 		expect(isReadOnlyShellCommand('tail -f "logs/app.log"')).toBe(true);
+	});
+
+	it("allows wc as a readonly shell command", () => {
 		expect(isReadOnlyShellCommand("wc -l src/index.ts")).toBe(true);
+	});
+
+	it("allows grep with safe flags as a readonly shell command", () => {
 		expect(isReadOnlyShellCommand('grep -n "Genesis CLI" README.md')).toBe(true);
+	});
+
+	it("allows rg with safe flags as a readonly shell command", () => {
 		expect(isReadOnlyShellCommand('rg -n --glob "*.ts" "createToolGovernor" packages')).toBe(true);
+	});
+
+	it("allows find as a readonly shell command", () => {
+		expect(isReadOnlyShellCommand('find . -name "*.ts" -type f')).toBe(true);
+	});
+
+	it("allows fd as a readonly shell command", () => {
+		expect(isReadOnlyShellCommand('fd -t f "governor" packages')).toBe(true);
 	});
 
 	it("rejects shell commands with metacharacters or unsupported syntax", () => {
@@ -140,5 +163,7 @@ describe("isReadOnlyShellCommand", () => {
 		expect(isReadOnlyShellCommand('rg --pre "bash" foo')).toBe(false);
 		expect(isReadOnlyShellCommand('rg "$PATTERN" src')).toBe(false);
 		expect(isReadOnlyShellCommand("grep `cat pattern.txt` README.md")).toBe(false);
+		expect(isReadOnlyShellCommand('find . -name "*.ts" -delete')).toBe(false);
+		expect(isReadOnlyShellCommand("fd --exec rm {} \\;")).toBe(false);
 	});
 });

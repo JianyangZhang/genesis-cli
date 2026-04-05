@@ -95,6 +95,82 @@ export interface ToolGovernor {
 const SIMPLE_ARG_PATTERN = /^[./~:@A-Za-z0-9_=-]+$/;
 const LS_SAFE_FLAG_CHARS = new Set(["a", "A", "l", "h", "F", "G", "1", "t", "r", "S", "d"]);
 const PWD_SAFE_FLAG_CHARS = new Set(["L", "P"]);
+const GREP_SAFE_FLAGS = new Set([
+	"-n",
+	"--line-number",
+	"-i",
+	"--ignore-case",
+	"-F",
+	"--fixed-strings",
+	"-E",
+	"--extended-regexp",
+	"-G",
+	"--basic-regexp",
+	"-P",
+	"--perl-regexp",
+	"-w",
+	"--word-regexp",
+	"-x",
+	"--line-regexp",
+	"-v",
+	"--invert-match",
+	"-c",
+	"--count",
+	"-l",
+	"--files-with-matches",
+	"-L",
+	"--files-without-match",
+	"-H",
+	"-h",
+	"-o",
+	"--only-matching",
+	"-q",
+	"--quiet",
+	"-s",
+	"--no-messages",
+	"-r",
+	"-R",
+	"--recursive",
+	"-m",
+	"--max-count",
+	"-A",
+	"--after-context",
+	"-B",
+	"--before-context",
+	"-C",
+	"--context",
+	"-e",
+	"--regexp",
+	"-f",
+	"--file",
+	"--include",
+	"--exclude",
+	"--exclude-dir",
+	"--binary-files",
+	"--color",
+	"--help",
+	"--version",
+	"--",
+]);
+const GREP_FLAGS_WITH_VALUE = new Set([
+	"-m",
+	"--max-count",
+	"-A",
+	"--after-context",
+	"-B",
+	"--before-context",
+	"-C",
+	"--context",
+	"-e",
+	"--regexp",
+	"-f",
+	"--file",
+	"--include",
+	"--exclude",
+	"--exclude-dir",
+	"--binary-files",
+	"--color",
+]);
 const RG_SAFE_FLAGS = new Set([
 	"-e",
 	"--regexp",
@@ -154,6 +230,80 @@ const RG_SAFE_FLAGS = new Set([
 	"--debug",
 	"--",
 ]);
+const FD_SAFE_FLAGS = new Set([
+	"-H",
+	"--hidden",
+	"-I",
+	"--no-ignore",
+	"-u",
+	"-L",
+	"--follow",
+	"-p",
+	"--full-path",
+	"-0",
+	"--print0",
+	"-a",
+	"--absolute-path",
+	"-l",
+	"--list-details",
+	"-t",
+	"--type",
+	"-e",
+	"--extension",
+	"-g",
+	"--glob",
+	"-E",
+	"--exclude",
+	"-d",
+	"--max-depth",
+	"-c",
+	"--color",
+	"-s",
+	"--case-sensitive",
+	"-i",
+	"--ignore-case",
+	"--and",
+	"--or",
+	"--size",
+	"--changed-within",
+	"--changed-before",
+	"--base-directory",
+	"--search-path",
+	"--strip-cwd-prefix",
+	"--help",
+	"--version",
+	"--",
+]);
+const FD_FLAGS_WITH_VALUE = new Set([
+	"-t",
+	"--type",
+	"-e",
+	"--extension",
+	"-g",
+	"--glob",
+	"-E",
+	"--exclude",
+	"-d",
+	"--max-depth",
+	"-c",
+	"--color",
+	"--size",
+	"--changed-within",
+	"--changed-before",
+	"--base-directory",
+	"--search-path",
+]);
+const FIND_DANGEROUS_FLAGS = new Set([
+	"-delete",
+	"-exec",
+	"-execdir",
+	"-ok",
+	"-okdir",
+	"-fprint",
+	"-fprint0",
+	"-fprintf",
+	"-fls",
+]);
 const RG_FLAGS_WITH_VALUE = new Set([
 	"-e",
 	"--regexp",
@@ -175,7 +325,7 @@ const RG_FLAGS_WITH_VALUE = new Set([
 	"--max-depth",
 	"--color",
 ]);
-const READONLY_SHELL_COMMANDS = new Set(["cat", "head", "tail", "wc", "grep"]);
+const GENERIC_READONLY_SHELL_COMMANDS = new Set(["cat", "head", "tail", "wc"]);
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -397,11 +547,20 @@ function isAutoAllowedReadOnlyBashCommand(command: string): boolean {
 			.slice(1)
 			.every((token) => isSafeShortFlag(token, LS_SAFE_FLAG_CHARS) || SIMPLE_ARG_PATTERN.test(token));
 	}
-	if (READONLY_SHELL_COMMANDS.has(head)) {
+	if (GENERIC_READONLY_SHELL_COMMANDS.has(head)) {
 		return tokens.slice(1).every((token) => !hasUnsafeShellContent(token));
+	}
+	if (head === "grep") {
+		return validateGrepArgs(tokens.slice(1));
 	}
 	if (head === "rg") {
 		return validateRipgrepArgs(tokens.slice(1));
+	}
+	if (head === "find") {
+		return validateFindArgs(tokens.slice(1));
+	}
+	if (head === "fd") {
+		return validateFdArgs(tokens.slice(1));
 	}
 	return false;
 }
@@ -438,6 +597,78 @@ function validateRipgrepArgs(args: readonly string[]): boolean {
 			continue;
 		}
 		if (RG_FLAGS_WITH_VALUE.has(flag)) {
+			const next = args[index + 1];
+			if (typeof next !== "string" || next.length === 0 || hasUnsafeShellContent(next)) {
+				return false;
+			}
+			index += 1;
+		}
+	}
+	return true;
+}
+
+function validateGrepArgs(args: readonly string[]): boolean {
+	for (let index = 0; index < args.length; index += 1) {
+		const token = args[index] ?? "";
+		if (hasUnsafeShellContent(token)) {
+			return false;
+		}
+		if (!token.startsWith("-") || token === "--") {
+			continue;
+		}
+		const [flag, inlineValue] = token.split("=", 2);
+		if (!GREP_SAFE_FLAGS.has(flag)) {
+			return false;
+		}
+		if (inlineValue !== undefined) {
+			if (!GREP_FLAGS_WITH_VALUE.has(flag) || hasUnsafeShellContent(inlineValue)) {
+				return false;
+			}
+			continue;
+		}
+		if (GREP_FLAGS_WITH_VALUE.has(flag)) {
+			const next = args[index + 1];
+			if (typeof next !== "string" || next.length === 0 || hasUnsafeShellContent(next)) {
+				return false;
+			}
+			index += 1;
+		}
+	}
+	return true;
+}
+
+function validateFindArgs(args: readonly string[]): boolean {
+	for (const token of args) {
+		if (hasUnsafeShellContent(token)) {
+			return false;
+		}
+		if (FIND_DANGEROUS_FLAGS.has(token)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function validateFdArgs(args: readonly string[]): boolean {
+	for (let index = 0; index < args.length; index += 1) {
+		const token = args[index] ?? "";
+		if (hasUnsafeShellContent(token)) {
+			return false;
+		}
+		if (!token.startsWith("-") || token === "--") {
+			continue;
+		}
+		const [flag, inlineValue] = token.split("=", 2);
+		if (!FD_SAFE_FLAGS.has(flag)) {
+			return false;
+		}
+		if (inlineValue !== undefined) {
+			if (!FD_FLAGS_WITH_VALUE.has(flag) || hasUnsafeShellContent(inlineValue)) {
+				return false;
+			}
+			continue;
+		}
+		if (FD_FLAGS_WITH_VALUE.has(flag)) {
 			const next = args[index + 1];
 			if (typeof next !== "string" || next.length === 0 || hasUnsafeShellContent(next)) {
 				return false;

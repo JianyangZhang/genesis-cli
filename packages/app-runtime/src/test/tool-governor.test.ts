@@ -226,29 +226,124 @@ describe("ToolGovernor", () => {
 			expect(decision.type).toBe("allow");
 		});
 
-		it("auto-allows common readonly bash commands", () => {
+		it("auto-allows cat for bash", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L3_BASH);
 
-			const commands = [
-				"cat README.md",
-				"head -n 10 README.md",
-				'tail -f "logs/app.log"',
-				"wc -l src/index.ts",
-				'grep -n "Genesis CLI" README.md',
-				'rg -n --glob "*.ts" "createToolGovernor" packages',
-			];
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_cat",
+					parameters: { command: "cat README.md" },
+				}),
+			);
 
-			for (const command of commands) {
-				const decision = governor.beforeExecution(
-					executionContext({
-						toolName: "bash",
-						toolCallId: `call_${command}`,
-						parameters: { command },
-					}),
-				);
-				expect(decision.type).toBe("allow");
-			}
+			expect(decision.type).toBe("allow");
+		});
+
+		it("auto-allows head for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_head",
+					parameters: { command: "head -n 10 README.md" },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
+		});
+
+		it("auto-allows tail for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_tail",
+					parameters: { command: 'tail -f "logs/app.log"' },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
+		});
+
+		it("auto-allows wc for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_wc",
+					parameters: { command: "wc -l src/index.ts" },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
+		});
+
+		it("auto-allows grep for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_grep",
+					parameters: { command: 'grep -n "Genesis CLI" README.md' },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
+		});
+
+		it("auto-allows rg for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_rg",
+					parameters: { command: 'rg -n --glob "*.ts" "createToolGovernor" packages' },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
+		});
+
+		it("auto-allows find for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_find",
+					parameters: { command: 'find . -name "*.ts" -type f' },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
+		});
+
+		it("auto-allows fd for bash", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_fd",
+					parameters: { command: 'fd -t f "governor" packages' },
+				}),
+			);
+
+			expect(decision.type).toBe("allow");
 		});
 
 		it("still asks for non-allowlisted bash commands", () => {
@@ -265,21 +360,32 @@ describe("ToolGovernor", () => {
 			expect(decision.type).toBe("ask_user");
 		});
 
-		it("still asks for risky ripgrep forms even though rg is readonly by default", () => {
+		it("still asks for risky rg forms even though rg is readonly by default", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L3_BASH);
 
-			const commands = ['rg --pre "bash" foo', 'rg "$PATTERN" src'];
-			for (const command of commands) {
-				const decision = governor.beforeExecution(
-					executionContext({
-						toolName: "bash",
-						toolCallId: `call_${command}`,
-						parameters: { command },
-					}),
-				);
-				expect(decision.type).toBe("ask_user");
-			}
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_rg_risky",
+					parameters: { command: 'rg --pre "bash" foo' },
+				}),
+			);
+			expect(decision.type).toBe("ask_user");
+		});
+
+		it("still asks for risky find forms", () => {
+			const governor = createToolGovernor();
+			governor.catalog.register(L3_BASH);
+
+			const decision = governor.beforeExecution(
+				executionContext({
+					toolName: "bash",
+					toolCallId: "call_find_risky",
+					parameters: { command: 'find . -name "*.ts" -delete' },
+				}),
+			);
+			expect(decision.type).toBe("ask_user");
 		});
 	});
 
