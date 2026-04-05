@@ -123,10 +123,22 @@ describe("isReadOnlyShellCommand", () => {
 		expect(isReadOnlyShellCommand("ls -lah src")).toBe(true);
 	});
 
+	it("allows common readonly file and search commands", () => {
+		expect(isReadOnlyShellCommand("cat README.md")).toBe(true);
+		expect(isReadOnlyShellCommand("head -n 20 README.md")).toBe(true);
+		expect(isReadOnlyShellCommand('tail -f "logs/app.log"')).toBe(true);
+		expect(isReadOnlyShellCommand("wc -l src/index.ts")).toBe(true);
+		expect(isReadOnlyShellCommand('grep -n "Genesis CLI" README.md')).toBe(true);
+		expect(isReadOnlyShellCommand('rg -n --glob "*.ts" "createToolGovernor" packages')).toBe(true);
+	});
+
 	it("rejects shell commands with metacharacters or unsupported syntax", () => {
 		expect(isReadOnlyShellCommand("ls | cat")).toBe(false);
 		expect(isReadOnlyShellCommand("pwd > out.txt")).toBe(false);
 		expect(isReadOnlyShellCommand("ls $(pwd)")).toBe(false);
 		expect(isReadOnlyShellCommand("echo hello")).toBe(false);
+		expect(isReadOnlyShellCommand('rg --pre "bash" foo')).toBe(false);
+		expect(isReadOnlyShellCommand('rg "$PATTERN" src')).toBe(false);
+		expect(isReadOnlyShellCommand("grep `cat pattern.txt` README.md")).toBe(false);
 	});
 });

@@ -92,10 +92,90 @@ export interface ToolGovernor {
 	readonly audit: AuditLog;
 }
 
-const SHELL_META_PATTERN = /[|&;><`$()]/;
 const SIMPLE_ARG_PATTERN = /^[./~:@A-Za-z0-9_=-]+$/;
 const LS_SAFE_FLAG_CHARS = new Set(["a", "A", "l", "h", "F", "G", "1", "t", "r", "S", "d"]);
 const PWD_SAFE_FLAG_CHARS = new Set(["L", "P"]);
+const RG_SAFE_FLAGS = new Set([
+	"-e",
+	"--regexp",
+	"-f",
+	"-i",
+	"--ignore-case",
+	"-S",
+	"--smart-case",
+	"-F",
+	"--fixed-strings",
+	"-w",
+	"--word-regexp",
+	"-v",
+	"--invert-match",
+	"-c",
+	"--count",
+	"-l",
+	"--files-with-matches",
+	"--files-without-match",
+	"-n",
+	"--line-number",
+	"-o",
+	"--only-matching",
+	"-A",
+	"--after-context",
+	"-B",
+	"--before-context",
+	"-C",
+	"--context",
+	"-H",
+	"-h",
+	"--heading",
+	"--no-heading",
+	"-q",
+	"--quiet",
+	"--column",
+	"-g",
+	"--glob",
+	"-t",
+	"--type",
+	"-T",
+	"--type-not",
+	"--type-list",
+	"--hidden",
+	"--no-ignore",
+	"-u",
+	"-m",
+	"--max-count",
+	"--max-depth",
+	"-L",
+	"--follow",
+	"--color",
+	"--json",
+	"--stats",
+	"--help",
+	"--version",
+	"--debug",
+	"--",
+]);
+const RG_FLAGS_WITH_VALUE = new Set([
+	"-e",
+	"--regexp",
+	"-f",
+	"-A",
+	"--after-context",
+	"-B",
+	"--before-context",
+	"-C",
+	"--context",
+	"-g",
+	"--glob",
+	"-t",
+	"--type",
+	"-T",
+	"--type-not",
+	"-m",
+	"--max-count",
+	"--max-depth",
+	"--color",
+]);
+const READONLY_SHELL_COMMANDS = new Set(["cat", "head", "tail", "wc", "grep"]);
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -304,11 +384,10 @@ export function createToolGovernor(): ToolGovernor {
 }
 
 function isAutoAllowedReadOnlyBashCommand(command: string): boolean {
-	const trimmed = command.trim();
-	if (trimmed.length === 0 || SHELL_META_PATTERN.test(trimmed)) {
+	const tokens = tokenizeShellCommand(command);
+	if (tokens === null || tokens.length === 0) {
 		return false;
 	}
-	const tokens = trimmed.split(/\s+/);
 	const head = tokens[0];
 	if (head === "pwd") {
 		return tokens.slice(1).every((token) => isSafeShortFlag(token, PWD_SAFE_FLAG_CHARS));
@@ -317,6 +396,12 @@ function isAutoAllowedReadOnlyBashCommand(command: string): boolean {
 		return tokens
 			.slice(1)
 			.every((token) => isSafeShortFlag(token, LS_SAFE_FLAG_CHARS) || SIMPLE_ARG_PATTERN.test(token));
+	}
+	if (READONLY_SHELL_COMMANDS.has(head)) {
+		return tokens.slice(1).every((token) => !hasUnsafeShellContent(token));
+	}
+	if (head === "rg") {
+		return validateRipgrepArgs(tokens.slice(1));
 	}
 	return false;
 }
@@ -331,6 +416,106 @@ function isSafeShortFlag(token: string, allowedChars: ReadonlySet<string>): bool
 		}
 	}
 	return token.length > 1;
+}
+
+function validateRipgrepArgs(args: readonly string[]): boolean {
+	for (let index = 0; index < args.length; index += 1) {
+		const token = args[index] ?? "";
+		if (hasUnsafeShellContent(token)) {
+			return false;
+		}
+		if (!token.startsWith("-") || token === "--") {
+			continue;
+		}
+		const [flag, inlineValue] = token.split("=", 2);
+		if (!RG_SAFE_FLAGS.has(flag)) {
+			return false;
+		}
+		if (inlineValue !== undefined) {
+			if (!RG_FLAGS_WITH_VALUE.has(flag) || hasUnsafeShellContent(inlineValue)) {
+				return false;
+			}
+			continue;
+		}
+		if (RG_FLAGS_WITH_VALUE.has(flag)) {
+			const next = args[index + 1];
+			if (typeof next !== "string" || next.length === 0 || hasUnsafeShellContent(next)) {
+				return false;
+			}
+			index += 1;
+		}
+	}
+	return true;
+}
+
+function tokenizeShellCommand(command: string): string[] | null {
+	const trimmed = command.trim();
+	if (trimmed.length === 0) {
+		return null;
+	}
+	const tokens: string[] = [];
+	let current = "";
+	let quote: "'" | '"' | null = null;
+	for (let index = 0; index < trimmed.length; index += 1) {
+		const char = trimmed[index] ?? "";
+		if (quote !== null) {
+			if (char === quote) {
+				quote = null;
+				continue;
+			}
+			if (quote === '"' && char === "\\") {
+				const next = trimmed[index + 1];
+				if (next !== undefined) {
+					current += next;
+					index += 1;
+					continue;
+				}
+			}
+			current += char;
+			continue;
+		}
+		if (char === "'" || char === '"') {
+			quote = char;
+			continue;
+		}
+		if (char === "\\") {
+			const next = trimmed[index + 1];
+			if (next === undefined) {
+				return null;
+			}
+			current += next;
+			index += 1;
+			continue;
+		}
+		if (/\s/.test(char)) {
+			if (current.length > 0) {
+				tokens.push(current);
+				current = "";
+			}
+			continue;
+		}
+		if ("|&;<>`()".includes(char)) {
+			return null;
+		}
+		current += char;
+	}
+	if (quote !== null) {
+		return null;
+	}
+	if (current.length > 0) {
+		tokens.push(current);
+	}
+	return tokens;
+}
+
+function hasUnsafeShellContent(token: string): boolean {
+	if (/[\n\r`$]/.test(token)) {
+		return true;
+	}
+	if (token.includes("{") && (token.includes(",") || token.includes(".."))) {
+		return true;
+	}
+	return false;
 }
 
 function matchesSessionApproval(
