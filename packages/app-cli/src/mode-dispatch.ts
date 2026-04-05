@@ -78,6 +78,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private _assistantBuffer = "";
+	private _turnNotice: "thinking" | "responding" | null = null;
+	private _commandSuggestions: readonly string[] = [];
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -137,6 +139,8 @@ class InteractiveModeHandler implements ModeHandler {
 			this._lastError = null;
 			this._changedPaths.clear();
 			this._assistantBuffer = "";
+			this._turnNotice = null;
+			this._commandSuggestions = [];
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -735,6 +739,7 @@ class InteractiveModeHandler implements ModeHandler {
 			rawMode: true,
 			onInputStateChange: (state) => {
 				this._inputState = state;
+				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listAll());
 				this.renderPromptLine();
 			},
 			onKey: (key) => {
@@ -828,6 +833,7 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				this.flushAssistantBuffer(false);
 				this.writeTranscriptText(formatTranscriptUserLine(trimmed), true);
+				this.startTurnFeedback();
 				this.rememberHistory(trimmed);
 				this._activeTurn = sessionRef.current
 					.prompt(trimmed)
@@ -837,6 +843,7 @@ class InteractiveModeHandler implements ModeHandler {
 					.finally(() => {
 						this._activeTurn = null;
 						this.flushAssistantBuffer(false);
+						this._turnNotice = null;
 						this.renderPromptLine();
 					});
 
@@ -884,15 +891,15 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("\n");
 		process.stdout.write(fill());
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}    · ✦ ·    ${RESET}`));
+		process.stdout.write(center(`${DIM}    ·   ◌   ·    ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}  ✦ ${CYAN}╭──╮${RESET} ${DIM}✦  ${RESET}`));
+		process.stdout.write(center(`${DIM}      ${CYAN}◜${GREEN}◎${CYAN}◝${RESET}      ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}  · ${CYAN}│${GREEN}◉◉${CYAN}│${RESET} ${DIM}·  ${RESET}`));
+		process.stdout.write(center(`${DIM}    ◌ ${CYAN}│${GREEN}◉${CYAN}│${RESET} ◌    ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}  ✦ ${CYAN}╰──╯${RESET} ${DIM}✦  ${RESET}`));
+		process.stdout.write(center(`${DIM}      ${CYAN}◟${GREEN}◎${CYAN}◞${RESET}      ${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write(center(`${DIM}    · ✦ ·    ${RESET}`));
+		process.stdout.write(center(`${DIM}    ·   ◌   ·    ${RESET}`));
 		process.stdout.write("\n");
 		process.stdout.write(center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`));
 		process.stdout.write("\n");
@@ -917,6 +924,13 @@ class InteractiveModeHandler implements ModeHandler {
 		if (buffer.length > 0) {
 			process.stdout.write(buffer);
 		}
+		const hint = formatSlashSuggestionHint(
+			this._commandSuggestions,
+			(process.stdout.columns ?? 80) - computePromptCursorColumn(prompt, buffer, buffer.length),
+		);
+		if (hint.length > 0) {
+			process.stdout.write(hint);
+		}
 		process.stdout.write("\r");
 		process.stdout.write(
 			ansiMoveRight(computePromptCursorColumn(prompt, this._inputState.buffer, this._inputState.cursor)),
@@ -935,7 +949,18 @@ class InteractiveModeHandler implements ModeHandler {
 			this.renderPromptLine();
 			return;
 		}
+		if (event.category === "text" && event.type === "thinking_delta") {
+			if (this._turnNotice === null) {
+				this.startTurnFeedback();
+			}
+			this.renderPromptLine();
+			return;
+		}
 		if (event.category === "text" && event.type === "text_delta") {
+			if (this._turnNotice !== "responding") {
+				this._turnNotice = "responding";
+				this.writeTranscriptText(formatTurnNotice("responding"), true, false);
+			}
 			this._assistantBuffer += event.content;
 			return;
 		}
@@ -958,6 +983,14 @@ class InteractiveModeHandler implements ModeHandler {
 		const text = formatTranscriptAssistantLine(this._assistantBuffer);
 		this._assistantBuffer = "";
 		this.writeTranscriptText(text, true, redrawPrompt);
+	}
+
+	private startTurnFeedback(): void {
+		if (this._turnNotice !== null) {
+			return;
+		}
+		this._turnNotice = "thinking";
+		this.writeTranscriptText(formatTurnNotice("thinking"), true);
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
@@ -1117,6 +1150,34 @@ export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boo
 	return true;
 }
 
+export function computeSlashSuggestions(input: string, commands: readonly SlashCommand[]): readonly string[] {
+	const trimmed = input.trimStart();
+	if (!trimmed.startsWith("/")) return [];
+	const body = trimmed.slice(1);
+	if (body.includes(" ")) return [];
+	const query = body.toLowerCase();
+	return commands
+		.map((command) => command.name)
+		.filter((name) => query.length === 0 || name.startsWith(query))
+		.sort((a, b) => a.localeCompare(b))
+		.slice(0, 6);
+}
+
+export function formatSlashSuggestionHint(suggestions: readonly string[], remainingWidth: number): string {
+	if (suggestions.length === 0 || remainingWidth < 6) return "";
+	const DIM = "\x1b[2m";
+	const RESET = "\x1b[0m";
+	let hint = "";
+	for (const name of suggestions) {
+		const segment = `${hint.length === 0 ? "  " : "  "}/${name}`;
+		if (measureTerminalDisplayWidth(hint + segment) > remainingWidth) {
+			break;
+		}
+		hint += segment;
+	}
+	return hint.length > 0 ? `${DIM}${hint}${RESET}` : "";
+}
+
 export function formatTranscriptUserLine(content: string): string {
 	const BG = "\x1b[48;5;238m";
 	const FG = "\x1b[97m";
@@ -1126,4 +1187,11 @@ export function formatTranscriptUserLine(content: string): string {
 
 export function formatTranscriptAssistantLine(content: string): string {
 	return content;
+}
+
+export function formatTurnNotice(kind: "thinking" | "responding"): string {
+	const DIM = "\x1b[2m";
+	const CYAN = "\x1b[36m";
+	const RESET = "\x1b[0m";
+	return kind === "thinking" ? `${DIM}${CYAN}· Thinking…${RESET}` : `${DIM}${CYAN}· Responding…${RESET}`;
 }

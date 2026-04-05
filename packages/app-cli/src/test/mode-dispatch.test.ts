@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+	computeSlashSuggestions,
+	formatSlashSuggestionHint,
 	formatTranscriptAssistantLine,
 	formatTranscriptUserLine,
+	formatTurnNotice,
 	shouldRenderInteractiveTranscriptEvent,
 } from "../mode-dispatch.js";
 
@@ -47,5 +50,34 @@ describe("interactive transcript formatting", () => {
 				parameters: {},
 			}),
 		).toBe(true);
+	});
+
+	it("formats turn notices for thinking and responding", () => {
+		expect(formatTurnNotice("thinking")).toContain("Thinking");
+		expect(formatTurnNotice("responding")).toContain("Responding");
+	});
+});
+
+describe("slash command hints", () => {
+	const commands = [
+		{ name: "help", description: "", type: "local" as const },
+		{ name: "status", description: "", type: "local" as const },
+		{ name: "sessions", description: "", type: "local" as const },
+		{ name: "resume", description: "", type: "local" as const },
+	];
+
+	it("suggests commands when the user types a slash prefix", () => {
+		expect(computeSlashSuggestions("/", commands)).toEqual(["help", "resume", "sessions", "status"]);
+		expect(computeSlashSuggestions("/st", commands)).toEqual(["status"]);
+	});
+
+	it("does not suggest commands after arguments begin", () => {
+		expect(computeSlashSuggestions("/status now", commands)).toEqual([]);
+	});
+
+	it("formats a dim inline hint for matching commands", () => {
+		const hint = formatSlashSuggestionHint(["help", "status"], 30);
+		expect(hint).toContain("/help");
+		expect(hint).toContain("/status");
 	});
 });
