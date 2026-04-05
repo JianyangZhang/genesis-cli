@@ -79,6 +79,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _transcriptBlocks: string[] = [];
 	private _assistantBuffer = "";
 	private _streamingReservedRows = 0;
+	private _streamingDisplayRows = 0;
+	private _renderedStreamingStartRow: number | null = null;
 	private _turnNotice: "thinking" | "responding" | null = null;
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
@@ -148,6 +150,8 @@ class InteractiveModeHandler implements ModeHandler {
 			this._transcriptBlocks.length = 0;
 			this._assistantBuffer = "";
 			this._streamingReservedRows = 0;
+			this._streamingDisplayRows = 0;
+			this._renderedStreamingStartRow = null;
 			this._turnNotice = null;
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
@@ -982,6 +986,8 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		this._assistantBuffer = "";
 		this._streamingReservedRows = 0;
+		this._streamingDisplayRows = 0;
+		this._renderedStreamingStartRow = null;
 		if (redrawPrompt) {
 			this.renderPromptLine();
 		}
@@ -1000,11 +1006,33 @@ class InteractiveModeHandler implements ModeHandler {
 		const lines = wrapTranscriptContent(rendered, process.stdout.columns ?? 80);
 		const renderedWidth = this.terminalWidth();
 		const rows = countRenderedTerminalRows(lines, renderedWidth);
+		const previousStartRow = this._renderedStreamingStartRow;
+		const previousRows = this._streamingReservedRows;
+		this._streamingDisplayRows = rows;
 		this.renderFooterRegion();
-		this.reserveStreamingRows(rows);
-		const startRow = this.transcriptBottomRow() - this._streamingReservedRows + 1;
-		this.clearTranscriptRows(startRow, this.transcriptBottomRow());
+		const footerStartRow =
+			this._renderedFooterStartRow ??
+			computeFooterStartRow(
+				this._welcomeLines.length,
+				this.terminalHeight(),
+				this.currentFooterHeight(),
+				this.currentTranscriptDisplayRows(),
+			);
+		if (isFooterBottomAnchored(footerStartRow, this.terminalHeight(), this.currentFooterHeight())) {
+			this.reserveStreamingRows(rows);
+		} else {
+			this._streamingReservedRows = rows;
+		}
+		const startRow = footerStartRow - rows;
+		const transcriptBottomRow = footerStartRow - 1;
+		const clearStartRow = previousStartRow === null ? startRow : Math.min(startRow, previousStartRow);
+		const clearEndRow =
+			previousStartRow === null
+				? transcriptBottomRow
+				: Math.max(transcriptBottomRow, previousStartRow + previousRows - 1);
+		this.clearTranscriptRows(clearStartRow, clearEndRow);
 		this.writeLinesAtRow(startRow, lines, renderedWidth);
+		this._renderedStreamingStartRow = startRow;
 		this.renderFooterRegion();
 	}
 
@@ -1105,20 +1133,15 @@ class InteractiveModeHandler implements ModeHandler {
 		return this._renderedFooterUi?.lines.length ?? this.buildFooterUi().lines.length;
 	}
 
-	private shouldUseCompactFooterLayout(): boolean {
-		return (
-			this._transcriptBlocks.length === 0 &&
-			this._assistantBuffer.length === 0 &&
-			this._pendingPermissionCallId === null &&
-			this._pendingPermissionDetails === null
-		);
-	}
-
 	private renderFooterRegion(): void {
 		const ui = this.buildFooterUi();
 		const footerHeight = ui.lines.length;
-		const compact = this.shouldUseCompactFooterLayout();
-		const startRow = computeFooterStartRow(this._welcomeLines.length, this.terminalHeight(), footerHeight, compact);
+		const startRow = computeFooterStartRow(
+			this._welcomeLines.length,
+			this.terminalHeight(),
+			footerHeight,
+			this.currentTranscriptDisplayRows(),
+		);
 		const oldStartRow = this._renderedFooterStartRow;
 		const oldHeight = this._renderedFooterUi?.lines.length ?? 0;
 		if (oldStartRow !== null && oldStartRow !== startRow) {
@@ -1126,7 +1149,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this.writeAbsoluteTerminalLine(oldStartRow + index, "");
 			}
 		}
-		if (!compact) {
+		if (startRow === Math.max(1, this.terminalHeight() - footerHeight + 1)) {
 			this.applyTranscriptViewport(footerHeight);
 		}
 		for (let index = 0; index < footerHeight; index += 1) {
@@ -1215,6 +1238,14 @@ class InteractiveModeHandler implements ModeHandler {
 		this._renderedFooterUi = null;
 		this._renderedFooterStartRow = null;
 		this._streamingReservedRows = 0;
+		this._renderedStreamingStartRow = null;
+		this._streamingDisplayRows =
+			this._assistantBuffer.length > 0
+				? countRenderedTerminalRows(
+						wrapTranscriptContent(formatTranscriptAssistantLine(this._assistantBuffer), this.terminalWidth()),
+						this.terminalWidth(),
+					)
+				: 0;
 		this.renderTranscriptViewport();
 		this.renderFooterRegion();
 		if (this._assistantBuffer.length > 0) {
@@ -1223,18 +1254,25 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderTranscriptViewport(): void {
-		if (this.shouldUseCompactFooterLayout()) {
-			return;
-		}
 		const footerUi = this.buildFooterUi();
 		const transcriptTopRow = this._welcomeLines.length + 1;
-		const transcriptBottomRow = this.transcriptBottomRow(footerUi.lines.length);
+		const transcriptBottomRow =
+			computeFooterStartRow(
+				this._welcomeLines.length,
+				this.terminalHeight(),
+				footerUi.lines.length,
+				this.currentTranscriptDisplayRows(),
+			) - 1;
 		const availableRows = Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
 		const visibleLines = computeVisibleTranscriptLines(this._transcriptBlocks, this.terminalWidth(), availableRows);
 		for (let row = transcriptTopRow; row <= transcriptBottomRow; row += 1) {
 			const index = row - transcriptTopRow;
 			this.writeAbsoluteTerminalLine(row, fitTerminalLine(visibleLines[index] ?? "", this.terminalWidth()));
 		}
+	}
+
+	private currentTranscriptDisplayRows(): number {
+		return computeTranscriptDisplayRows(this._transcriptBlocks, this.terminalWidth()) + this._streamingDisplayRows;
 	}
 }
 
@@ -1985,16 +2023,15 @@ export function computeVisibleTranscriptLines(
 	if (maxRows <= 0 || blocks.length === 0) {
 		return [];
 	}
-	const flattened: string[] = [];
-	for (const block of blocks) {
-		for (const logicalLine of block.split("\n")) {
-			flattened.push(...wrapTranscriptContent(logicalLine, width));
-		}
-	}
+	const flattened = flattenTranscriptLines(blocks, width);
 	if (flattened.length <= maxRows) {
 		return flattened;
 	}
 	return flattened.slice(flattened.length - maxRows);
+}
+
+export function computeTranscriptDisplayRows(blocks: readonly string[], width: number): number {
+	return flattenTranscriptLines(blocks, width).length;
 }
 
 export function materializeAssistantTranscriptBlock(buffer: string): string | null {
@@ -2008,10 +2045,23 @@ export function computeFooterStartRow(
 	welcomeLineCount: number,
 	terminalHeight: number,
 	footerHeight: number,
-	compact: boolean,
+	transcriptRows: number,
 ): number {
-	if (compact) {
-		return welcomeLineCount + 1;
+	const naturalStartRow = welcomeLineCount + 1 + Math.max(0, transcriptRows);
+	const bottomAnchoredStartRow = Math.max(1, terminalHeight - footerHeight + 1);
+	return Math.min(naturalStartRow, bottomAnchoredStartRow);
+}
+
+function isFooterBottomAnchored(startRow: number, terminalHeight: number, footerHeight: number): boolean {
+	return startRow === Math.max(1, terminalHeight - footerHeight + 1);
+}
+
+function flattenTranscriptLines(blocks: readonly string[], width: number): string[] {
+	const flattened: string[] = [];
+	for (const block of blocks) {
+		for (const logicalLine of block.split("\n")) {
+			flattened.push(...wrapTranscriptContent(logicalLine, width));
+		}
 	}
-	return Math.max(1, terminalHeight - footerHeight + 1);
+	return flattened;
 }

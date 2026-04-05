@@ -126,6 +126,14 @@ class VirtualScreen {
 	}
 }
 
+function findLineIndexContaining(snapshot: string, needle: string): number {
+	return snapshot.split("\n").findIndex((line) => line.includes(needle));
+}
+
+function countOccurrences(snapshot: string, needle: string): number {
+	return snapshot.split(needle).length - 1;
+}
+
 class FakeInteractiveSession implements SessionFacade {
 	readonly id = { value: "tty-test-session" };
 	readonly state = {
@@ -272,6 +280,33 @@ class FakeInteractiveSession implements SessionFacade {
 			content: "Current directory: /tmp",
 		} as RuntimeEvent);
 	}
+
+	queueMultiChunkHello(): void {
+		this.prompt = async (input: string): Promise<void> => {
+			if (input === "hello") {
+				this.emit({
+					id: "thinking-1",
+					timestamp: Date.now(),
+					sessionId: this.id,
+					category: "text",
+					type: "thinking_delta",
+					content: "...",
+				} as RuntimeEvent);
+				for (const [index, chunk] of ["Hi", "Hi from", "Hi from Genesis"].entries()) {
+					this.emit({
+						id: `text-chunk-${index}`,
+						timestamp: Date.now(),
+						sessionId: this.id,
+						category: "text",
+						type: "text_delta",
+						content: chunk,
+					} as RuntimeEvent);
+				}
+				return;
+			}
+			return FakeInteractiveSession.prototype.prompt.call(this, input);
+		};
+	}
 }
 
 function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
@@ -339,9 +374,35 @@ describe("interactive workbench TTY", () => {
 			input.write("hello\r");
 
 			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
-			expect(screen.snapshot()).toContain("hello");
-			expect(screen.snapshot()).toContain("Hi from Genesis");
-			expect(screen.snapshot()).toContain("❯");
+			const snapshot = screen.snapshot();
+			expect(snapshot).toContain("hello");
+			expect(snapshot).toContain("Hi from Genesis");
+			expect(snapshot).toContain("❯");
+			const assistantLine = findLineIndexContaining(snapshot, "Hi from Genesis");
+			const footerSeparatorLine = findLineIndexContaining(snapshot, "────────────────");
+			expect(footerSeparatorLine - assistantLine).toBeLessThanOrEqual(2);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("does not leave duplicate assistant lines behind across streaming updates", async () => {
+		const session = new FakeInteractiveSession();
+		session.queueMultiChunkHello();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("hello\r");
+
+			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
+			const snapshot = screen.snapshot();
+			expect(countOccurrences(snapshot, "⏺ Hi from Genesis")).toBe(1);
 
 			input.write("/exit\r");
 			await startPromise;

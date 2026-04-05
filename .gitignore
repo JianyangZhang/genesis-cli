@@ -7,6 +7,7 @@ dist/
 .env.*
 !.env.example
 .genesis-local/
+.tmp-tests/
 coverage/
 *.log
 vitest.config.js
