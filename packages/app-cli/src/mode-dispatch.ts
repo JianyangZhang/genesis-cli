@@ -881,7 +881,12 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderWelcome(session: SessionFacade): void {
-		this._welcomeLines = buildWelcomeLines(session, process.stdout.columns ?? 80);
+		this._welcomeLines = buildWelcomeLines({
+			terminalWidth: process.stdout.columns ?? 80,
+			version: process.env.npm_package_version ?? "dev",
+			model: session.state.model.displayName ?? session.state.model.id,
+			provider: session.state.model.provider,
+		});
 		process.stdout.write(`${this._welcomeLines.join("\n")}\n`);
 	}
 
@@ -1094,11 +1099,23 @@ class InteractiveModeHandler implements ModeHandler {
 		return this._renderedFooterUi?.lines.length ?? this.buildFooterUi().lines.length;
 	}
 
+	private shouldUseCompactFooterLayout(): boolean {
+		return (
+			this._transcriptBlocks.length === 0 &&
+			this._assistantBuffer.length === 0 &&
+			this._pendingPermissionCallId === null &&
+			this._pendingPermissionDetails === null
+		);
+	}
+
 	private renderFooterRegion(): void {
 		const ui = this.buildFooterUi();
 		const footerHeight = ui.lines.length;
-		const startRow = this.transcriptBottomRow(footerHeight) + 1;
-		this.applyTranscriptViewport(footerHeight);
+		const compact = this.shouldUseCompactFooterLayout();
+		const startRow = compact ? this._welcomeLines.length + 1 : this.transcriptBottomRow(footerHeight) + 1;
+		if (!compact) {
+			this.applyTranscriptViewport(footerHeight);
+		}
 		for (let index = 0; index < footerHeight; index += 1) {
 			const row = startRow + index;
 			const line = fitTerminalLine(ui.lines[index] ?? "", this.terminalWidth());
@@ -1195,6 +1212,9 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderTranscriptViewport(): void {
+		if (this.shouldUseCompactFooterLayout()) {
+			return;
+		}
 		const footerUi = this.buildFooterUi();
 		const transcriptTopRow = this._welcomeLines.length + 1;
 		const transcriptBottomRow = this.transcriptBottomRow(footerUi.lines.length);
@@ -1322,21 +1342,27 @@ function stripAnsiWelcome(text: string): string {
 	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
 }
 
-function buildWelcomeLines(session: SessionFacade, terminalWidth: number): readonly string[] {
-	const width = Math.max(60, Math.min(terminalWidth, 100));
+function applyWelcomeBackground(text: string): string {
+	return `${INTERACTIVE_THEME.welcomeBg}${text.replaceAll(INTERACTIVE_THEME.reset, `${INTERACTIVE_THEME.reset}${INTERACTIVE_THEME.welcomeBg}`)}${INTERACTIVE_THEME.reset}`;
+}
+
+export function buildWelcomeLines(input: {
+	terminalWidth: number;
+	version: string;
+	model: string;
+	provider: string;
+}): readonly string[] {
+	const width = Math.max(60, Math.min(input.terminalWidth, 100));
 	const DIM = INTERACTIVE_THEME.muted;
 	const RESET = INTERACTIVE_THEME.reset;
 	const GREEN = INTERACTIVE_THEME.success;
 	const CYAN = INTERACTIVE_THEME.brand;
 	const BOLD = INTERACTIVE_THEME.bold;
-	const model = session.state.model.displayName ?? session.state.model.id;
-	const provider = session.state.model.provider;
-	const version = process.env.npm_package_version ?? "dev";
 	const contentWidth = width - 2;
 	const center = (text: string): string => formatWelcomeCenteredLine(contentWidth, text);
 	const fill = (text = ""): string => formatWelcomeFilledLine(contentWidth, text);
 	return [
-		formatWelcomeTopBorder(width, version),
+		formatWelcomeTopBorder(width, input.version),
 		fill(),
 		center(`${BOLD}Welcome back!${RESET}`),
 		fill(),
@@ -1344,7 +1370,7 @@ function buildWelcomeLines(session: SessionFacade, terminalWidth: number): reado
 		center(`${CYAN}      ──╂──      ${RESET}`),
 		center(`${DIM}        ${CYAN}│${RESET}        ${RESET}`),
 		fill(),
-		center(`${CYAN}${model}${RESET} ${DIM}via${RESET} ${provider}`),
+		center(`${CYAN}${input.model}${RESET} ${DIM}via${RESET} ${input.provider}`),
 		formatWelcomeBottomBorder(width),
 		`${DIM}Start:${RESET} type a prompt and press Enter  ${DIM}Help:${RESET} /help  ${DIM}Scroll:${RESET} wheel/PageUp/PageDown`,
 	];
@@ -1353,17 +1379,17 @@ function buildWelcomeLines(session: SessionFacade, terminalWidth: number): reado
 export function formatWelcomeTopBorder(width: number, version: string): string {
 	const label = `╭─── ${INTERACTIVE_THEME.bold}${INTERACTIVE_THEME.brand}Genesis CLI${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.muted}v${version}${INTERACTIVE_THEME.reset} `;
 	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(label));
-	return `${label}${"─".repeat(Math.max(0, width - plainWidth - 1))}╮`;
+	return applyWelcomeBackground(`${label}${"─".repeat(Math.max(0, width - plainWidth - 1))}╮`);
 }
 
 export function formatWelcomeBottomBorder(width: number): string {
-	return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
+	return applyWelcomeBackground(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
 }
 
 export function formatWelcomeFilledLine(contentWidth: number, text = ""): string {
 	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(text));
 	const padding = Math.max(0, contentWidth - plainWidth);
-	return `│${INTERACTIVE_THEME.welcomeBg}${text}${" ".repeat(padding)}${INTERACTIVE_THEME.reset}│`;
+	return applyWelcomeBackground(`│${text}${" ".repeat(padding)}│`);
 }
 
 export function formatWelcomeCenteredLine(contentWidth: number, text: string): string {
@@ -1371,7 +1397,7 @@ export function formatWelcomeCenteredLine(contentWidth: number, text: string): s
 	const padding = Math.max(0, contentWidth - plainWidth);
 	const left = Math.floor(padding / 2);
 	const right = padding - left;
-	return `│${INTERACTIVE_THEME.welcomeBg}${" ".repeat(left)}${text}${" ".repeat(right)}${INTERACTIVE_THEME.reset}│`;
+	return applyWelcomeBackground(`│${" ".repeat(left)}${text}${" ".repeat(right)}│`);
 }
 
 export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {

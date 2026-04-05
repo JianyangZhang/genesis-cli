@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
+	buildWelcomeLines,
 	computeFooterCursorColumn,
 	computeFooterCursorRowsFromEnd,
 	computeFooterCursorRowsUp,
@@ -8,6 +9,7 @@ import {
 	computeInteractiveFooterSeparatorWidth,
 	computePromptCursorRowsUp,
 	computeSlashSuggestions,
+	computeVisibleTranscriptLines,
 	countRenderedTerminalRows,
 	formatInteractiveFooter,
 	formatInteractiveInputSeparator,
@@ -103,9 +105,13 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("keeps the welcome bottom border aligned to the requested width", () => {
-		expect(formatWelcomeBottomBorder(40)).toHaveLength(40);
-		expect(formatWelcomeBottomBorder(40).startsWith("╰")).toBe(true);
-		expect(formatWelcomeBottomBorder(40).endsWith("╯")).toBe(true);
+		const visible = formatWelcomeBottomBorder(40).replace(
+			new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"),
+			"",
+		);
+		expect(visible).toHaveLength(40);
+		expect(visible.startsWith("╰")).toBe(true);
+		expect(visible.endsWith("╯")).toBe(true);
 	});
 
 	it("keeps welcome body rows aligned to the frame width", () => {
@@ -115,8 +121,20 @@ describe("interactive transcript formatting", () => {
 		const centeredVisible = centered.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
 		expect(filledVisible).toHaveLength(40);
 		expect(centeredVisible).toHaveLength(40);
-		expect(filled.startsWith("│")).toBe(true);
-		expect(centered.endsWith("│")).toBe(true);
+		expect(filledVisible.startsWith("│")).toBe(true);
+		expect(centeredVisible.endsWith("│")).toBe(true);
+	});
+
+	it("builds welcome lines without the cwd and keeps a spacer before the model line", () => {
+		const lines = buildWelcomeLines({
+			terminalWidth: 80,
+			version: "0.0.0",
+			model: "GLM 5.1",
+			provider: "zai",
+		});
+		expect(lines.some((line) => line.includes("/Users/"))).toBe(false);
+		expect(lines[7]).toContain("│");
+		expect(lines[8]).toContain("GLM 5.1");
 	});
 
 	it("suppresses session lifecycle events", () => {
@@ -175,6 +193,11 @@ describe("interactive transcript formatting", () => {
 	it("wraps transcript content for streaming redraw", () => {
 		expect(wrapTranscriptContent("abcdef", 3)).toEqual(["abc", "def"]);
 		expect(wrapTranscriptContent("你好吗", 4)).toEqual(["你好", "吗"]);
+	});
+
+	it("keeps only the visible transcript tail for full-screen redraw", () => {
+		expect(computeVisibleTranscriptLines(["one\ntwo", "three", "four"], 10, 2)).toEqual(["three", "four"]);
+		expect(computeVisibleTranscriptLines(["abcdef"], 3, 2)).toEqual(["abc", "def"]);
 	});
 
 	it("counts rendered footer rows after terminal resize", () => {
