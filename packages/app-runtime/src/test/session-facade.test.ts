@@ -637,6 +637,397 @@ describe("SessionFacade", () => {
 			"tool_completed",
 		]);
 	});
+
+	it("reuses allow_for_session approval for write on the same file within the session", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["write"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["write"]),
+		});
+		const governor = createToolGovernor();
+		const recordedApprovals: Parameters<typeof governor.recordSessionApproval>[0][] = [];
+		const originalRecordSessionApproval = governor.recordSessionApproval.bind(governor);
+		governor.recordSessionApproval = (entry) => {
+			recordedApprovals.push(entry);
+			originalRecordSessionApproval(entry);
+		};
+		governor.catalog.register({
+			identity: { name: "write", category: "file-mutation" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L3",
+				readOnly: false,
+				concurrency: "per_target",
+				confirmation: "always",
+				subAgentAllowed: true,
+				timeoutMs: 60_000,
+			},
+			executorTag: "write",
+		});
+		adapter.enqueueEventsForPrompt("write once", [
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "write",
+					toolCallId: "write_1",
+					parameters: { file_path: "/tmp/.tmp-tests/one.txt", content: "hello" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: { toolName: "write", toolCallId: "write_1", status: "success", durationMs: 20 },
+			},
+		]);
+		adapter.enqueueEventsForPrompt("write twice", [
+			{
+				type: "tool_execution_start",
+				timestamp: 3000,
+				payload: {
+					toolName: "write",
+					toolCallId: "write_2",
+					parameters: { file_path: "/tmp/.tmp-tests/one.txt", content: "world" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 4000,
+				payload: { toolName: "write", toolCallId: "write_2", status: "success", durationMs: 20 },
+			},
+		]);
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+		const received: RuntimeEvent[] = [];
+		globalBus.onCategory("permission", (event) => received.push(event));
+		globalBus.onCategory("tool", (event) => received.push(event));
+
+		const firstPrompt = facade.prompt("write once");
+		await new Promise((r) => setTimeout(r, 0));
+		await facade.resolvePermission("write_1", "allow_for_session");
+		await firstPrompt;
+
+		expect(recordedApprovals[0]).toMatchObject({
+			toolName: "write",
+			riskLevel: "L3",
+			targetPattern: "/tmp/**",
+		});
+		const writeDecision = governor.beforeExecution({
+			sessionId: stubId.value,
+			toolName: "write",
+			toolCallId: "write_probe",
+			workingDirectory: "/tmp",
+			sessionMode: "print",
+			isSubAgent: false,
+			targetPath: "/tmp/.tmp-tests/one.txt",
+			parameters: { file_path: "/tmp/.tmp-tests/one.txt", content: "world" },
+		});
+		expect(writeDecision).toMatchObject({ type: "allow" });
+
+		const eventsAfterFirstPrompt = received.length;
+		await facade.prompt("write twice");
+
+		expect(received.slice(eventsAfterFirstPrompt).map((event) => event.type)).toEqual([
+			"tool_started",
+			"tool_completed",
+		]);
+	});
+
+	it("reuses allow_for_session approval for edit on the same file within the session", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["edit"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["edit"]),
+		});
+		const governor = createToolGovernor();
+		governor.catalog.register({
+			identity: { name: "edit", category: "file-mutation" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L3",
+				readOnly: false,
+				concurrency: "per_target",
+				confirmation: "always",
+				subAgentAllowed: true,
+				timeoutMs: 60_000,
+			},
+			executorTag: "edit",
+		});
+		adapter.enqueueEventsForPrompt("edit once", [
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "edit",
+					toolCallId: "edit_1",
+					parameters: {
+						file_path: "/tmp/.tmp-tests/two.txt",
+						old_string: "before",
+						new_string: "after",
+					},
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: { toolName: "edit", toolCallId: "edit_1", status: "success", durationMs: 20 },
+			},
+		]);
+		adapter.enqueueEventsForPrompt("edit twice", [
+			{
+				type: "tool_execution_start",
+				timestamp: 3000,
+				payload: {
+					toolName: "edit",
+					toolCallId: "edit_2",
+					parameters: {
+						file_path: "/tmp/.tmp-tests/two.txt",
+						old_string: "after",
+						new_string: "final",
+					},
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 4000,
+				payload: { toolName: "edit", toolCallId: "edit_2", status: "success", durationMs: 20 },
+			},
+		]);
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+		const received: RuntimeEvent[] = [];
+		globalBus.onCategory("permission", (event) => received.push(event));
+		globalBus.onCategory("tool", (event) => received.push(event));
+
+		const firstPrompt = facade.prompt("edit once");
+		await new Promise((r) => setTimeout(r, 0));
+		await facade.resolvePermission("edit_1", "allow_for_session");
+		await firstPrompt;
+
+		expect(
+			governor.beforeExecution({
+				sessionId: stubId.value,
+				toolName: "edit",
+				toolCallId: "edit_probe",
+				workingDirectory: "/tmp",
+				sessionMode: "print",
+				isSubAgent: false,
+				targetPath: "/tmp/.tmp-tests/two.txt",
+				parameters: {
+					file_path: "/tmp/.tmp-tests/two.txt",
+					old_string: "after",
+					new_string: "final",
+				},
+			}).type,
+		).toBe("allow");
+
+		const eventsAfterFirstPrompt = received.length;
+		await facade.prompt("edit twice");
+
+		expect(received.slice(eventsAfterFirstPrompt).map((event) => event.type)).toEqual([
+			"tool_started",
+			"tool_completed",
+		]);
+	});
+
+	it("reuses allow_for_session approval for another file under the same working directory", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["write"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["write"]),
+		});
+		const governor = createToolGovernor();
+		governor.catalog.register({
+			identity: { name: "write", category: "file-mutation" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L3",
+				readOnly: false,
+				concurrency: "per_target",
+				confirmation: "always",
+				subAgentAllowed: true,
+				timeoutMs: 60_000,
+			},
+			executorTag: "write",
+		});
+		adapter.enqueueEventsForPrompt("write first file", [
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "write",
+					toolCallId: "write_a",
+					parameters: { file_path: "/tmp/.tmp-tests/a.txt", content: "hello" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: { toolName: "write", toolCallId: "write_a", status: "success", durationMs: 20 },
+			},
+		]);
+		adapter.enqueueEventsForPrompt("write second file", [
+			{
+				type: "tool_execution_start",
+				timestamp: 3000,
+				payload: {
+					toolName: "write",
+					toolCallId: "write_b",
+					parameters: { file_path: "/tmp/.tmp-tests/b.txt", content: "world" },
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 4000,
+				payload: { toolName: "write", toolCallId: "write_b", status: "success", durationMs: 20 },
+			},
+		]);
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+		const received: RuntimeEvent[] = [];
+		globalBus.onCategory("permission", (event) => received.push(event));
+		globalBus.onCategory("tool", (event) => received.push(event));
+
+		const firstPrompt = facade.prompt("write first file");
+		await new Promise((r) => setTimeout(r, 0));
+		await facade.resolvePermission("write_a", "allow_for_session");
+		await firstPrompt;
+
+		expect(
+			governor.beforeExecution({
+				sessionId: stubId.value,
+				toolName: "write",
+				toolCallId: "write_probe_b",
+				workingDirectory: "/tmp",
+				sessionMode: "print",
+				isSubAgent: false,
+				targetPath: "/tmp/.tmp-tests/b.txt",
+				parameters: { file_path: "/tmp/.tmp-tests/b.txt", content: "world" },
+			}).type,
+		).toBe("allow");
+
+		const eventsAfterFirstPrompt = received.length;
+		await facade.prompt("write second file");
+		expect(received.slice(eventsAfterFirstPrompt).map((event) => event.type)).toEqual([
+			"tool_started",
+			"tool_completed",
+		]);
+	});
+
+	it("asks again when the same tool targets a different directory outside the session scope", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["edit"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp/project",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["edit"]),
+		});
+		const governor = createToolGovernor();
+		governor.catalog.register({
+			identity: { name: "edit", category: "file-mutation" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L3",
+				readOnly: false,
+				concurrency: "per_target",
+				confirmation: "always",
+				subAgentAllowed: true,
+				timeoutMs: 60_000,
+			},
+			executorTag: "edit",
+		});
+		adapter.enqueueEventsForPrompt("edit external one", [
+			{
+				type: "tool_execution_start",
+				timestamp: 1000,
+				payload: {
+					toolName: "edit",
+					toolCallId: "edit_external_1",
+					parameters: {
+						file_path: "/opt/tmp-tests/a.txt",
+						old_string: "before",
+						new_string: "after",
+					},
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 2000,
+				payload: { toolName: "edit", toolCallId: "edit_external_1", status: "success", durationMs: 20 },
+			},
+		]);
+		adapter.enqueueEventsForPrompt("edit external two", [
+			{
+				type: "tool_execution_start",
+				timestamp: 3000,
+				payload: {
+					toolName: "edit",
+					toolCallId: "edit_external_2",
+					parameters: {
+						file_path: "/var/tmp-tests/b.txt",
+						old_string: "before",
+						new_string: "after",
+					},
+				},
+			},
+			{
+				type: "tool_execution_end",
+				timestamp: 4000,
+				payload: { toolName: "edit", toolCallId: "edit_external_2", status: "success", durationMs: 20 },
+			},
+		]);
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, governor);
+		const received: RuntimeEvent[] = [];
+		globalBus.onCategory("permission", (event) => received.push(event));
+		globalBus.onCategory("tool", (event) => received.push(event));
+
+		const firstPrompt = facade.prompt("edit external one");
+		await new Promise((r) => setTimeout(r, 0));
+		await facade.resolvePermission("edit_external_1", "allow_for_session");
+		await firstPrompt;
+
+		const eventsAfterFirstPrompt = received.length;
+		const secondPrompt = facade.prompt("edit external two");
+		await new Promise((r) => setTimeout(r, 0));
+		expect(received.slice(eventsAfterFirstPrompt).map((event) => event.type)).toEqual(["permission_requested"]);
+		await facade.resolvePermission("edit_external_2", "deny");
+		await secondPrompt;
+	});
 });
 
 // ---------------------------------------------------------------------------

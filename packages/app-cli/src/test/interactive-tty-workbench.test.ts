@@ -378,8 +378,10 @@ describe("interactive workbench TTY", () => {
 			expect(snapshot).toContain("hello");
 			expect(snapshot).toContain("Hi from Genesis");
 			expect(snapshot).toContain("❯");
+			const userLine = findLineIndexContaining(snapshot, "hello");
 			const assistantLine = findLineIndexContaining(snapshot, "Hi from Genesis");
 			const footerSeparatorLine = findLineIndexContaining(snapshot, "────────────────");
+			expect(assistantLine - userLine).toBeGreaterThanOrEqual(2);
 			expect(footerSeparatorLine - assistantLine).toBeLessThanOrEqual(2);
 
 			input.write("/exit\r");

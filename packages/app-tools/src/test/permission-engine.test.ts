@@ -211,6 +211,27 @@ describe("PermissionEngine", () => {
 			);
 			expect(decision.verdict).toBe("ask_user");
 		});
+
+		it("directory approval covers files under that directory", () => {
+			const engine = createPermissionEngine();
+			engine.recordApproval({
+				sessionId: "session-1",
+				toolName: "test_tool",
+				riskLevel: "L3",
+				targetPattern: "/project/src/**",
+				verdict: "allow_for_session",
+				grantedAt: Date.now(),
+			});
+
+			const decision = engine.evaluate(
+				createContext({
+					toolPolicy: createPolicy({ riskLevel: "L3" }),
+					targetPath: "/project/src/nested/main.ts",
+				}),
+			);
+
+			expect(decision.verdict).toBe("allow");
+		});
 	});
 
 	describe("cache key granularity", () => {
@@ -235,13 +256,13 @@ describe("PermissionEngine", () => {
 			expect(decision.verdict).toBe("ask_user");
 		});
 
-		it("L3 approval for target A does not auto-allow target B", () => {
+		it("directory-scoped approval does not auto-allow a different directory", () => {
 			const engine = createPermissionEngine();
 			engine.recordApproval({
 				sessionId: "session-1",
 				toolName: "test_tool",
 				riskLevel: "L3",
-				targetPattern: "/project/a.ts",
+				targetPattern: "/project/a/**",
 				verdict: "allow_for_session",
 				grantedAt: Date.now(),
 			});
@@ -249,7 +270,7 @@ describe("PermissionEngine", () => {
 			const decision = engine.evaluate(
 				createContext({
 					toolPolicy: createPolicy({ riskLevel: "L3" }),
-					targetPath: "/project/b.ts",
+					targetPath: "/project/b/file.ts",
 				}),
 			);
 

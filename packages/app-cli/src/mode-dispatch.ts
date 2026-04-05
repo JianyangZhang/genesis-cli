@@ -982,7 +982,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
 		if (assistantBlock !== null) {
-			this.rememberTranscriptBlock(assistantBlock, true);
+			this.rememberAssistantTranscriptBlock(assistantBlock);
 		}
 		this._assistantBuffer = "";
 		this._streamingReservedRows = 0;
@@ -1220,6 +1220,12 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this._transcriptBlocks.push(block);
+	}
+
+	private rememberAssistantTranscriptBlock(block: string): void {
+		const nextBlocks = appendAssistantTranscriptBlock(this._transcriptBlocks, block);
+		this._transcriptBlocks.length = 0;
+		this._transcriptBlocks.push(...nextBlocks);
 	}
 
 	private fullRedrawInteractiveScreen(): void {
@@ -2041,6 +2047,14 @@ export function materializeAssistantTranscriptBlock(buffer: string): string | nu
 	return formatTranscriptAssistantLine(buffer);
 }
 
+export function appendAssistantTranscriptBlock(blocks: readonly string[], assistantBlock: string): readonly string[] {
+	const lastNonEmptyBlock = [...blocks].reverse().find((block) => block.length > 0);
+	if (lastNonEmptyBlock && isTranscriptUserBlock(lastNonEmptyBlock)) {
+		return [...blocks, "", assistantBlock];
+	}
+	return [...blocks, assistantBlock];
+}
+
 export function computeFooterStartRow(
 	welcomeLineCount: number,
 	terminalHeight: number,
@@ -2064,4 +2078,8 @@ function flattenTranscriptLines(blocks: readonly string[], width: number): strin
 		}
 	}
 	return flattened;
+}
+
+function isTranscriptUserBlock(block: string): boolean {
+	return block.startsWith(`${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.userTranscriptFg} `);
 }

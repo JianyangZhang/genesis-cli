@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
+	appendAssistantTranscriptBlock,
 	buildWelcomeLines,
 	computeFooterCursorColumn,
 	computeFooterCursorRowsFromEnd,
@@ -228,6 +229,18 @@ describe("interactive transcript formatting", () => {
 	it("materializes the final assistant transcript block before redraw clears the buffer", () => {
 		expect(materializeAssistantTranscriptBlock("hello")).toBe(formatTranscriptAssistantLine("hello"));
 		expect(materializeAssistantTranscriptBlock("")).toBeNull();
+	});
+
+	it("inserts a spacer row between a user block and the next assistant block", () => {
+		expect(
+			appendAssistantTranscriptBlock([formatTranscriptUserLine("Hello")], formatTranscriptAssistantLine("World")),
+		).toEqual([formatTranscriptUserLine("Hello"), "", formatTranscriptAssistantLine("World")]);
+		expect(
+			appendAssistantTranscriptBlock(
+				[formatTranscriptAssistantLine("Before")],
+				formatTranscriptAssistantLine("After"),
+			),
+		).toEqual([formatTranscriptAssistantLine("Before"), formatTranscriptAssistantLine("After")]);
 	});
 
 	it("keeps only the visible transcript tail for full-screen redraw", () => {

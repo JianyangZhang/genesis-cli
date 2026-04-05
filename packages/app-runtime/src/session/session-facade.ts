@@ -9,6 +9,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { dirname, normalize as nodeNormalize } from "node:path";
 import type { KernelSessionAdapter, ToolExecutionGateDecision } from "../adapters/kernel-session-adapter.js";
 import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
@@ -265,7 +266,11 @@ export class SessionFacadeImpl implements SessionFacade {
 				sessionId: this._state.id.value,
 				toolName: pending.toolName,
 				riskLevel: pending.riskLevel as "L0" | "L1" | "L2" | "L3" | "L4",
-				targetPattern: pending.targetPath ?? "*",
+				targetPattern: computeSessionApprovalTargetPattern(
+					pending.toolName,
+					pending.targetPath,
+					this._context.workingDirectory,
+				),
 				commandDigest: pending.commandDigest,
 				verdict: "allow_for_session",
 				grantedAt: Date.now(),
@@ -533,6 +538,13 @@ function extractTargetPath(parameters: Readonly<Record<string, unknown>> | undef
 		return parameters.path;
 	}
 
+	if (Array.isArray(parameters.file_paths)) {
+		const firstPath = parameters.file_paths.find((value) => typeof value === "string" && value.length > 0);
+		if (typeof firstPath === "string") {
+			return firstPath;
+		}
+	}
+
 	return undefined;
 }
 
@@ -542,4 +554,30 @@ function extractCommandDigest(parameters: Readonly<Record<string, unknown>> | un
 		return undefined;
 	}
 	return `sha256:${createHash("sha256").update(command).digest("hex")}`;
+}
+
+function computeSessionApprovalTargetPattern(
+	toolName: string,
+	targetPath: string | undefined,
+	workingDirectory: string,
+): string {
+	if (toolName === "write" || toolName === "edit") {
+		const normalizedWorkingDirectory = nodeNormalize(workingDirectory);
+		if (!targetPath) {
+			return `${normalizedWorkingDirectory}/**`;
+		}
+		const normalizedTarget = nodeNormalize(targetPath);
+		if (
+			normalizedTarget === normalizedWorkingDirectory ||
+			normalizedTarget.startsWith(`${normalizedWorkingDirectory}/`)
+		) {
+			return `${normalizedWorkingDirectory}/**`;
+		}
+		return `${dirname(normalizedTarget)}/**`;
+	}
+	if (!targetPath) {
+		return "*";
+	}
+	const normalizedTarget = nodeNormalize(targetPath);
+	return normalizedTarget;
 }

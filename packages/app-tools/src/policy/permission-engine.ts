@@ -11,9 +11,11 @@
  * The engine does NOT interact with the user — it returns "ask_user"
  * when user input is needed. The runtime layer handles the actual prompt.
  *
- * Cache key is a 4-tuple: toolName:riskLevel:normalizedTargetPath:commandDigest.
- * For L2+, only an exact match on all four components grants auto-allow.
- * This prevents cross-risk-level escalation and cross-command wildcard approval.
+ * Session approvals are scoped by tool + risk level, then matched against either:
+ *   - an exact command digest for command-execution tools, or
+ *   - an exact path / directory pattern for filesystem tools.
+ * This prevents cross-risk-level escalation while still allowing session-scoped
+ * directory approvals for file mutations.
  */
 
 import { normalize as nodeNormalize } from "node:path";
@@ -78,9 +80,10 @@ export function createPermissionEngine(): PermissionEngine {
 				return { verdict: "allow", riskLevel, reason: "Low-risk, logged" };
 			}
 
-			// --- Check session approval cache (exact match only for L2+) ---
-			const key = cacheKey(sessionId, toolIdentity.name, riskLevel, targetPath, commandDigest);
-			const cached = approvals.get(key);
+			// --- Check session approval cache ---
+			const cached = [...approvals.values()].find((entry) =>
+				matchesApproval(entry, sessionId, toolIdentity.name, riskLevel, targetPath, commandDigest),
+			);
 			if (cached) {
 				return { verdict: "allow", riskLevel, reason: "Session-approved" };
 			}
@@ -121,4 +124,43 @@ export function createPermissionEngine(): PermissionEngine {
 			approvals.clear();
 		},
 	};
+}
+
+function matchesApproval(
+	entry: ApprovalCacheEntry,
+	sessionId: string,
+	toolName: string,
+	riskLevel: RiskLevel,
+	targetPath: string | undefined,
+	commandDigest: string | undefined,
+): boolean {
+	return (
+		entry.sessionId === sessionId &&
+		entry.toolName === toolName &&
+		entry.riskLevel === riskLevel &&
+		matchesTargetPattern(entry.targetPattern, targetPath) &&
+		matchesCommandDigest(entry.commandDigest, commandDigest)
+	);
+}
+
+function matchesTargetPattern(targetPattern: string, targetPath: string | undefined): boolean {
+	if (targetPath === undefined) {
+		return targetPattern === "*";
+	}
+	if (targetPattern === "*") {
+		return false;
+	}
+	const normalizedTarget = nodeNormalize(targetPath);
+	if (targetPattern.endsWith("/**")) {
+		const normalizedPrefix = nodeNormalize(targetPattern.slice(0, -3));
+		return normalizedTarget === normalizedPrefix || normalizedTarget.startsWith(`${normalizedPrefix}/`);
+	}
+	return normalizedTarget === nodeNormalize(targetPattern);
+}
+
+function matchesCommandDigest(expected: string | undefined, actual: string | undefined): boolean {
+	if (expected === undefined) {
+		return actual === undefined;
+	}
+	return expected === actual;
 }

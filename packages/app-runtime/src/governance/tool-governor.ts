@@ -102,6 +102,7 @@ export function createToolGovernor(): ToolGovernor {
 	const mutations = createMutationQueue();
 	const audit = createAuditLog();
 	const activeExecutions = new Map<string, { toolName: string; targetPath?: string; riskLevel: RiskLevel }>();
+	const sessionApprovals: ApprovalCacheEntry[] = [];
 
 	function deriveCommandDigest(
 		parameters: Readonly<Record<string, unknown>> | undefined,
@@ -179,6 +180,12 @@ export function createToolGovernor(): ToolGovernor {
 			const effectiveRiskLevel =
 				typeof command === "string" && isDestructiveCommand(command) ? "L4" : classifyRisk(toolDef, parameters);
 			const effectiveCommandDigest = deriveCommandDigest(parameters, commandDigest);
+			const matchingSessionApproval = sessionApprovals.find((entry) =>
+				matchesSessionApproval(entry, sessionId, toolName, effectiveRiskLevel, targetPath, effectiveCommandDigest),
+			);
+			if (matchingSessionApproval) {
+				return { type: "allow" };
+			}
 			const permContext: PermissionContext = {
 				sessionId,
 				toolIdentity: toolDef.identity,
@@ -264,6 +271,7 @@ export function createToolGovernor(): ToolGovernor {
 		},
 
 		recordSessionApproval(entry: ApprovalCacheEntry): void {
+			sessionApprovals.push(entry);
 			permissions.recordApproval(entry);
 		},
 
@@ -283,4 +291,42 @@ export function createToolGovernor(): ToolGovernor {
 			return audit;
 		},
 	};
+}
+
+function matchesSessionApproval(
+	entry: ApprovalCacheEntry,
+	sessionId: string,
+	toolName: string,
+	riskLevel: RiskLevel,
+	targetPath: string | undefined,
+	commandDigest: string | undefined,
+): boolean {
+	return (
+		entry.sessionId === sessionId &&
+		entry.toolName === toolName &&
+		entry.riskLevel === riskLevel &&
+		matchesTargetPattern(entry.targetPattern, targetPath) &&
+		matchesCommandDigest(entry.commandDigest, commandDigest)
+	);
+}
+
+function matchesTargetPattern(targetPattern: string, targetPath: string | undefined): boolean {
+	if (targetPath === undefined) {
+		return targetPattern === "*";
+	}
+	if (targetPattern === "*") {
+		return false;
+	}
+	if (targetPattern.endsWith("/**")) {
+		const prefix = targetPattern.slice(0, -3);
+		return targetPath === prefix || targetPath.startsWith(`${prefix}/`);
+	}
+	return targetPath === targetPattern;
+}
+
+function matchesCommandDigest(expected: string | undefined, actual: string | undefined): boolean {
+	if (expected === undefined) {
+		return actual === undefined;
+	}
+	return expected === actual;
 }
