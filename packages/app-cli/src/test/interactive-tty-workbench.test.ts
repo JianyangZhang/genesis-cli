@@ -154,6 +154,7 @@ class FakeInteractiveSession implements SessionFacade {
 	private bashApprovedForSession = false;
 	private pendingPermission: {
 		callId: string;
+		toolName: string;
 		resolve: () => void;
 	} | null = null;
 
@@ -198,9 +199,43 @@ class FakeInteractiveSession implements SessionFacade {
 				riskLevel: "L3",
 			} as RuntimeEvent);
 			await new Promise<void>((resolve) => {
-				this.pendingPermission = { callId: "bash-pwd-1", resolve };
+				this.pendingPermission = { callId: "bash-pwd-1", toolName: "bash", resolve };
 			});
 			this.emitBashExecution("bash-pwd-1");
+			return;
+		}
+
+		if (input === "write file") {
+			this.emit({
+				id: "perm-write-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "permission",
+				type: "permission_requested",
+				toolName: "write",
+				toolCallId: "write-file-1",
+				riskLevel: "L3",
+			} as RuntimeEvent);
+			await new Promise<void>((resolve) => {
+				this.pendingPermission = { callId: "write-file-1", toolName: "write", resolve };
+			});
+			return;
+		}
+
+		if (input === "edit file") {
+			this.emit({
+				id: "perm-edit-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "permission",
+				type: "permission_requested",
+				toolName: "edit",
+				toolCallId: "edit-file-1",
+				riskLevel: "L3",
+			} as RuntimeEvent);
+			await new Promise<void>((resolve) => {
+				this.pendingPermission = { callId: "edit-file-1", toolName: "edit", resolve };
+			});
 			return;
 		}
 	}
@@ -220,16 +255,17 @@ class FakeInteractiveSession implements SessionFacade {
 		if (!this.pendingPermission || this.pendingPermission.callId !== callId) {
 			throw new Error(`Unexpected permission resolution: ${callId}`);
 		}
-		if (decision === "allow_for_session") {
+		if (decision === "allow_for_session" && this.pendingPermission.toolName === "bash") {
 			this.bashApprovedForSession = true;
 		}
+		const toolName = this.pendingPermission.toolName;
 		this.emit({
 			id: `resolved-${callId}`,
 			timestamp: Date.now(),
 			sessionId: this.id,
 			category: "permission",
 			type: "permission_resolved",
-			toolName: "bash",
+			toolName,
 			toolCallId: callId,
 			decision,
 		} as RuntimeEvent);
@@ -433,6 +469,39 @@ describe("interactive workbench TTY", () => {
 			input.write("bash pwd\r");
 			await waitFor(() => screen.snapshot().includes("Bash(pwd)"));
 			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("keeps the user prompt visible when write/edit permissions are requested", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("write file\r");
+			await waitFor(() => session.isWaitingForPermission());
+			await waitFor(() => screen.snapshot().includes("choice [Enter/1/2/3]>"));
+			expect(screen.snapshot()).toContain("write file");
+			expect(screen.snapshot()).toContain("Write");
+
+			input.write("3\r");
+			await waitFor(() => !screen.snapshot().includes("choice [Enter/1/2/3]>"));
+
+			input.write("edit file\r");
+			await waitFor(() => session.isWaitingForPermission());
+			await waitFor(() => screen.snapshot().includes("choice [Enter/1/2/3]>"));
+			expect(screen.snapshot()).toContain("edit file");
+			expect(screen.snapshot()).toContain("Edit");
+
+			input.write("3\r");
+			await waitFor(() => !screen.snapshot().includes("choice [Enter/1/2/3]>"));
 
 			input.write("/exit\r");
 			await startPromise;
