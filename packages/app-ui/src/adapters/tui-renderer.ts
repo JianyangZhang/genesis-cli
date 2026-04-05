@@ -40,6 +40,7 @@ export function renderScreen(layout: TuiScreenLayout, terminalWidth: number): st
 
 	// Header
 	parts.push(renderHeader(layout.header, terminalWidth));
+	parts.push(renderRule(terminalWidth));
 
 	// Conversation
 	parts.push(renderConversation(layout.conversation.lines, terminalWidth));
@@ -87,11 +88,11 @@ function renderConversation(lines: readonly ConversationLine[], width: number): 
 function renderConversationLine(line: ConversationLine, width: number): string {
 	switch (line.type) {
 		case "text":
-			return renderTextLine(line);
+			return renderTextLine(line, width);
 		case "tool_call":
 			return renderToolCallLine(line);
 		case "permission_prompt":
-			return renderPermissionLine(line);
+			return renderPermissionLine(line, width);
 		case "permission_result":
 			return renderPermissionResultLine(line);
 		case "plan_step":
@@ -101,9 +102,17 @@ function renderConversationLine(line: ConversationLine, width: number): string {
 	}
 }
 
-function renderTextLine(line: { readonly role: "user" | "assistant"; readonly content: string }): string {
-	const label = line.role === "user" ? `${BOLD}You:${RESET}` : `${GREEN}Assistant:${RESET}`;
-	return `${label} ${line.content}`;
+function renderTextLine(
+	line: { readonly role: "user" | "assistant"; readonly content: string },
+	width: number,
+): string {
+	const labelPlain = line.role === "user" ? "You:" : "Assistant:";
+	const labelAnsi = line.role === "user" ? `${BOLD}${labelPlain}${RESET}` : `${GREEN}${labelPlain}${RESET}`;
+
+	const available = Math.max(10, width - (labelPlain.length + 1));
+	const chunks = wrapPlainText(line.content, available);
+	const indent = " ".repeat(labelPlain.length + 1);
+	return chunks.map((chunk, i) => (i === 0 ? `${labelAnsi} ${chunk}` : `${indent}${chunk}`)).join("\n");
 }
 
 function renderToolCallLine(line: {
@@ -119,17 +128,24 @@ function renderToolCallLine(line: {
 	return `  ${icon} ${name}${duration}${summary}`;
 }
 
-function renderPermissionLine(line: {
-	readonly toolName: string;
-	readonly riskLevel: string;
-	readonly reason?: string;
-	readonly targetPath?: string;
-}): string {
+function renderPermissionLine(
+	line: {
+		readonly toolName: string;
+		readonly riskLevel: string;
+		readonly reason?: string;
+		readonly targetPath?: string;
+	},
+	width: number,
+): string {
 	const path = line.targetPath ? ` ${DIM}${line.targetPath}${RESET}` : "";
 	const first = `${YELLOW}⚠ Permission required${RESET} (${line.riskLevel}): ${line.toolName}${path}`;
 	const details: string[] = [];
 	if (line.reason && line.reason.trim().length > 0) {
-		details.push(`  ${DIM}Reason:${RESET} ${truncate(line.reason, 120)}`);
+		const wrapped = wrapPlainText(line.reason.trim(), Math.max(20, width - 10));
+		details.push(`  ${DIM}Reason:${RESET} ${truncate(wrapped[0] ?? "", 200)}`);
+		for (const extra of wrapped.slice(1)) {
+			details.push(`         ${truncate(extra, 200)}`);
+		}
 	}
 	details.push(`  ${DIM}Reply:${RESET} y once · Y session · n deny  ${DIM}(Ctrl+C to deny)${RESET}`);
 	return [first, ...details].join("\n");
@@ -303,4 +319,32 @@ function truncateToWidth(text: string, maxWidth: number): string {
 function truncate(str: string, max: number): string {
 	if (str.length <= max) return str;
 	return `${str.slice(0, max - 1)}…`;
+}
+
+function wrapPlainText(text: string, width: number): string[] {
+	const lines: string[] = [];
+	const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+	if (words.length === 0) return [""];
+
+	let current = "";
+	for (const w of words) {
+		if (current.length === 0) {
+			current = w;
+			continue;
+		}
+		if (current.length + 1 + w.length <= width) {
+			current = `${current} ${w}`;
+			continue;
+		}
+		lines.push(current);
+		current = w;
+	}
+	if (current.length > 0) lines.push(current);
+
+	return lines;
+}
+
+function renderRule(width: number): string {
+	const n = Math.max(0, Math.min(width, 200));
+	return `${DIM}${"─".repeat(n)}${RESET}`;
 }
