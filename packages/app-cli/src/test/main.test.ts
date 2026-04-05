@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { main, parseArgs, readCliPackageVersion, resolveCliOptions } from "../main.js";
+import { ensureUserSettingsFile, main, parseArgs, readCliPackageVersion, resolveCliOptions } from "../main.js";
 
 const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+const currentCliVersion = readCliPackageVersion();
 const originalHome = process.env.HOME;
 const originalGenesisEnv = {
 	GENESIS_API_KEY: process.env.GENESIS_API_KEY,
@@ -49,13 +50,13 @@ describe("main", () => {
 	it("prints the version for --version", async () => {
 		await main(["--version"]);
 
-		expect(stdoutWrite).toHaveBeenCalledWith("0.0.0\n");
+		expect(stdoutWrite).toHaveBeenCalledWith(`${currentCliVersion}\n`);
 	});
 
 	it("prints the version for -v", async () => {
 		await main(["-v"]);
 
-		expect(stdoutWrite).toHaveBeenCalledWith("0.0.0\n");
+		expect(stdoutWrite).toHaveBeenCalledWith(`${currentCliVersion}\n`);
 	});
 
 	it("prints help for -h", async () => {
@@ -66,6 +67,37 @@ describe("main", () => {
 });
 
 describe("resolveCliOptions", () => {
+	it("creates ~/.genesis-cli/settings.json with defaults when missing", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		const settingsPath = join(homeDir, ".genesis-cli", "settings.json");
+		process.env.HOME = homeDir;
+
+		await ensureUserSettingsFile(settingsPath);
+
+		const settings = JSON.parse(await readFile(settingsPath, "utf8")) as {
+			env: Record<string, string>;
+		};
+		expect(settings.env.GENESIS_API_KEY).toBe("your_zhipu_api_key");
+		expect(settings.env.GENESIS_BOOTSTRAP_API).toBe("openai-completions");
+		expect(settings.env.GENESIS_MODEL_PROVIDER).toBe("zai");
+		expect(settings.env.GENESIS_MODEL_ID).toBe("glm-5.1");
+	});
+
+	it("does not overwrite an existing ~/.genesis-cli/settings.json", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		const settingsDir = join(homeDir, ".genesis-cli");
+		const settingsPath = join(settingsDir, "settings.json");
+		process.env.HOME = homeDir;
+		await mkdir(settingsDir, { recursive: true });
+		await writeFile(settingsPath, JSON.stringify({ env: { GENESIS_MODEL_ID: "custom-model" } }), "utf8");
+
+		await ensureUserSettingsFile(settingsPath);
+
+		expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+			env: { GENESIS_MODEL_ID: "custom-model" },
+		});
+	});
+
 	it("loads Genesis env defaults from ~/.genesis-cli/settings.json", async () => {
 		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
 		const settingsDir = join(homeDir, ".genesis-cli");

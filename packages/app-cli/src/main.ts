@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@pickle-pee/runtime";
-import { ensureAgentDirBootstrapped } from "./bootstrap.js";
+import { ensureAgentDirBootstrapped, resolveDefaultBootstrapBaseUrl } from "./bootstrap.js";
 import { createModeHandler } from "./mode-dispatch.js";
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -145,6 +145,9 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const workingDirectory = resolve(readStringFlag(flags, "cwd", process.cwd()));
 	const agentDir = resolve(readStringFlag(flags, "agent-dir", resolve(".genesis-local/pi-agent")));
 	const settingsPath = resolve(homedir(), ".genesis-cli", "settings.json");
+	try {
+		await ensureUserSettingsFile(settingsPath);
+	} catch {}
 	const settingsEnv = await readSettingsEnv(settingsPath);
 	applySettingsEnv(settingsEnv);
 
@@ -417,6 +420,41 @@ async function readOptionalJson(filePath: string): Promise<FileConfig | null> {
 	} catch {
 		return null;
 	}
+}
+
+export async function ensureUserSettingsFile(
+	settingsPath: string,
+	env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+	await mkdir(dirname(settingsPath), { recursive: true });
+	try {
+		await readFile(settingsPath, "utf8");
+		return;
+	} catch {}
+
+	try {
+		await writeFile(settingsPath, `${JSON.stringify(buildDefaultSettingsFile(env), null, 2)}\n`, {
+			flag: "wx",
+		});
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+			throw error;
+		}
+	}
+}
+
+function buildDefaultSettingsFile(env: NodeJS.ProcessEnv = process.env): SettingsFile {
+	const modelId = normalizeOptionalString(env.GENESIS_MODEL_ID) ?? "glm-5.1";
+	return {
+		env: {
+			GENESIS_API_KEY: "your_zhipu_api_key",
+			GENESIS_BOOTSTRAP_BASE_URL: resolveDefaultBootstrapBaseUrl(env),
+			GENESIS_BOOTSTRAP_API: normalizeOptionalString(env.GENESIS_BOOTSTRAP_API) ?? "openai-completions",
+			GENESIS_MODEL_PROVIDER: normalizeOptionalString(env.GENESIS_MODEL_PROVIDER) ?? "zai",
+			GENESIS_MODEL_ID: modelId,
+			GENESIS_MODEL_DISPLAY_NAME: normalizeOptionalString(env.GENESIS_MODEL_DISPLAY_NAME) ?? modelId,
+		},
+	};
 }
 
 async function readSettingsEnv(settingsPath: string): Promise<Readonly<Record<string, string>>> {

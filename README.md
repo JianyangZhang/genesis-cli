@@ -10,239 +10,18 @@
 
 ---
 
-## Overview
+## Quick Start
 
 Genesis is building toward an open-source coding CLI that feels like a real software teammate: ambitious in product vision, disciplined in execution, and practical enough for day-to-day repository work.
 
-The project combines two ideas:
+### 1. Configure First
 
-- learn from `pi-mono` for kernel shape, session primitives, and runtime discipline
-- learn from Claude Code for product experience, command UX, permission flow, and interactive workbench behavior
+- User settings file:
+  - macOS / Linux: `~/.genesis-cli/settings.json`
+  - Windows: `%USERPROFILE%/.genesis-cli/settings.json`
+- When `genesis` starts and this file does not exist yet, it creates the directory and a starter template automatically; if the file already exists, it is left untouched
 
-The implementation boundary is intentionally narrower than either upstream reference:
-
-- the repository owns its own vendored kernel and product runtime
-- the kernel is centered on a minimal `pi-agent-core`-based boundary rather than a full external coding-agent stack
-- product semantics such as permissions, tool governance, planning, and mode rendering stay in Genesis packages
-
----
-
-## Quick Start
-
-### Global Install
-
-```bash
-npm install -g @pickle-pee/genesis-cli
-genesis --version
-genesis
-```
-
-Expected result:
-
-- `genesis --version` prints the installed CLI version
-- `genesis` starts the interactive workbench
-
-First-run verification:
-
-- run `/help` and confirm that slash commands are listed
-- exit with `/exit` or `/quit`
-
-Keyboard and scrolling:
-
-- `↑` / `↓`: cycle local input history
-- `←` / `→` / `Home` / `End`: move inside the current input line
-- `Tab`: accept the first slash-command suggestion when available
-- mouse wheel / touchpad: use native terminal scrollback for transcript history
-- `PageUp` / `PageDown`: follow native terminal scrollback behavior
-- interactive mode stays on the primary terminal buffer, so the transcript remains visible after `/exit`
-
-Exit behavior:
-
-- `/exit`, `/quit`, or idle `Ctrl+C` closes the TUI and restores terminal state
-- `Ctrl+C` aborts the active turn when a response is streaming
-- `Ctrl+C` denies the current permission request when an approval menu is open
-
----
-
-## Architecture
-
-Genesis is designed so the kernel stays small while the product layer evolves quickly.
-
-### Kernel Boundary
-
-The vendored kernel focuses on the execution surface Genesis must control directly:
-
-- session lifecycle and streaming event flow
-- provider and model registry boundaries
-- auth storage and built-in tool wiring
-
-### Product Runtime
-
-The product runtime turns raw agent capability into a stable user-facing contract:
-
-- normalized runtime events instead of leaking upstream wire formats
-- tool governance with permission decisions, audit trails, and mutation control
-- planning and subagent contracts with scoped execution rules
-- shared semantics across `Interactive`, `Print`, `JSON`, and `RPC`
-
----
-
-## Current Capabilities
-
-- one runtime powering `Interactive`, `Print`, `JSON`, and `RPC` modes
-- Claude-like interactive TUI behavior on the primary terminal buffer
-- explicit permission prompts and structured tool-step rendering
-- OpenAI-compatible provider flow for live model integration
-- a repository-owned kernel boundary that can evolve without depending on a full upstream product stack
-
----
-
-## Development
-
-### Tests
-
-Unit and workspace regression:
-
-```bash
-npm test
-```
-
-Focused TUI regression suite:
-
-```bash
-npm run test:tui
-```
-
-Type checks:
-
-```bash
-npm run check:types
-```
-
-Live integration test:
-
-```bash
-npm run test:live:pi-mono
-```
-
-Lint and format checks:
-
-```bash
-npm run check:lint
-npm run check:format
-```
-
-All checks:
-
-```bash
-npm run check
-```
-
-Notes:
-
-- `test:live:pi-mono` requires a valid API key in `.env.local`
-- Vitest currently prints summaries to stdout; coverage reporting is still a TODO
-
-### Local Work
-
-Run the repository locally:
-
-```bash
-git clone https://github.com/JianyangZhang/genesis-cli.git
-cd genesis-cli
-npm ci
-npm run build
-cp .env.example .env.local
-npm run chat:live
-```
-
-Requirements:
-
-- Node.js 20.0.0+
-- a valid `GENESIS_API_KEY` in `.env.local`
-
-Startup success signal:
-
-- the `Genesis CLI` welcome card appears and the prompt `❯ ` is shown
-
-Useful commands:
-
-```bash
-npm run build --workspaces
-npm test
-npm run chat:live -- --mode print
-npm run test:live:pi-mono
-```
-
-Local secrets stay out of version control. Copy `.env.example` to `.env.local` and fill `GENESIS_API_KEY`.
-
-### Release
-
-Release automation lives in `scripts/bump-version.mjs` and `scripts/publish-all.sh`.
-
-Version bump:
-
-```bash
-npm run version:bump:patch
-```
-
-Other bump modes:
-
-```bash
-npm run version:bump:minor
-npm run version:bump:major
-npm run version:bump:prerelease
-```
-
-Common entry points:
-
-```bash
-npm run publish:check
-npm run publish:packages
-npm run publish:verify
-```
-
-Recommended release flow:
-
-```bash
-npm run version:bump:patch
-git add packages/*/package.json
-git commit -m "release 0.0.1"
-npm run publish:all
-```
-
-One-shot release flow:
-
-```bash
-npm run publish:all
-```
-
-Notes:
-
-- `bump-version.mjs` bumps every published workspace package from its own current version and rewrites internal `@pickle-pee/*` dependency versions to match
-- the script enforces a clean git worktree before `check` and `publish`
-- `publish:check` now includes a runtime-adapter smoke test from a temporary directory, so vendored kernel resolution must work outside the monorepo root before release
-- the script stops if any package version has already been published
-- npm may still require a browser confirmation because the account uses 2FA for writes
-
----
-
-## Documentation
-
-- package-level docs: `packages/*/README.md`
-- ADRs and runbooks: `docs/`
-
----
-
-## Configuration
-
-User settings file:
-
-- macOS / Linux: `~/.genesis-cli/settings.json`
-- Windows: `%USERPROFILE%/.genesis-cli/settings.json`
-- currently the CLI reads the `env` object from this file and uses it as default environment configuration
-
-Example:
+Minimal example:
 
 ```json
 {
@@ -257,32 +36,125 @@ Example:
 }
 ```
 
-Environment variables:
+Common fields:
 
-- `GENESIS_API_KEY`: API key used by OpenAI-compatible providers
-- `GENESIS_BOOTSTRAP_BASE_URL`: bootstrap base URL used when Genesis writes provider config into the local agent directory
+- `GENESIS_API_KEY`: model API key
+- `GENESIS_BOOTSTRAP_BASE_URL`: provider bootstrap base URL
 - `GENESIS_BOOTSTRAP_API`: bootstrap transport, typically `openai-completions`
-- `GENESIS_MODEL_PROVIDER`: provider key such as `zai`
-- `GENESIS_MODEL_ID`: model id such as `glm-5.1`
-- `GENESIS_MODEL_DISPLAY_NAME`: optional model display name shown in UI and stored in bootstrap config
+- `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`: default provider and model
 
-Project and agent files:
+Optional project-level overrides:
 
-- `.genesis/config.json`: repository-level overrides for mode, model, tools, and bootstrap fields
-- `.genesis-local/pi-agent/models.json`: local generated provider/model registry used by the vendored kernel
+- `.genesis/config.json`
+- `.genesis-local/pi-agent/models.json`
 
-CLI flags:
-
-- `--cwd <path>`: set the working directory
-- `--agent-dir <path>`: set the agent directory for model and auth assets
-- `--mode <interactive|print|json|rpc>`: select the runtime mode
-- `--provider <id>` / `--model <id>`: override the model selection
-- `--tools <csv>`: override the enabled tool set
-
-Precedence:
+Current precedence:
 
 - CLI flags
 - shell environment variables
-- `~/.genesis-cli/settings.json` `env`
+- `env` from `~/.genesis-cli/settings.json`
 - project `.genesis/config.json`
 - local agent config under `--agent-dir`
+
+### 2. Global Install
+
+```bash
+npm install -g @pickle-pee/genesis-cli
+genesis --version
+```
+
+### 3. Run
+
+```bash
+genesis
+```
+
+Expected result:
+
+- `genesis --version` prints the installed CLI version
+- `genesis` starts the interactive workbench
+
+On first launch:
+
+- run `/help` and confirm slash commands are listed
+- exit with `/exit` or `/quit`
+
+Interaction basics:
+
+- `↑` / `↓`: cycle local input history
+- `Tab`: accept the first slash-command suggestion when available
+- mouse wheel / touchpad: use native terminal scrollback for transcript history
+- interactive mode stays on the primary terminal buffer, so the transcript remains visible after `/exit`
+- `/exit`, `/quit`, or idle `Ctrl+C` closes the TUI and restores terminal state
+- `Ctrl+C` aborts the active turn when a response is streaming
+- `Ctrl+C` denies the current permission request when an approval menu is open
+
+---
+
+## Positioning
+
+- one runtime powering `Interactive`, `Print`, `JSON`, and `RPC`
+- Claude-like interactive TUI behavior on the primary terminal buffer
+- explicit permission prompts and structured tool-step rendering
+- OpenAI-compatible provider flow for live model integration
+- a repository-owned vendored kernel and product runtime that can evolve together
+
+---
+
+## Development
+
+### Local Work
+
+```bash
+git clone https://github.com/JianyangZhang/genesis-cli.git
+cd genesis-cli
+npm ci
+npm run build
+cp .env.example .env.local
+npm run chat:live
+```
+
+- Node.js 20.0.0+
+- a valid `GENESIS_API_KEY` in `.env.local`
+- successful startup shows the `Genesis CLI` welcome card and the `❯ ` prompt
+
+### Common Checks
+
+```bash
+npm test
+npm run test:tui
+npm run check:types
+npm run check
+npm run test:live:pi-mono
+```
+
+- `test:live:pi-mono` requires a valid API key in `.env.local`
+
+### Release
+
+```bash
+npm run version:bump:patch
+git add package-lock.json packages/*/package.json
+git commit -m "release 0.0.1"
+npm run publish:all
+```
+
+- release automation lives in `scripts/bump-version.mjs` and `scripts/publish-all.sh`
+- `publish:check` includes a runtime-adapter smoke test from a temporary directory, so startup cannot silently depend on the monorepo root
+- npm may still require browser confirmation when the account uses 2FA for writes
+
+### Other Entry Points
+
+```bash
+npm run chat:live -- --mode print
+npm run publish:check
+npm run publish:packages
+npm run publish:verify
+```
+
+---
+
+## More
+
+- package-level docs: `packages/*/README.md`
+- ADRs and runbooks: `docs/`
