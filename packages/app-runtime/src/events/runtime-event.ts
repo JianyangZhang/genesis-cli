@@ -58,6 +58,7 @@ export interface SessionClosingEvent extends BaseEvent {
 export interface SessionClosedEvent extends BaseEvent {
 	readonly category: "session";
 	readonly type: "session_closed";
+	readonly recoveryData: SessionRecoveryData;
 }
 
 export type SessionLifecycleEvent =

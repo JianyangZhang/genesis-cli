@@ -47,6 +47,14 @@ export class EventNormalizer {
 					...base,
 					category: "session",
 					type: "session_closed",
+					recoveryData: {
+						sessionId: this.sessionId,
+						model: { id: "unknown", provider: "unknown" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
 				};
 
 			// -- Tool execution --

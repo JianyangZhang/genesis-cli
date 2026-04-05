@@ -46,12 +46,13 @@ export function sessionResumed(sessionId: SessionId, recoveryData: SessionRecove
 	};
 }
 
-export function sessionClosed(sessionId: SessionId): SessionClosedEvent {
+export function sessionClosed(sessionId: SessionId, recoveryData: SessionRecoveryData): SessionClosedEvent {
 	return {
 		id: generateEventId(),
 		timestamp: Date.now(),
 		sessionId,
 		category: "session",
 		type: "session_closed",
+		recoveryData,
 	};
 }
