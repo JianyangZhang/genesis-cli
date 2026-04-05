@@ -85,6 +85,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _queuedInputs: string[] = [];
 	private _pendingPermissionSelection = 0;
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
+	private _renderedFooterStartRow: number | null = null;
 	private _welcomeLines: readonly string[] = [];
 
 	async start(runtime: AppRuntime): Promise<void> {
@@ -153,6 +154,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._queuedInputs.length = 0;
 			this._pendingPermissionSelection = 0;
 			this._renderedFooterUi = null;
+			this._renderedFooterStartRow = null;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -914,7 +916,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private renderPermissionUi(): void {
 		if (this._pendingPermissionCallId === null || this._pendingPermissionDetails === null) {
-			this.renderPromptLine();
+			this.fullRedrawInteractiveScreen();
 			return;
 		}
 		this.renderFooterRegion();
@@ -925,7 +927,7 @@ class InteractiveModeHandler implements ModeHandler {
 			if (event.type === "permission_requested") {
 				this.renderPermissionUi();
 			} else {
-				this.renderPromptLine();
+				this.fullRedrawInteractiveScreen();
 			}
 			return;
 		}
@@ -1057,7 +1059,7 @@ class InteractiveModeHandler implements ModeHandler {
 					this.startPromptTurn(session, nextQueued, sink);
 					return;
 				}
-				this.renderPromptLine();
+				this.fullRedrawInteractiveScreen();
 			});
 	}
 
@@ -1113,6 +1115,13 @@ class InteractiveModeHandler implements ModeHandler {
 		const footerHeight = ui.lines.length;
 		const compact = this.shouldUseCompactFooterLayout();
 		const startRow = computeFooterStartRow(this._welcomeLines.length, this.terminalHeight(), footerHeight, compact);
+		const oldStartRow = this._renderedFooterStartRow;
+		const oldHeight = this._renderedFooterUi?.lines.length ?? 0;
+		if (oldStartRow !== null && oldStartRow !== startRow) {
+			for (let index = 0; index < oldHeight; index += 1) {
+				this.writeAbsoluteTerminalLine(oldStartRow + index, "");
+			}
+		}
 		if (!compact) {
 			this.applyTranscriptViewport(footerHeight);
 		}
@@ -1121,7 +1130,6 @@ class InteractiveModeHandler implements ModeHandler {
 			const line = fitTerminalLine(ui.lines[index] ?? "", this.terminalWidth());
 			this.writeAbsoluteTerminalLine(row, line);
 		}
-		const oldHeight = this._renderedFooterUi?.lines.length ?? 0;
 		for (let index = footerHeight; index < oldHeight; index += 1) {
 			this.writeAbsoluteTerminalLine(startRow + index, "");
 		}
@@ -1133,6 +1141,7 @@ class InteractiveModeHandler implements ModeHandler {
 		);
 		process.stdout.write(ansiShowCursor());
 		this._renderedFooterUi = { ...ui, renderedWidth: this.terminalWidth() };
+		this._renderedFooterStartRow = startRow;
 	}
 
 	private applyTranscriptViewport(footerHeight: number): void {
@@ -1140,18 +1149,10 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private appendTranscriptLines(lines: readonly string[]): void {
-		this.renderFooterRegion();
-		this.applyTranscriptViewport(this.currentFooterHeight());
-		for (const rawLine of lines) {
-			const wrapped = wrapTranscriptContent(rawLine, this.terminalWidth());
-			for (const line of wrapped) {
-				process.stdout.write(ansiCursorTo(this.transcriptBottomRow(), 1));
-				process.stdout.write("\n");
-				process.stdout.write(ansiClearLine());
-				process.stdout.write(line);
-			}
+		if (lines.length === 0) {
+			return;
 		}
-		this.renderFooterRegion();
+		this.fullRedrawInteractiveScreen();
 	}
 
 	private reserveStreamingRows(rows: number): void {
@@ -1208,6 +1209,7 @@ class InteractiveModeHandler implements ModeHandler {
 			);
 		}
 		this._renderedFooterUi = null;
+		this._renderedFooterStartRow = null;
 		this._streamingReservedRows = 0;
 		this.renderTranscriptViewport();
 		this.renderFooterRegion();
