@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
+	computePromptCursorRowsUp,
 	computeSlashSuggestions,
+	countRenderedTerminalRows,
 	formatInteractiveInputSeparator,
 	formatInteractivePermissionBlock,
 	formatInteractivePromptBuffer,
@@ -12,6 +14,9 @@ import {
 	formatTranscriptAssistantLine,
 	formatTranscriptUserLine,
 	formatTurnNotice,
+	formatWelcomeBottomBorder,
+	formatWelcomeCenteredLine,
+	formatWelcomeFilledLine,
 	formatWelcomeTopBorder,
 	mergeStreamingText,
 	movePermissionSelection,
@@ -46,6 +51,21 @@ describe("interactive transcript formatting", () => {
 		const visible = line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
 		expect(visible).toHaveLength(40);
 		expect(visible.endsWith("╮")).toBe(true);
+	});
+
+	it("keeps the welcome bottom border aligned to the requested width", () => {
+		expect(formatWelcomeBottomBorder(40)).toHaveLength(40);
+		expect(formatWelcomeBottomBorder(40).startsWith("╰")).toBe(true);
+		expect(formatWelcomeBottomBorder(40).endsWith("╯")).toBe(true);
+	});
+
+	it("keeps welcome body rows aligned to the frame width", () => {
+		const filled = formatWelcomeFilledLine(38, "abc");
+		const centered = formatWelcomeCenteredLine(38, "abc");
+		expect(filled).toHaveLength(40);
+		expect(centered).toHaveLength(40);
+		expect(filled.startsWith("│")).toBe(true);
+		expect(centered.endsWith("│")).toBe(true);
 	});
 
 	it("suppresses session lifecycle events", () => {
@@ -104,6 +124,11 @@ describe("interactive transcript formatting", () => {
 	it("wraps transcript content for streaming redraw", () => {
 		expect(wrapTranscriptContent("abcdef", 3)).toEqual(["abc", "def"]);
 		expect(wrapTranscriptContent("你好吗", 4)).toEqual(["你好", "吗"]);
+	});
+
+	it("counts rendered footer rows after terminal resize", () => {
+		expect(countRenderedTerminalRows(["──────────"], 4)).toBe(3);
+		expect(computePromptCursorRowsUp(["──────────", "❯ hello", "──────────"], 4, 6)).toBe(4);
 	});
 
 	it("merges overlapping streaming chunks without duplicating text", () => {

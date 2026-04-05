@@ -85,8 +85,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
 	private readonly _queuedInputs: string[] = [];
 	private _pendingPermissionSelection = 0;
-	private _permissionUiLineCount = 0;
-	private _promptUiLineCount = 0;
+	private _renderedPromptUi: { lines: readonly string[]; cursorColumn: number } | null = null;
+	private _renderedPermissionBlock: readonly string[] | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -152,8 +152,8 @@ class InteractiveModeHandler implements ModeHandler {
 			this._toolCalls.clear();
 			this._queuedInputs.length = 0;
 			this._pendingPermissionSelection = 0;
-			this._permissionUiLineCount = 0;
-			this._promptUiLineCount = 0;
+			this._renderedPromptUi = null;
+			this._renderedPermissionBlock = null;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -183,7 +183,6 @@ class InteractiveModeHandler implements ModeHandler {
 					if (this._pendingPermissionDetails?.toolCallId === event.toolCallId) {
 						this._pendingPermissionDetails = null;
 						this._pendingPermissionSelection = 0;
-						this._permissionUiLineCount = 0;
 					}
 				}
 				if (event.type === "tool_started") {
@@ -832,7 +831,6 @@ class InteractiveModeHandler implements ModeHandler {
 					this._pendingPermissionCallId = null;
 					this._pendingPermissionDetails = null;
 					this._pendingPermissionSelection = 0;
-					this._permissionUiLineCount = 0;
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -894,18 +892,8 @@ class InteractiveModeHandler implements ModeHandler {
 		const cwd = session.context.workingDirectory;
 		const version = process.env.npm_package_version ?? "dev";
 		const contentWidth = width - 2;
-		const center = (text: string): string => {
-			const plain = stripAnsiWelcome(text);
-			const padding = Math.max(0, contentWidth - plain.length);
-			const left = Math.floor(padding / 2);
-			const right = padding - left;
-			return `│${" ".repeat(left)}${text}${" ".repeat(right)}│`;
-		};
-		const fill = (text = ""): string => {
-			const plain = stripAnsiWelcome(text);
-			const padding = Math.max(0, contentWidth - plain.length);
-			return `│${text}${" ".repeat(padding)}│`;
-		};
+		const center = (text: string): string => formatWelcomeCenteredLine(contentWidth, text);
+		const fill = (text = ""): string => formatWelcomeFilledLine(contentWidth, text);
 		process.stdout.write(formatWelcomeTopBorder(width, version));
 		process.stdout.write("\n");
 		process.stdout.write(fill());
@@ -924,9 +912,8 @@ class InteractiveModeHandler implements ModeHandler {
 		process.stdout.write("\n");
 		process.stdout.write(center(`${DIM}${cwd}${RESET}`));
 		process.stdout.write("\n");
-		process.stdout.write("╰");
-		process.stdout.write("─".repeat(contentWidth));
-		process.stdout.write("╯\n");
+		process.stdout.write(formatWelcomeBottomBorder(width));
+		process.stdout.write("\n");
 		process.stdout.write(
 			`${DIM}Start:${RESET} type a prompt and press Enter  ${DIM}Help:${RESET} /help  ${DIM}Scroll:${RESET} wheel/PageUp/PageDown\n`,
 		);
@@ -934,17 +921,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private renderPromptLine(): void {
 		const ui = this.buildPromptUi();
-		let linesUp = 0;
-		if (this._pendingPermissionCallId === null && this._permissionUiLineCount > 0) {
-			linesUp = this._permissionUiLineCount + 1;
-			this._permissionUiLineCount = 0;
-		} else if (this._promptUiLineCount > 0) {
-			linesUp = 1;
-		}
-		if (linesUp > 0) {
-			process.stdout.write(ansiMoveUp(linesUp));
-			process.stdout.write(ansiClearBelow());
-		}
+		this.clearFooterUi();
 		this.writePromptUi(ui);
 	}
 
@@ -972,14 +949,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		const block = formatInteractivePermissionBlock(this._pendingPermissionDetails, this._pendingPermissionSelection);
-		const linesUp = this._permissionUiLineCount + (this._promptUiLineCount > 0 ? 1 : 0);
-		if (linesUp > 0) {
-			process.stdout.write(ansiMoveUp(linesUp));
-			process.stdout.write(ansiClearBelow());
-		}
+		this.clearFooterUi();
 		process.stdout.write(block);
 		process.stdout.write("\n");
-		this._permissionUiLineCount = block.split("\n").length;
+		this._renderedPermissionBlock = block.split("\n");
 		this.writePromptUi(this.buildPromptUi());
 	}
 
@@ -1056,7 +1029,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private renderStreamingAssistantBlock(): void {
 		const rendered = formatTranscriptAssistantLine(this._assistantBuffer);
 		const lines = wrapTranscriptContent(rendered, process.stdout.columns ?? 80);
-		const linesUp = this._streamRenderLineCount + (this._promptUiLineCount > 0 ? 1 : 0);
+		const linesUp = this._streamRenderLineCount + (this._renderedPromptUi !== null ? 1 : 0);
 		process.stdout.write("\r");
 		if (linesUp > 0) {
 			process.stdout.write(ansiMoveUp(linesUp));
@@ -1069,10 +1042,8 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private writeTranscriptText(text: string, newline: boolean, redrawPrompt = true): void {
-		if (this._promptUiLineCount > 0) {
-			process.stdout.write(ansiMoveUp(1));
-			process.stdout.write(ansiClearBelow());
-			this._promptUiLineCount = 0;
+		if (this._renderedPromptUi !== null || this._renderedPermissionBlock !== null) {
+			this.clearFooterUi();
 		} else {
 			process.stdout.write(ansiClearLine());
 		}
@@ -1147,6 +1118,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private writePromptUi(ui: { block: string; prompt: string }): void {
+		const lines = ui.block.split("\n");
 		process.stdout.write(ui.block);
 		process.stdout.write("\r");
 		process.stdout.write(ansiMoveUp(1));
@@ -1154,7 +1126,30 @@ class InteractiveModeHandler implements ModeHandler {
 			ansiMoveRight(computePromptCursorColumn(ui.prompt, this._inputState.buffer, this._inputState.cursor)),
 		);
 		process.stdout.write(ansiShowCursor());
-		this._promptUiLineCount = 3;
+		this._renderedPromptUi = {
+			lines,
+			cursorColumn: computePromptCursorColumn(ui.prompt, this._inputState.buffer, this._inputState.cursor),
+		};
+		if (this._pendingPermissionCallId === null) {
+			this._renderedPermissionBlock = null;
+		}
+	}
+
+	private clearFooterUi(): void {
+		const width = Math.max(1, process.stdout.columns ?? 80);
+		const promptRowsUp =
+			this._renderedPromptUi === null
+				? 0
+				: computePromptCursorRowsUp(this._renderedPromptUi.lines, width, this._renderedPromptUi.cursorColumn);
+		const permissionRows =
+			this._renderedPermissionBlock === null ? 0 : countRenderedTerminalRows(this._renderedPermissionBlock, width);
+		const rowsUp = promptRowsUp + permissionRows;
+		if (rowsUp > 0) {
+			process.stdout.write(ansiMoveUp(rowsUp));
+			process.stdout.write(ansiClearBelow());
+		}
+		this._renderedPromptUi = null;
+		this._renderedPermissionBlock = null;
 	}
 }
 
@@ -1275,8 +1270,26 @@ function stripAnsiWelcome(text: string): string {
 
 export function formatWelcomeTopBorder(width: number, version: string): string {
 	const label = `╭─── ${INTERACTIVE_THEME.bold}${INTERACTIVE_THEME.brand}Genesis CLI${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.muted}v${version}${INTERACTIVE_THEME.reset} `;
-	const plainWidth = stripAnsiWelcome(label).length;
+	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(label));
 	return `${label}${"─".repeat(Math.max(0, width - plainWidth - 1))}╮`;
+}
+
+export function formatWelcomeBottomBorder(width: number): string {
+	return `╰${"─".repeat(Math.max(0, width - 2))}╯`;
+}
+
+export function formatWelcomeFilledLine(contentWidth: number, text = ""): string {
+	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(text));
+	const padding = Math.max(0, contentWidth - plainWidth);
+	return `│${text}${" ".repeat(padding)}│`;
+}
+
+export function formatWelcomeCenteredLine(contentWidth: number, text: string): string {
+	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(text));
+	const padding = Math.max(0, contentWidth - plainWidth);
+	const left = Math.floor(padding / 2);
+	const right = padding - left;
+	return `│${" ".repeat(left)}${text}${" ".repeat(right)}│`;
 }
 
 export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
@@ -1570,6 +1583,24 @@ export function formatInteractivePromptBuffer(content: string, plain = false): s
 
 export function formatInteractiveInputSeparator(width: number): string {
 	return `${INTERACTIVE_THEME.muted}${"─".repeat(Math.max(1, width))}${INTERACTIVE_THEME.reset}`;
+}
+
+export function countRenderedTerminalRows(lines: readonly string[], width: number): number {
+	const safeWidth = Math.max(1, width);
+	let total = 0;
+	for (const line of lines) {
+		const plain = stripAnsiWelcome(line);
+		const visibleWidth = Math.max(1, measureTerminalDisplayWidth(plain));
+		total += Math.max(1, Math.ceil(visibleWidth / safeWidth));
+	}
+	return total;
+}
+
+export function computePromptCursorRowsUp(lines: readonly string[], width: number, cursorColumn: number): number {
+	const safeWidth = Math.max(1, width);
+	const rowsBeforePrompt = countRenderedTerminalRows(lines.slice(0, 1), safeWidth);
+	const promptRowOffset = Math.floor(Math.max(0, cursorColumn) / safeWidth);
+	return rowsBeforePrompt + promptRowOffset;
 }
 
 export function formatTurnNotice(kind: "thinking" | "responding"): string {
