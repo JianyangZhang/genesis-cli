@@ -29,7 +29,9 @@ import {
 	mergeStreamingText,
 	movePermissionSelection,
 	permissionDecisionFromSelection,
+	pickWelcomeGreeting,
 	shouldRenderInteractiveTranscriptEvent,
+	WELCOME_BIBLE_GREETINGS,
 	wrapTranscriptContent,
 } from "../mode-dispatch.js";
 
@@ -131,10 +133,18 @@ describe("interactive transcript formatting", () => {
 			version: "0.0.0",
 			model: "GLM 5.1",
 			provider: "zai",
+			greeting: "Let there be light.",
 		});
 		expect(lines.some((line) => line.includes("/Users/"))).toBe(false);
 		expect(lines[7]).toContain("│");
 		expect(lines[8]).toContain("GLM 5.1");
+	});
+
+	it("exposes eight coding-friendly bible greetings and picks them deterministically", () => {
+		expect(WELCOME_BIBLE_GREETINGS).toHaveLength(8);
+		expect(pickWelcomeGreeting(0)).toBe(WELCOME_BIBLE_GREETINGS[0]);
+		expect(pickWelcomeGreeting(0.15)).toBe(WELCOME_BIBLE_GREETINGS[1]);
+		expect(pickWelcomeGreeting(0.95)).toBe(WELCOME_BIBLE_GREETINGS[7]);
 	});
 
 	it("suppresses session lifecycle events", () => {

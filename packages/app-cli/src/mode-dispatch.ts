@@ -886,6 +886,7 @@ class InteractiveModeHandler implements ModeHandler {
 			version: process.env.npm_package_version ?? "dev",
 			model: session.state.model.displayName ?? session.state.model.id,
 			provider: session.state.model.provider,
+			greeting: pickWelcomeGreeting(),
 		});
 		process.stdout.write(`${this._welcomeLines.join("\n")}\n`);
 	}
@@ -1342,8 +1343,25 @@ function stripAnsiWelcome(text: string): string {
 	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
 }
 
-function applyWelcomeBackground(text: string): string {
-	return `${INTERACTIVE_THEME.welcomeBg}${text.replaceAll(INTERACTIVE_THEME.reset, `${INTERACTIVE_THEME.reset}${INTERACTIVE_THEME.welcomeBg}`)}${INTERACTIVE_THEME.reset}`;
+function applyWelcomeBorderColor(text: string): string {
+	return `${INTERACTIVE_THEME.welcomeBorder}${text}${INTERACTIVE_THEME.reset}`;
+}
+
+export const WELCOME_BIBLE_GREETINGS = [
+	"Let there be light.",
+	"Seek, and ye shall find.",
+	"Knock, and it shall be opened.",
+	"Write the vision plainly.",
+	"Iron sharpeneth iron.",
+	"The truth shall make you free.",
+	"A wise man will hear.",
+	"Let all things be done decently.",
+] as const;
+
+export function pickWelcomeGreeting(randomValue = Math.random()): string {
+	const size = WELCOME_BIBLE_GREETINGS.length;
+	const normalized = Number.isFinite(randomValue) ? Math.min(Math.max(randomValue, 0), 0.999999999999) : 0;
+	return WELCOME_BIBLE_GREETINGS[Math.floor(normalized * size)] ?? WELCOME_BIBLE_GREETINGS[0];
 }
 
 export function buildWelcomeLines(input: {
@@ -1351,6 +1369,7 @@ export function buildWelcomeLines(input: {
 	version: string;
 	model: string;
 	provider: string;
+	greeting: string;
 }): readonly string[] {
 	const width = Math.max(60, Math.min(input.terminalWidth, 100));
 	const DIM = INTERACTIVE_THEME.muted;
@@ -1364,7 +1383,7 @@ export function buildWelcomeLines(input: {
 	return [
 		formatWelcomeTopBorder(width, input.version),
 		fill(),
-		center(`${BOLD}Welcome back!${RESET}`),
+		center(`${BOLD}${input.greeting}${RESET}`),
 		fill(),
 		center(`${DIM}        ${GREEN}✦${RESET}        ${RESET}`),
 		center(`${CYAN}      ──╂──      ${RESET}`),
@@ -1377,19 +1396,19 @@ export function buildWelcomeLines(input: {
 }
 
 export function formatWelcomeTopBorder(width: number, version: string): string {
-	const label = `╭─── ${INTERACTIVE_THEME.bold}${INTERACTIVE_THEME.brand}Genesis CLI${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.muted}v${version}${INTERACTIVE_THEME.reset} `;
+	const label = `╭─── ${INTERACTIVE_THEME.bold}${INTERACTIVE_THEME.welcomeTitle}Genesis CLI${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.muted}v${version}${INTERACTIVE_THEME.reset} `;
 	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(label));
-	return applyWelcomeBackground(`${label}${"─".repeat(Math.max(0, width - plainWidth - 1))}╮`);
+	return applyWelcomeBorderColor(`${label}${"─".repeat(Math.max(0, width - plainWidth - 1))}╮`);
 }
 
 export function formatWelcomeBottomBorder(width: number): string {
-	return applyWelcomeBackground(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
+	return applyWelcomeBorderColor(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
 }
 
 export function formatWelcomeFilledLine(contentWidth: number, text = ""): string {
 	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(text));
 	const padding = Math.max(0, contentWidth - plainWidth);
-	return applyWelcomeBackground(`│${text}${" ".repeat(padding)}│`);
+	return `${applyWelcomeBorderColor("│")}${text}${" ".repeat(padding)}${applyWelcomeBorderColor("│")}`;
 }
 
 export function formatWelcomeCenteredLine(contentWidth: number, text: string): string {
@@ -1397,7 +1416,7 @@ export function formatWelcomeCenteredLine(contentWidth: number, text: string): s
 	const padding = Math.max(0, contentWidth - plainWidth);
 	const left = Math.floor(padding / 2);
 	const right = padding - left;
-	return applyWelcomeBackground(`│${" ".repeat(left)}${text}${" ".repeat(right)}│`);
+	return `${applyWelcomeBorderColor("│")}${" ".repeat(left)}${text}${" ".repeat(right)}${applyWelcomeBorderColor("│")}`;
 }
 
 export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
