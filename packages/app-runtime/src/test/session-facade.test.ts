@@ -9,6 +9,7 @@ import { createRuntimeContext } from "../runtime-context.js";
 import { SessionFacadeImpl } from "../session/session-facade.js";
 import { createInitialSessionState } from "../session/session-state.js";
 import type { ModelDescriptor, SessionId, SessionState } from "../types/index.js";
+import { expectGovernorProbeAllows } from "./governor-test-helpers.js";
 import { StubKernelSessionAdapter } from "./stubs/stub-kernel-session-adapter.js";
 
 const stubId: SessionId = { value: "facade-test" };
@@ -730,7 +731,7 @@ describe("SessionFacade", () => {
 			riskLevel: "L3",
 			targetPattern: "/tmp/**",
 		});
-		const writeDecision = governor.beforeExecution({
+		const writeProbe = expectGovernorProbeAllows(governor, {
 			sessionId: stubId.value,
 			toolName: "write",
 			toolCallId: "write_probe",
@@ -740,11 +741,7 @@ describe("SessionFacade", () => {
 			targetPath: "/tmp/.tmp-tests/one.txt",
 			parameters: { file_path: "/tmp/.tmp-tests/one.txt", content: "world" },
 		});
-		expect(writeDecision).toMatchObject({ type: "allow" });
-		governor.afterExecution({
-			toolName: "write",
-			toolCallId: "write_probe",
-			status: "success",
+		writeProbe.complete({
 			targetPath: "/tmp/.tmp-tests/one.txt",
 			durationMs: 0,
 		});
@@ -838,7 +835,7 @@ describe("SessionFacade", () => {
 		await facade.resolvePermission("edit_1", "allow_for_session");
 		await firstPrompt;
 
-		const editDecision = governor.beforeExecution({
+		const editProbe = expectGovernorProbeAllows(governor, {
 			sessionId: stubId.value,
 			toolName: "edit",
 			toolCallId: "edit_probe",
@@ -852,11 +849,7 @@ describe("SessionFacade", () => {
 				new_string: "final",
 			},
 		});
-		expect(editDecision.type).toBe("allow");
-		governor.afterExecution({
-			toolName: "edit",
-			toolCallId: "edit_probe",
-			status: "success",
+		editProbe.complete({
 			targetPath: "/tmp/.tmp-tests/two.txt",
 			durationMs: 0,
 		});
@@ -942,7 +935,7 @@ describe("SessionFacade", () => {
 		await facade.resolvePermission("write_a", "allow_for_session");
 		await firstPrompt;
 
-		const writeSecondDecision = governor.beforeExecution({
+		const writeSecondProbe = expectGovernorProbeAllows(governor, {
 			sessionId: stubId.value,
 			toolName: "write",
 			toolCallId: "write_probe_b",
@@ -952,11 +945,7 @@ describe("SessionFacade", () => {
 			targetPath: "/tmp/.tmp-tests/b.txt",
 			parameters: { file_path: "/tmp/.tmp-tests/b.txt", content: "world" },
 		});
-		expect(writeSecondDecision.type).toBe("allow");
-		governor.afterExecution({
-			toolName: "write",
-			toolCallId: "write_probe_b",
-			status: "success",
+		writeSecondProbe.complete({
 			targetPath: "/tmp/.tmp-tests/b.txt",
 			durationMs: 0,
 		});

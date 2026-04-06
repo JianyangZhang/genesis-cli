@@ -2,6 +2,7 @@ import type { ToolDefinition } from "@pickle-pee/tools";
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionContext } from "../governance/tool-governor.js";
 import { createToolGovernor } from "../governance/tool-governor.js";
+import { expectGovernorProbeAllows } from "./governor-test-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -394,12 +395,8 @@ describe("ToolGovernor", () => {
 			const governor = createToolGovernor();
 			governor.catalog.register(L0_READ);
 
-			governor.beforeExecution(executionContext());
-
-			governor.afterExecution({
-				toolName: "test_tool",
-				toolCallId: "call_1",
-				status: "success",
+			const probe = expectGovernorProbeAllows(governor, executionContext());
+			probe.complete({
 				durationMs: 100,
 			});
 
@@ -424,7 +421,8 @@ describe("ToolGovernor", () => {
 			});
 
 			// First execution
-			governor.beforeExecution(
+			const firstExecution = expectGovernorProbeAllows(
+				governor,
 				executionContext({
 					toolName: "edit",
 					toolCallId: "call_1",
@@ -435,10 +433,7 @@ describe("ToolGovernor", () => {
 			expect(governor.mutations.isPending("/project/src/main.ts")).toBe(true);
 
 			// Complete the first execution
-			governor.afterExecution({
-				toolName: "edit",
-				toolCallId: "call_1",
-				status: "success",
+			firstExecution.complete({
 				durationMs: 100,
 			});
 
