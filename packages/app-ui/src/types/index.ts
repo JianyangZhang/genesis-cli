@@ -7,6 +7,7 @@
  */
 
 import type { AppRuntime, RecentSessionSearchHit, SessionFacade } from "@pickle-pee/runtime";
+import type { ModelDescriptor } from "@pickle-pee/runtime";
 
 // ---------------------------------------------------------------------------
 // Output mode — canonical definition shared by all formatters
@@ -105,6 +106,22 @@ export interface SlashCommandContext {
 	readonly runtime: AppRuntime;
 	readonly session: SessionFacade;
 	readonly output: OutputSink;
+	readonly host?: SlashCommandHost;
+}
+
+export interface ModelOption {
+	readonly id: string;
+	readonly provider: string;
+	readonly displayName?: string;
+	readonly reasoning?: boolean;
+}
+
+export interface SlashCommandHost {
+	listAvailableModels?(current: ModelDescriptor): Promise<readonly ModelOption[]>;
+	switchModel?(params: { readonly session: SessionFacade; readonly runtime: AppRuntime; readonly modelId: string }): Promise<{
+		readonly model: ModelDescriptor;
+		readonly persistedTo?: string;
+	}>;
 }
 
 /** Result from a slash command execution. */

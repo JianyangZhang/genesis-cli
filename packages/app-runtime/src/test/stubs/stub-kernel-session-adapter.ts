@@ -12,6 +12,7 @@ import type {
 	ToolExecutionGate,
 } from "../../adapters/kernel-session-adapter.js";
 import type { SessionRecoveryData } from "../../types/index.js";
+import type { ModelDescriptor } from "../../types/index.js";
 
 export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	private readonly eventsByPrompt = new Map<string, RawUpstreamEvent[]>();
@@ -26,6 +27,7 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	private _closed = false;
 	private _lastInput: string | null = null;
 	private _resumeData: SessionRecoveryData | null = null;
+	private _model: ModelDescriptor = { id: "stub-model", provider: "stub" };
 
 	// -----------------------------------------------------------------------
 	// Test helpers
@@ -64,6 +66,10 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	/** The data passed to the last resume() call. */
 	get lastResumeData(): SessionRecoveryData | null {
 		return this._resumeData;
+	}
+
+	get lastModel(): ModelDescriptor {
+		return this._model;
 	}
 
 	setToolExecutionGate(gate: ToolExecutionGate): void {
@@ -197,7 +203,7 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	async getRecoveryData(): Promise<SessionRecoveryData> {
 		return {
 			sessionId: { value: "stub-session-id" },
-			model: { id: "stub-model", provider: "stub" },
+			model: this._model,
 			toolSet: ["read", "edit"],
 			planSummary: null,
 			compactionSummary: null,
@@ -207,6 +213,11 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 
 	resume(data: SessionRecoveryData): void {
 		this._resumeData = data;
+		this._model = data.model;
+	}
+
+	setModel(model: ModelDescriptor): void {
+		this._model = model;
 	}
 
 	private waitForPermission(callId: string): Promise<"allow" | "allow_for_session" | "allow_once" | "deny"> {

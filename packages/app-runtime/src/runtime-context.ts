@@ -58,3 +58,7 @@ export function createRuntimeContext(params: RuntimeContextParams): RuntimeConte
 export function updateTaskState(context: RuntimeContext, taskState: TaskState): RuntimeContext {
 	return { ...context, taskState };
 }
+
+export function updateModel(context: RuntimeContext, model: ModelDescriptor): RuntimeContext {
+	return { ...context, model };
+}

@@ -235,13 +235,33 @@ describe("createAppRuntime", () => {
 		expect(browserResults[0]?.snippet).toContain("README 发布说明");
 	});
 
+	it("tracks and updates the default model for newly created sessions", async () => {
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			createAdapter: (model) => {
+				const adapter = new StubKernelSessionAdapter();
+				adapter.setModel(model);
+				return adapter;
+			},
+		});
+
+		expect(runtime.getDefaultModel()).toEqual(stubModel);
+		runtime.setDefaultModel({ id: "glm-5.2", provider: "zai", displayName: "GLM 5.2" });
+
+		const session = runtime.createSession();
+		expect(runtime.getDefaultModel().id).toBe("glm-5.2");
+		expect(session.state.model.id).toBe("glm-5.2");
+	});
+
 	it("createAdapter provisions a fresh adapter per session", async () => {
 		const adapters: StubKernelSessionAdapter[] = [];
 		const runtime = createAppRuntime({
 			workingDirectory: "/tmp",
 			mode: "print",
 			model: stubModel,
-			createAdapter: () => {
+			createAdapter: (_model) => {
 				const adapter = new StubKernelSessionAdapter();
 				adapters.push(adapter);
 				return adapter;
@@ -295,7 +315,7 @@ describe("createAppRuntime", () => {
 			workingDirectory: "/tmp",
 			mode: "print",
 			model: stubModel,
-			createAdapter: () => {
+			createAdapter: (_model) => {
 				const adapter = new StubKernelSessionAdapter();
 				adapters.push(adapter);
 				return adapter;

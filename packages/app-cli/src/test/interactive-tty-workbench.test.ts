@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
 import type {
@@ -214,6 +214,36 @@ async function createGitRepoFixture(options?: {
 	return { repoDir, filePath };
 }
 
+async function createModelFixture(): Promise<{ readonly agentDir: string; readonly settingsPath: string }> {
+	const agentDir = await mkdtemp(join(tmpdir(), "genesis-model-agent-"));
+	const settingsDir = await mkdtemp(join(tmpdir(), "genesis-model-settings-"));
+	const settingsPath = join(settingsDir, "settings.json");
+	await writeFile(
+		join(agentDir, "models.json"),
+		JSON.stringify(
+			{
+				providers: {
+					zai: {
+						baseURL: "https://open.bigmodel.cn/api/coding/paas/v4/",
+						api: "openai-completions",
+						envKey: "GENESIS_API_KEY",
+						authHeader: "Authorization",
+						models: [
+							{ id: "glm-5.1", name: "GLM 5.1", reasoning: true },
+							{ id: "glm-5.2", name: "GLM 5.2", reasoning: true },
+						],
+					},
+				},
+			},
+			null,
+			2,
+		),
+		"utf8",
+	);
+	await writeFile(settingsPath, "{}\n", "utf8");
+	return { agentDir, settingsPath };
+}
+
 class FakeInteractiveSession implements SessionFacade {
 	readonly id: SessionFacade["id"];
 	readonly state: SessionFacade["state"];
@@ -223,6 +253,7 @@ class FakeInteractiveSession implements SessionFacade {
 	private readonly sessionApprovedCommands = new Set<string>();
 	private readonly receivedPrompts: string[] = [];
 	private readonly receivedContinues: string[] = [];
+	private readonly stateListeners = new Set<(state: SessionFacade["state"]) => void>();
 	private pendingPermission: {
 		callId: string;
 		toolName: string;
@@ -644,6 +675,15 @@ class FakeInteractiveSession implements SessionFacade {
 
 	async close(): Promise<void> {}
 
+	async switchModel(model: SessionFacade["state"]["model"]): Promise<void> {
+		(this.state as { model: SessionFacade["state"]["model"]; updatedAt: number }).model = model;
+		(this.state as { model: SessionFacade["state"]["model"]; updatedAt: number }).updatedAt = Date.now();
+		(this.context as { model: SessionFacade["context"]["model"] }).model = model;
+		for (const listener of this.stateListeners) {
+			listener(this.state);
+		}
+	}
+
 	async resolvePermission(
 		callId: string,
 		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
@@ -674,8 +714,11 @@ class FakeInteractiveSession implements SessionFacade {
 		pending.resolve();
 	}
 
-	onStateChange(): () => void {
-		return () => {};
+	onStateChange(listener: (state: SessionFacade["state"]) => void): () => void {
+		this.stateListeners.add(listener);
+		return () => {
+			this.stateListeners.delete(listener);
+		};
 	}
 
 	async compact(): Promise<void> {
@@ -795,6 +838,7 @@ class FakeInteractiveSession implements SessionFacade {
 function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 	const events = createEventBus();
 	const recentSessions: RecentSessionEntry[] = [];
+	let defaultModel = session.state.model;
 	return {
 		createSession: () => session,
 		recoverSession: () => session,
@@ -806,6 +850,10 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 		},
 		listRecentSessions: async () => recentSessions,
 		searchRecentSessions: async (query) => searchRecentSessionsForTest(recentSessions, query),
+		getDefaultModel: () => defaultModel,
+		setDefaultModel: (model) => {
+			defaultModel = model;
+		},
 		shutdown: async () => {},
 	};
 }
@@ -818,6 +866,7 @@ function createSequencedRuntime(
 	const events = createEventBus();
 	let createIndex = 0;
 	const recentSessions = [...initialRecentSessions];
+	let defaultModel = sessions[0]?.state.model ?? { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" };
 	return {
 		createSession: () => {
 			const next = sessions[createIndex];
@@ -842,6 +891,10 @@ function createSequencedRuntime(
 		},
 		listRecentSessions: async () => recentSessions,
 		searchRecentSessions: async (query) => searchRecentSessionsForTest(recentSessions, query),
+		getDefaultModel: () => defaultModel,
+		setDefaultModel: (model) => {
+			defaultModel = model;
+		},
 		shutdown: async () => {},
 	};
 }
@@ -1063,11 +1116,11 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes("❯"));
 
 			input.write("/help\r");
-			await waitFor(() => screen.snapshot().includes("Commands:"));
-			expect(screen.snapshot()).toContain("/changes");
-			expect(screen.snapshot()).toContain("/status");
-			expect(screen.snapshot()).not.toContain("/model");
-			expect(screen.snapshot()).not.toContain("/config");
+			await waitFor(() => output.getRawOutput().includes("Commands:"));
+			expect(output.getRawOutput()).toContain("/changes");
+			expect(output.getRawOutput()).toContain("/status");
+			expect(output.getRawOutput()).toContain("/model");
+			expect(output.getRawOutput()).not.toContain("/config");
 
 			input.write("/exit\r");
 			await startPromise;
@@ -1206,6 +1259,50 @@ describe("interactive workbench TTY", () => {
 			input.write("/exit\r");
 			await startPromise;
 		});
+	}, 10000);
+
+	it("switches the current model and persists the new default via /model", async () => {
+		const { agentDir, settingsPath } = await createModelFixture();
+		const session = new FakeInteractiveSession({ sessionId: "session-model", agentDir });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive", {
+					modelHost: {
+						agentDir,
+						settingsPath,
+						bootstrapDefaults: {
+							baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4/",
+							api: "openai-completions",
+						},
+					},
+				}).start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("/model glm-5.2\r");
+				await waitFor(() => runtime.getDefaultModel().id === "glm-5.2");
+				expect(output.getRawOutput()).toContain("Current model: glm-5.2");
+				expect(runtime.getDefaultModel().id).toBe("glm-5.2");
+				expect(session.state.model.id).toBe("glm-5.2");
+				expect(JSON.parse(await readFile(settingsPath, "utf8"))).toMatchObject({
+					provider: "zai",
+					model: "glm-5.2",
+				});
+
+				input.write("/model\r");
+				await waitFor(() => output.getRawOutput().includes("Available models:"));
+				expect(output.getRawOutput()).toContain("glm-5.2 (current)");
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await rm(agentDir, { recursive: true, force: true });
+			await rm(dirname(settingsPath), { recursive: true, force: true });
+		}
 	}, 10000);
 
 	it("opens a resume browser, filters as you type, and resumes the selected session", async () => {

@@ -69,10 +69,12 @@ export type {
 	OutputMode,
 	OutputSink,
 	RenderContext,
+	ModelOption,
 	ResumeBrowserState,
 	RpcEnvelope,
 	SlashCommand,
 	SlashCommandContext,
+	SlashCommandHost,
 	SlashCommandResult,
 	SlashCommandType,
 } from "./types/index.js";

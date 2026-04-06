@@ -7,6 +7,7 @@
  */
 
 import type { SessionRecoveryData } from "../types/index.js";
+import type { ModelDescriptor } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Raw upstream event — a generic envelope from pi-mono
@@ -85,6 +86,9 @@ export interface KernelSessionAdapter {
 
 	/** Extract serializable recovery data from the current session state. */
 	getRecoveryData(): Promise<SessionRecoveryData>;
+
+	/** Switch the model used for subsequent requests in this session. */
+	setModel?(model: ModelDescriptor): Promise<void> | void;
 
 	/** Resume a previously serialized session. Called before any prompt/continue. */
 	resume(data: SessionRecoveryData): void;

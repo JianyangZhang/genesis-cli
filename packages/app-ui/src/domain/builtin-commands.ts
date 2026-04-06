@@ -13,18 +13,37 @@ import type { SlashCommand, SlashCommandContext } from "../types/index.js";
 
 const modelCommand: SlashCommand = {
 	name: "model",
-	description: "Show the active model",
+	description: "Show or switch the active model",
 	type: "local",
-	visibility: "internal",
+	visibility: "public",
 	async execute(ctx: SlashCommandContext): Promise<undefined> {
 		const model = ctx.session.state.model;
 		if (ctx.args.length === 0) {
 			ctx.output.writeLine(`Current model: ${model.displayName ?? model.id}`);
 			ctx.output.writeLine(`  Provider: ${model.provider}`);
 			ctx.output.writeLine(`  ID: ${model.id}`);
+			const available = await ctx.host?.listAvailableModels?.(model);
+			if (available && available.length > 0) {
+				ctx.output.writeLine("Available models:");
+				for (const option of available.slice(0, 8)) {
+					ctx.output.writeLine(`  ${option.id}${option.id === model.id ? " (current)" : ""}`);
+				}
+			}
 		} else {
-			ctx.output.writeError("Model switching is not available in this release.");
-			ctx.output.writeLine(`Current model: ${model.displayName ?? model.id}`);
+			if (!ctx.host?.switchModel) {
+				ctx.output.writeError("Model switching is not available in this environment.");
+				return undefined;
+			}
+			const result = await ctx.host.switchModel({
+				session: ctx.session,
+				runtime: ctx.runtime,
+				modelId: ctx.args.trim(),
+			});
+			ctx.output.writeLine(`Current model: ${result.model.displayName ?? result.model.id}`);
+			ctx.output.writeLine(`  Provider: ${result.model.provider}`);
+			if (result.persistedTo) {
+				ctx.output.writeLine(`  Persisted to: ${result.persistedTo}`);
+			}
 		}
 		return undefined;
 	},

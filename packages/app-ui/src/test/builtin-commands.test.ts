@@ -5,7 +5,7 @@
 import type { AppRuntime, SessionFacade, SessionId, SessionState } from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 import { createBuiltinCommands } from "../domain/builtin-commands.js";
-import type { OutputSink, SlashCommandContext } from "../types/index.js";
+import type { OutputSink, SlashCommandContext, SlashCommandHost } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -55,6 +55,7 @@ function createMockSession(overrides?: Partial<SessionState>): SessionFacade {
 		continue: async () => {},
 		abort: () => {},
 		close: async () => {},
+		switchModel: async () => {},
 		onStateChange: () => {},
 		compact: async () => {},
 	} as unknown as SessionFacade;
@@ -79,6 +80,8 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 		recordRecentSession: async () => {},
 		listRecentSessions: async () => [],
 		searchRecentSessions: async () => [],
+		getDefaultModel: () => session.state.model,
+		setDefaultModel: () => {},
 		shutdown: async () => {},
 	};
 }
@@ -88,8 +91,9 @@ function createContext(
 	runtime: AppRuntime,
 	output: OutputSink,
 	args = "",
+	host?: SlashCommandHost,
 ): SlashCommandContext {
-	return { args, runtime, session, output };
+	return { args, runtime, session, output, host };
 }
 
 // ---------------------------------------------------------------------------
@@ -117,15 +121,22 @@ describe("/model command", () => {
 		expect(output.lines.some((l) => l.includes("anthropic"))).toBe(true);
 	});
 
-	it("reports model switching as unavailable", async () => {
+	it("switches the model via the host when args are provided", async () => {
 		const cmds = createBuiltinCommands();
 		const model = cmds.find((c) => c.name === "model")!;
 		const output = createMockOutputSink();
 		const session = createMockSession();
 		const runtime = createMockRuntime(session);
-		await model.execute!(createContext(session, runtime, output, "gpt-4"));
-		expect(output.errors).toContain("Model switching is not available in this release.");
-		expect(output.lines.some((l) => l.includes("Current model: Claude 3 Sonnet"))).toBe(true);
+		const host: SlashCommandHost = {
+			switchModel: async () => ({
+				model: { id: "gpt-4", provider: "openai", displayName: "GPT-4" },
+				persistedTo: "/tmp/settings.json",
+			}),
+		};
+		await model.execute!(createContext(session, runtime, output, "gpt-4", host));
+		expect(output.lines).toContain("Current model: GPT-4");
+		expect(output.lines).toContain("  Provider: openai");
+		expect(output.lines).toContain("  Persisted to: /tmp/settings.json");
 	});
 });
 

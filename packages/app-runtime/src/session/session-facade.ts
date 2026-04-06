@@ -18,11 +18,11 @@ import type { ToolGovernor } from "../governance/tool-governor.js";
 import type { PlanEngine } from "../planning/plan-engine.js";
 import type { PlanOrchestrator } from "../planning/plan-orchestrator.js";
 import { createPlanOrchestrator } from "../planning/plan-orchestrator.js";
-import { updateTaskState as updateContextTaskState } from "../runtime-context.js";
+import { updateModel as updateContextModel, updateTaskState as updateContextTaskState } from "../runtime-context.js";
 import { EventNormalizer } from "../services/event-normalizer.js";
-import type { RuntimeContext, SessionId, SessionState, TaskState } from "../types/index.js";
+import type { ModelDescriptor, RuntimeContext, SessionId, SessionState, TaskState } from "../types/index.js";
 import { generateEventId, sessionClosed } from "./session-events.js";
-import { updatePlanSummary, updateSessionStatus, updateTaskState } from "./session-state.js";
+import { updatePlanSummary, updateSessionModel, updateSessionStatus, updateTaskState } from "./session-state.js";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -55,6 +55,9 @@ export interface SessionFacade {
 
 	/** Resolve a pending permission request. */
 	resolvePermission(callId: string, decision: "allow" | "allow_for_session" | "allow_once" | "deny"): Promise<void>;
+
+	/** Switch the active model for subsequent requests in this session. */
+	switchModel(model: ModelDescriptor): Promise<void>;
 
 	/** Subscribe to state changes. */
 	onStateChange(listener: (state: SessionState) => void): Unsubscribe;
@@ -283,6 +286,15 @@ export class SessionFacadeImpl implements SessionFacade {
 			await this._adapter.resolveToolPermission(callId, decision);
 		}
 		this.flushBufferedToolExecution(callId, decision);
+	}
+
+	async switchModel(model: ModelDescriptor): Promise<void> {
+		this.assertOpen();
+		this.assertNotRunning();
+		await this._adapter.setModel?.(model);
+		this._state = updateSessionModel(this._state, model);
+		this._context = updateContextModel(this._context, model);
+		this.notifyStateChange();
 	}
 
 	// -----------------------------------------------------------------------

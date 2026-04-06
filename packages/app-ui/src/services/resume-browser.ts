@@ -86,6 +86,7 @@ function formatResumeBrowserMatchSource(source: RecentSessionMatchSource): strin
 		case "session_id":
 			return "session id";
 	}
+	return source;
 }
 
 function shortSessionId(sessionId: string): string {

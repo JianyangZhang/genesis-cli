@@ -89,3 +89,7 @@ export function updateTaskState(state: SessionState, taskState: TaskState): Sess
 export function updatePlanSummary(state: SessionState, planSummary: PlanSummary | null): SessionState {
 	return { ...state, planSummary, updatedAt: Date.now() };
 }
+
+export function updateSessionModel(state: SessionState, model: ModelDescriptor): SessionState {
+	return { ...state, model, updatedAt: Date.now() };
+}

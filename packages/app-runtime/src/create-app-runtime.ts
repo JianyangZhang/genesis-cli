@@ -58,7 +58,7 @@ export interface AppRuntimeConfig {
 	readonly adapter?: KernelSessionAdapter;
 
 	/** Factory for creating one fresh adapter per session. */
-	readonly createAdapter?: () => KernelSessionAdapter;
+	readonly createAdapter?: (model: ModelDescriptor) => KernelSessionAdapter;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +90,12 @@ export interface AppRuntime {
 	/** Search recent sessions by human-readable text, ordered by relevance. */
 	searchRecentSessions(query: string): Promise<readonly RecentSessionSearchHit[]>;
 
+	/** The current default model for newly created sessions. */
+	getDefaultModel(): ModelDescriptor;
+
+	/** Update the default model for newly created sessions. */
+	setDefaultModel(model: ModelDescriptor): void;
+
 	/** Shut down the runtime and release resources. */
 	shutdown(): Promise<void>;
 }
@@ -107,6 +113,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 	const sessions = new Set<SessionFacade>();
 	let shutdown = false;
 	let staticAdapterClaimed = false;
+	let defaultModel = config.model;
 
 	function assertNotShutdown(): void {
 		if (shutdown) {
@@ -114,9 +121,9 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 		}
 	}
 
-	function getAdapter(): KernelSessionAdapter {
+	function getAdapter(model: ModelDescriptor): KernelSessionAdapter {
 		if (config.createAdapter) {
-			return config.createAdapter();
+			return config.createAdapter(model);
 		}
 
 		if (config.adapter) {
@@ -159,25 +166,34 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			return searchRecentSessions(config.agentDir, query);
 		},
 
+		getDefaultModel(): ModelDescriptor {
+			return defaultModel;
+		},
+
+		setDefaultModel(model: ModelDescriptor): void {
+			defaultModel = model;
+		},
+
 		createSession(): SessionFacade {
 			assertNotShutdown();
 
+			const model = defaultModel;
 			const sessionId = { value: crypto.randomUUID() };
-			const state = createInitialSessionState(sessionId, config.model, toolSet);
+			const state = createInitialSessionState(sessionId, model, toolSet);
 			const context = createRuntimeContext({
 				sessionId,
 				workingDirectory: config.workingDirectory,
 				agentDir: config.agentDir,
 				configSources: config.configSources,
 				mode: config.mode,
-				model: config.model,
+				model,
 				toolSet,
 			});
 
-			const facade = new SessionFacadeImpl(getAdapter(), state, context, globalBus, governor, planEngine);
+			const facade = new SessionFacadeImpl(getAdapter(model), state, context, globalBus, governor, planEngine);
 
 			// Emit session_created on the global bus
-			const event = sessionCreated(sessionId, config.model, [...toolSet]);
+			const event = sessionCreated(sessionId, model, [...toolSet]);
 			globalBus.emit(event);
 
 			sessions.add(facade);
@@ -198,7 +214,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 				toolSet: new Set(data.toolSet),
 			});
 
-			const adapter = getAdapter();
+			const adapter = getAdapter(data.model);
 
 			// Tell the adapter about the recovery so it can restore its own state.
 			adapter.resume(data);

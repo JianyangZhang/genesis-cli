@@ -3,8 +3,8 @@
 	"compilerOptions": {
 		"baseUrl": ".",
 		"paths": {
-			"@pickle-pee/runtime": ["../app-runtime/dist/index.d.ts"],
-			"@pickle-pee/tools": ["../app-tools/dist/index.d.ts"]
+			"@pickle-pee/runtime": ["../app-runtime/dist/index"],
+			"@pickle-pee/tools": ["../app-tools/dist/index"]
 		}
 	},
 	"exclude": ["src/test", "src/**/*.test.ts"]

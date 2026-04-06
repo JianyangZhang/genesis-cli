@@ -16,6 +16,7 @@ export interface CliOptions {
 	readonly debug: boolean;
 	readonly workingDirectory: string;
 	readonly agentDir: string;
+	readonly settingsPath: string;
 	readonly model: ModelDescriptor;
 	readonly toolSet: readonly string[];
 	readonly thinkingLevel?: ThinkingLevel;
@@ -132,17 +133,26 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 			mode: options.mode,
 			model: options.model,
 			toolSet: options.toolSet,
-			createAdapter: () =>
+			createAdapter: (model) =>
 				new PiMonoSessionAdapter({
 					workingDirectory: options.workingDirectory,
 					agentDir: options.agentDir,
-					model: options.model,
+					model,
 					toolSet: options.toolSet,
 					thinkingLevel: options.thinkingLevel,
 				}),
 		});
 
-		const handler = createModeHandler(options.mode);
+		const handler = createModeHandler(options.mode, {
+			modelHost: {
+				agentDir: options.agentDir,
+				settingsPath: options.settingsPath,
+				bootstrapDefaults: {
+					baseUrl: options.bootstrapOverrides?.baseUrl,
+					api: options.bootstrapOverrides?.api,
+				},
+			},
+		});
 		logger.info("cli.mode", "Starting mode handler", { mode: options.mode });
 		try {
 			await handler.start(runtime);
@@ -500,6 +510,7 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 		debug,
 		workingDirectory,
 		agentDir,
+		settingsPath,
 		model: {
 			id: modelId,
 			provider,

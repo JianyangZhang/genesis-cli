@@ -34,6 +34,7 @@ import {
 } from "@pickle-pee/ui";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
+import { createModelCommandHost, type ModelCommandHostOptions } from "./model-command-host.js";
 import type { RpcServer } from "./rpc-server.js";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import { createRpcServer } from "./rpc-server.js";
@@ -53,10 +54,10 @@ export interface ModeHandler {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createModeHandler(mode: CliMode): ModeHandler {
+export function createModeHandler(mode: CliMode, options?: { readonly modelHost?: ModelCommandHostOptions }): ModeHandler {
 	switch (mode) {
 		case "interactive":
-			return new InteractiveModeHandler();
+			return new InteractiveModeHandler(options?.modelHost);
 		case "print":
 			return new PrintModeHandler();
 		case "json":
@@ -82,6 +83,8 @@ const RESIZE_REDRAW_DEBOUNCE_MS = 120;
 // ---------------------------------------------------------------------------
 
 class InteractiveModeHandler implements ModeHandler {
+	constructor(private readonly _modelHostOptions?: ModelCommandHostOptions) {}
+
 	private _pendingPermissionCallId: string | null = null;
 	private _pendingPermissionDetails: {
 		toolName: string;
@@ -133,6 +136,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
+		const commandHost = createModelCommandHost(this._modelHostOptions ?? {});
 		if (!process.stdin.isTTY || !process.stdout.isTTY) {
 			throw new Error("Interactive mode requires a TTY. Use --mode print|json|rpc instead.");
 		}
@@ -174,6 +178,7 @@ class InteractiveModeHandler implements ModeHandler {
 			debouncedResizeRedraw.schedule();
 		};
 		process.stdout.on("resize", onResize);
+		let detachSessionStateListener: (() => void) | null = null;
 
 		const resolveAgentDir = (): string => {
 			return (
@@ -183,6 +188,8 @@ class InteractiveModeHandler implements ModeHandler {
 		};
 
 		const attachSession = (next: SessionFacade): void => {
+			detachSessionStateSubscription(detachSessionStateListener);
+			detachSessionStateListener = null;
 			sessionRef.current.events.removeAllListeners();
 			sessionRef.current = next;
 			this._pendingPermissionCallId = null;
@@ -274,6 +281,13 @@ class InteractiveModeHandler implements ModeHandler {
 					this._pendingPermissionCallId = null;
 				}
 				this.handleTranscriptEvent(event);
+			});
+			detachSessionStateListener = sessionRef.current.onStateChange((state) => {
+				if (state.model.id !== sessionRef.current.state.model.id || state.model.provider !== sessionRef.current.state.model.provider) {
+					return;
+				}
+				this.renderWelcome(sessionRef.current);
+				this.renderFooterRegion();
 			});
 		};
 
@@ -833,6 +847,7 @@ class InteractiveModeHandler implements ModeHandler {
 							runtime,
 							session: sessionRef.current,
 							output: sink,
+							host: commandHost,
 						});
 					} catch (error) {
 						this._lastError = error instanceof Error ? error.message : String(error);
@@ -870,6 +885,7 @@ class InteractiveModeHandler implements ModeHandler {
 		} finally {
 			process.stdout.off("resize", onResize);
 			debouncedResizeRedraw.cancel();
+			detachSessionStateSubscription(detachSessionStateListener);
 			inputLoop.close();
 			this._inputLoop = null;
 			process.stdout.write(ansiResetScrollRegion());
@@ -1998,6 +2014,12 @@ function splitNonEmptyLines(text: string): readonly string[] {
 		.split("\n")
 		.map((line) => line.trimEnd())
 		.filter((line) => line.length > 0);
+}
+
+function detachSessionStateSubscription(unsubscribe: (() => void) | null): void {
+	if (unsubscribe) {
+		unsubscribe();
+	}
 }
 
 function stripAnsiWelcome(text: string): string {

@@ -81,6 +81,7 @@ export type {
 // Context
 export type { RuntimeContextParams } from "./runtime-context.js";
 export { createRuntimeContext, updateTaskState } from "./runtime-context.js";
+export { updateModel as updateRuntimeContextModel } from "./runtime-context.js";
 // Services
 export { EventNormalizer } from "./services/event-normalizer.js";
 // Session events
@@ -93,6 +94,7 @@ export {
 	recoverSessionState,
 	serializeForRecovery,
 	updateCompactionSummary,
+	updateSessionModel,
 	updatePlanSummary,
 	updateSessionStatus,
 	updateTaskState as updateSessionTaskState,

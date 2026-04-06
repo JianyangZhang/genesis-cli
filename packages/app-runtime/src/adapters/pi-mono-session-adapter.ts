@@ -111,10 +111,12 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 	private pendingRecoveryData: ExtendedRecoveryData | null = null;
 	private closed = false;
 	private bridgeState: PiMonoBridgeState;
+	private currentModel: ModelDescriptor;
 
 	constructor(private readonly options: PiMonoSessionAdapterOptions) {
+		this.currentModel = options.model;
 		this.bridgeState = createInitialBridgeState({
-			model: options.model,
+			model: this.currentModel,
 			toolSet: options.toolSet ?? defaultToolSet(),
 		});
 	}
@@ -165,7 +167,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		const snapshot = await this.getActiveSnapshot();
 		return {
 			sessionId: { value: snapshot?.sessionId ?? "unknown-session" },
-			model: this.options.model,
+			model: this.currentModel,
 			toolSet: [...this.bridgeState.toolSet],
 			planSummary: null,
 			compactionSummary: null,
@@ -179,6 +181,23 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 
 	resume(data: SessionRecoveryData): void {
 		this.pendingRecoveryData = data;
+	}
+
+	async setModel(model: ModelDescriptor): Promise<void> {
+		const recoveryData = await this.getRecoveryData();
+		this.currentModel = model;
+		this.bridgeState = createInitialBridgeState({
+			model,
+			toolSet: this.bridgeState.toolSet,
+		});
+		if (this.session) {
+			this.session.dispose();
+			this.session = null;
+		}
+		this.pendingRecoveryData = {
+			...recoveryData,
+			model,
+		};
 	}
 
 	private async *runPromptLikeOperation(input: string, mode: "prompt" | "continue"): AsyncIterable<RawUpstreamEvent> {
@@ -404,9 +423,9 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 			});
 			this.bridgeState = createInitialBridgeState({
 				model: {
-					id: this.options.model.id,
-					provider: this.options.model.provider,
-					displayName: this.options.model.displayName,
+					id: this.currentModel.id,
+					provider: this.currentModel.provider,
+					displayName: this.currentModel.displayName,
 				},
 				toolSet: tools.map((tool) => tool.name),
 			});
@@ -417,10 +436,10 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		const sdk = await loadPiMonoSdk();
 		const authStorage = sdk.AuthStorage.create(agentDir ? join(agentDir, "auth.json") : undefined);
 		const modelRegistry = sdk.ModelRegistry.create(authStorage, agentDir ? join(agentDir, "models.json") : undefined);
-		const model = modelRegistry.find(this.options.model.provider, this.options.model.id) as PiMonoModel | undefined;
+		const model = modelRegistry.find(this.currentModel.provider, this.currentModel.id) as PiMonoModel | undefined;
 		if (!model) {
 			throw new Error(
-				`Model ${this.options.model.provider}/${this.options.model.id} is not configured in ${
+				`Model ${this.currentModel.provider}/${this.currentModel.id} is not configured in ${
 					agentDir ?? "~/.pi/agent"
 				}/models.json`,
 			);
@@ -445,9 +464,9 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 
 		this.bridgeState = createInitialBridgeState({
 			model: {
-				id: this.options.model.id,
-				provider: this.options.model.provider,
-				displayName: this.options.model.displayName,
+				id: this.currentModel.id,
+				provider: this.currentModel.provider,
+				displayName: this.currentModel.displayName,
 			},
 			toolSet: tools.map((tool) => tool.name),
 		});

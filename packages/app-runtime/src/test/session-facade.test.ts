@@ -1136,6 +1136,19 @@ describe("SessionFacade — plan integration", () => {
 		expect(facade.plan).toBeNull();
 	});
 
+	it("switches the active model and notifies state listeners", async () => {
+		const { facade, adapter } = createFacadeWithPlan();
+		const seenModels: string[] = [];
+		facade.onStateChange((state) => seenModels.push(state.model.id));
+
+		await facade.switchModel({ id: "glm-5.2", provider: "zai", displayName: "GLM 5.2" });
+
+		expect(facade.state.model.id).toBe("glm-5.2");
+		expect(facade.context.model.id).toBe("glm-5.2");
+		expect(adapter.lastModel.id).toBe("glm-5.2");
+		expect(seenModels).toContain("glm-5.2");
+	});
+
 	it("plan events update sessionState.planSummary", () => {
 		const { facade } = createFacadeWithPlan();
 		expect(facade.state.planSummary).toBeNull();
