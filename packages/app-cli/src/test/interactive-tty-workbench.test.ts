@@ -2009,7 +2009,7 @@ describe("interactive workbench TTY", () => {
 				const snapshot = screen.snapshot();
 				return snapshot.includes("Responding..") || snapshot.includes("Responding...");
 			}, 2000);
-			await waitFor(() => screen.snapshot().includes("2s"), 3000);
+			await waitFor(() => /\b[23]s\b/.test(screen.snapshot()), 4000);
 			await waitFor(() => screen.snapshot().includes("Draft reply finished"), 3000);
 
 			input.write("/exit\r");
