@@ -780,12 +780,17 @@ function readOptionalBooleanFlag(
 		return value;
 	}
 	if (typeof value === "string") {
-		return value === "true";
+		return parseBooleanLike(value);
 	}
 	if (envValue === undefined) {
 		return undefined;
 	}
-	return envValue === "true";
+	return parseBooleanLike(envValue);
+}
+
+function parseBooleanLike(value: string): boolean {
+	const normalized = value.trim().toLowerCase();
+	return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
 }
 
 function splitCsv(value: string): readonly string[] {

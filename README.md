@@ -128,6 +128,15 @@ npm run chat:live
 - 前提：Node.js 20.0.0+，且 `.env.local` 中已配置可用的 `GENESIS_API_KEY`
 - 默认入口：`npm run chat:live` 会启动 interactive 工作台
 - 启动成功：会看到 `Genesis CLI` 欢迎卡片与 `❯ ` 提示符
+- Debug 启动：
+
+```bash
+npm run chat:live -- --debug
+# 或
+GENESIS_DEBUG=1 npm run chat:live
+```
+
+- 说明：源码模式下推荐优先用上面两种方式；都会保留 `.env.local`，并启用 debug 日志
 
 ### 调试与日志
 
@@ -140,6 +149,9 @@ genesis -d
 - 可见性：启动后会显示本次会话的 `trace-id`
   - 标准错误输出会打印 `trace-id` 与日志目录
   - Interactive 模式会在历史缓冲区显示 `Debug trace: ...`
+- 新渲染内核额外日志：
+  - `tui.capabilities`：终端宿主识别、能力降级结果、mode plan 摘要
+  - `tui.render`：frame 尺寸、footer 行数、viewport 行数、patch 统计
 - 反馈问题：优先附上复现步骤、`trace-id` 与 `~/.genesis-cli/debug-logs/<trace-id>/` 下的相关日志文件
 
 ### 常用检查

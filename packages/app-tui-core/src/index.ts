@@ -6,6 +6,12 @@ export {
 	createInteractiveModePlan,
 	createRestoredModeState,
 } from "./lifecycle/terminal-modes.js";
+export {
+	summarizeFramePatches,
+	summarizeScreenFrame,
+	summarizeTerminalCapabilities,
+	summarizeTerminalModePlan,
+} from "./debug/render-summary.js";
 export { diffScreenFrames } from "./render/frame-diff.js";
 export {
 	encodeFramePatches,

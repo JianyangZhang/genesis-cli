@@ -45,6 +45,10 @@ import {
 	materializeTextBlock,
 	stripAnsiControlSequences,
 	renderSelectedPlainLine,
+	summarizeFramePatches,
+	summarizeScreenFrame,
+	summarizeTerminalCapabilities,
+	summarizeTerminalModePlan,
 	truncatePlainText as truncatePlainTextFromTuiCore,
 	type ComposedScreen,
 	type RenderedComposerBlock,
@@ -208,6 +212,16 @@ class InteractiveModeHandler implements ModeHandler {
 			...terminalCapabilities,
 			// Old input-loop path does not yet parse bracketed paste envelopes safely.
 			bracketedPaste: false,
+		});
+		getActiveDebugLogger()?.debug("tui.capabilities", "Resolved terminal capabilities", {
+			env: {
+				term: process.env.TERM,
+				termProgram: process.env.TERM_PROGRAM,
+				terminalEmulator: process.env.TERMINAL_EMULATOR,
+				tmux: process.env.TMUX,
+			},
+			capabilities: summarizeTerminalCapabilities(terminalCapabilities),
+			modePlan: summarizeTerminalModePlan(terminalModePlan),
 		});
 		const ttySession = createTtySession({
 			onResume: () => {
@@ -1714,7 +1728,17 @@ class InteractiveModeHandler implements ModeHandler {
 			process.stdout.write(encodeResetScrollRegion());
 		}
 		const next = this.buildInteractiveScreenFrame();
-		process.stdout.write(encodeFramePatches(diffScreenFrames(this._lastScreenFrame, next.frame), next.frame.width));
+		const patches = diffScreenFrames(this._lastScreenFrame, next.frame);
+		getActiveDebugLogger()?.debug("tui.render", "Rendered interactive screen frame", {
+			resetScrollRegion: options.resetScrollRegion ?? false,
+			footerStartRow: next.footerStartRow,
+			pinFooterToBottom: next.pinFooterToBottom,
+			footerLineCount: next.footerUi.lines.length,
+			transcriptViewportLineCount: this._renderedTranscriptViewportLines.length,
+			frame: summarizeScreenFrame(next.frame),
+			patches: summarizeFramePatches(patches),
+		});
+		process.stdout.write(encodeFramePatches(patches, next.frame.width));
 		if (next.pinFooterToBottom) {
 			process.stdout.write(
 				encodeSetScrollRegion({

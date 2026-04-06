@@ -202,6 +202,15 @@ describe("resolveCliOptions", () => {
 		expect(options.debug).toBe(true);
 	});
 
+	it("accepts 1 for GENESIS_DEBUG", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		process.env.HOME = homeDir;
+		process.env.GENESIS_DEBUG = "1";
+
+		const options = await resolveCliOptions({});
+		expect(options.debug).toBe(true);
+	});
+
 	it("enables debug mode from --debug", async () => {
 		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
 		process.env.HOME = homeDir;

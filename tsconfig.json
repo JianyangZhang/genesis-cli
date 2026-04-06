@@ -1,6 +1,8 @@
 {
 	"extends": "./tsconfig.base.json",
 	"files": [],
+	"include": [],
+	"exclude": ["**/dist/**", "**/node_modules/**"],
 	"references": [
 		{ "path": "packages/app-config" },
 		{ "path": "packages/app-tools" },
