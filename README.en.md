@@ -104,54 +104,30 @@ Interaction basics:
 
 ## Top-Level Blueprint
 
-Genesis deliberately aims for a "thin UI, rich contracts, repository-owned kernel" structure.
+Genesis follows a "thin UI, rich contracts, repository-owned kernel" structure.
 
-### Layers
-
-- `packages/app-cli`
-  - process entrypoint, TTY lifecycle, input loop, interactive mode host
-- `packages/app-ui`
-  - slash commands, pickers, formatters, interaction state, presentation rules
-- `packages/app-runtime`
-  - session facade, event normalization, tool governance, planning, product state aggregation
-- `packages/kernel`
-  - the vendored kernel
-  - this should keep separating into a cleaner `session core` and `provider/tools`
-- `pi-agent-core`
-  - minimal agent loop, message-driven execution, tool-call primitives
-
-### Design Rules
-
-- `app-cli` owns terminal hosting, not product semantics
-- `app-ui` owns interaction and rendering, not transcript persistence details
-- `app-runtime` maps kernel semantics into product semantics, but should not parse transcript files directly
-- `kernel session core` owns transcript persistence, resume, compact, context rebuild, and session metadata
-- `kernel provider/tools` owns model auth, provider integration, and low-level tool wiring
-
-### Placement Guide For Contributors
-
-- TTY input, main buffer behavior, interactive lifecycle: start in `app-cli`
-- slash commands, pickers, output formatting: start in `app-ui`
-- session facade, event normalization, governance, planning: start in `app-runtime`
-- transcript, resume, compact, recovery snapshot, session metadata: start in `kernel session core`
-- provider integration, auth, tool wiring: start in `kernel provider/tools`
-
-### Current Refactor Direction
-
-The current priority is not adding more commands. It is continuing to straighten the `session core` boundary.
-
-Already completed:
-
-- `/resume` summary and restored-context preview
-- a minimally working `/compact` flow
-- `SessionRecoveryData.metadata` as a unified recovery contract
-- moving session metadata out of `app-cli` private logic back into `kernel`
-
-Still in progress:
-
-- a truly stable `session-manager`
-- a cleaner contract for `resume / compact / persistence / context rebuild`
-- less cross-layer fallback logic and less duplicate parsing
+- Layers:
+  - `packages/app-cli` owns process entrypoints, the TTY lifecycle, and the interactive mode host
+  - `packages/app-ui` owns slash commands, pickers, formatters, and interaction presentation
+  - `packages/app-runtime` owns the session facade, event normalization, governance, and planning
+  - `packages/kernel` owns the vendored kernel and continues to separate `session core` from `provider/tools`
+  - `pi-agent-core` owns the minimal agent loop and tool-call primitives
+- Boundaries:
+  - `app-cli` hosts the terminal, but does not own product semantics
+  - `app-ui` consumes stable contracts, but does not handle transcript persistence details
+  - `app-runtime` maps kernel semantics into product semantics
+  - `kernel session core` owns transcript persistence, resume, compact, context rebuild, and session metadata
+  - `kernel provider/tools` owns model auth, provider integration, and low-level tool wiring
+- Where to start:
+  - TTY behavior and interactive lifecycle: `app-cli`
+  - slash commands, pickers, formatters: `app-ui`
+  - session facade, event normalization, governance: `app-runtime`
+  - transcript, resume, compact, recovery snapshot: `kernel session core`
+  - provider, auth, tool wiring: `kernel provider/tools`
+- Current direction:
+  - stop adding commands first; keep tightening the `session core` boundary
+  - already landed: `/resume` preview, a minimally working `/compact`, and `SessionRecoveryData.metadata`
+  - still in progress: `session-manager`, recovery contracts, and removing cross-layer fallback logic
 
 ---
 

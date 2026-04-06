@@ -104,54 +104,30 @@ genesis
 
 ## 顶层蓝图
 
-Genesis 当前有意保持“薄 UI、厚 contract、仓库自持内核”的结构。
+Genesis 采用“薄 UI、厚 contract、仓库自持内核”的结构。
 
-### 分层
-
-- `packages/app-cli`
-  - 负责进程入口、TTY 生命周期、输入循环、interactive mode 宿主
-- `packages/app-ui`
-  - 负责 slash commands、picker、formatter、交互状态与展示规则
-- `packages/app-runtime`
-  - 负责 session facade、事件归一化、tool governance、planning、产品态聚合
-- `packages/kernel`
-  - 负责 vendored kernel
-  - 其中应继续收敛出更清晰的 `session core` 与 `provider/tools` 两块
-- `pi-agent-core`
-  - 负责最小 agent loop、消息驱动与工具执行原语
-
-### 核心设计
-
-- `app-cli` 不承载产品语义，只承载终端宿主语义
-- `app-ui` 不直接操心底层 session 持久化，只消费稳定 contract
-- `app-runtime` 不负责 transcript 文件细节，只负责把 kernel 语义映射成产品语义
-- `kernel session core` 承接 transcript persistence、resume、compact、context rebuild、session metadata
-- `kernel provider/tools` 承接模型、鉴权、工具注册与底层工具接线
-
-### 贡献者放置规则
-
-- 改 TTY 输入、主缓冲区、interactive 生命周期：优先看 `app-cli`
-- 改 slash command、列表选择器、文案格式化：优先看 `app-ui`
-- 改 session facade、event normalization、permission/governance：优先看 `app-runtime`
-- 改 transcript、resume、compact、recovery snapshot、session metadata：优先看 `kernel session core`
-- 改模型 provider、auth、tool wiring：优先看 `kernel provider/tools`
-
-### 当前重构主线
-
-目前项目最重要的不是继续堆命令，而是持续拉直 `session core` 的职责边界。
-
-已经完成的方向包括：
-
-- `/resume` 的摘要与恢复预览能力
-- `/compact` 的最小可用主链
-- `SessionRecoveryData.metadata` 统一 recovery contract
-- session metadata 从 `app-cli` 私有逻辑下沉回 `kernel`
-
-后续仍会继续收敛：
-
-- 真正稳定的 `session-manager`
-- 更完整的 `resume / compact / persistence / context rebuild` contract
-- 更少的跨层兜底与重复解析逻辑
+- 分层：
+  - `packages/app-cli` 负责进程入口、TTY 生命周期与 interactive mode 宿主
+  - `packages/app-ui` 负责 slash commands、picker、formatter 与交互展示
+  - `packages/app-runtime` 负责 session facade、事件归一化、governance 与 planning
+  - `packages/kernel` 负责 vendored kernel，并继续收敛 `session core` 与 `provider/tools`
+  - `pi-agent-core` 负责最小 agent loop 与工具执行原语
+- 边界：
+  - `app-cli` 只承载终端宿主语义，不承载产品语义
+  - `app-ui` 只消费稳定 contract，不处理 transcript 持久化细节
+  - `app-runtime` 负责把 kernel 语义映射成产品语义
+  - `kernel session core` 负责 transcript persistence、resume、compact、context rebuild、session metadata
+  - `kernel provider/tools` 负责模型、鉴权与底层工具接线
+- 贡献入口：
+  - 改 TTY / 主缓冲区 / interactive 生命周期：看 `app-cli`
+  - 改 slash commands / picker / formatter：看 `app-ui`
+  - 改 session facade / event normalization / governance：看 `app-runtime`
+  - 改 transcript / resume / compact / recovery snapshot：看 `kernel session core`
+  - 改 provider / auth / tool wiring：看 `kernel provider/tools`
+- 当前主线：
+  - 不继续堆命令，先拉直 `session core` 边界
+  - 已完成 `/resume` 预览、`/compact` 最小主链、`SessionRecoveryData.metadata`
+  - 后续继续收敛 `session-manager`、恢复协议与跨层兜底逻辑
 
 ---
 
