@@ -26,8 +26,10 @@ import {
 	formatInteractiveToolEvent,
 	formatInteractiveToolResult,
 	formatInteractiveToolTitle,
+	formatFullWidthTranscriptUserLine,
 	formatSlashSuggestionHint,
 	formatTranscriptAssistantLine,
+	formatTranscriptUserBlocks,
 	formatTranscriptUserLine,
 	formatTurnNotice,
 	formatWelcomeBottomBorder,
@@ -51,6 +53,21 @@ describe("interactive transcript formatting", () => {
 		const line = formatTranscriptUserLine("Hello");
 		expect(line).toContain("Hello");
 		expect(line).toContain("\x1b[48;5;252m");
+	});
+
+	it("splits queued user batches into independent highlighted blocks", () => {
+		expect(formatTranscriptUserBlocks("queued part one\n\nqueued part two")).toEqual([
+			formatTranscriptUserLine("queued part one"),
+			formatTranscriptUserLine("queued part two"),
+		]);
+	});
+
+	it("pads highlighted user lines to the full terminal width", () => {
+		const line = formatFullWidthTranscriptUserLine(" 你好 ", 12);
+		const visible = line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+		expect([...visible].reduce((width, ch) => width + (ch === "你" || ch === "好" ? 2 : 1), 0)).toBe(12);
+		expect(line.startsWith("\x1b[48;5;252m")).toBe(true);
+		expect(line.endsWith("\x1b[0m")).toBe(true);
 	});
 
 	it("formats assistant lines with a themed bullet prefix", () => {

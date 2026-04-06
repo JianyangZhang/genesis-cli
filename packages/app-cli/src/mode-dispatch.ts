@@ -1377,7 +1377,9 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private startUserTurn(session: SessionFacade, input: string, sink: OutputSink, mode: "prompt" | "continue"): void {
 		this.flushAssistantBuffer(false);
-		this.writeTranscriptText(formatTranscriptUserLine(input), true, false);
+		for (const block of formatTranscriptUserBlocks(input)) {
+			this.writeTranscriptText(block, true, false);
+		}
 		this._turnStartedAt = Date.now();
 		this._detailPanelExpanded = false;
 		this._detailPanelScroll = 0;
@@ -1783,7 +1785,9 @@ class InteractiveModeHandler implements ModeHandler {
 			const row = index + 1;
 			const selectionColumns = this.selectionColumnsForRow(row);
 			return selectionColumns === null
-				? fitTerminalLine(visibleLine, terminalWidth)
+				? isTranscriptUserBlock(visibleLine)
+					? formatFullWidthTranscriptUserLine(plainLine, terminalWidth)
+					: fitTerminalLine(visibleLine, terminalWidth)
 				: renderSelectedPlainLine(plainLine, selectionColumns.startColumn, selectionColumns.endColumn, terminalWidth);
 		});
 
@@ -2671,6 +2675,23 @@ export function acceptFirstSlashSuggestion(
 
 export function formatTranscriptUserLine(content: string): string {
 	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.userTranscriptFg} ${content} ${INTERACTIVE_THEME.reset}`;
+}
+
+export function formatTranscriptUserBlocks(content: string): readonly string[] {
+	return content
+		.split(/\n{2,}/)
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0)
+		.map((part) => formatTranscriptUserLine(part));
+}
+
+export function formatFullWidthTranscriptUserLine(content: string, width: number): string {
+	const plain = content.replace(/\r?\n/g, " ");
+	const visibleWidth = measureTerminalDisplayWidth(plain);
+	const safeWidth = Math.max(1, width);
+	const padded =
+		visibleWidth >= safeWidth ? truncatePlainTerminalText(plain, safeWidth) : `${plain}${" ".repeat(safeWidth - visibleWidth)}`;
+	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.userTranscriptFg}${padded}${INTERACTIVE_THEME.reset}`;
 }
 
 export function formatTranscriptAssistantLine(content: string): string {

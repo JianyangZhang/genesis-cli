@@ -1744,6 +1744,10 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes("Queued batch reply"), 4000);
 			expect(session.getReceivedPrompts()).toContain("slow hello");
 			expect(session.getReceivedContinues()).toEqual(["queued part one\n\nqueued part two"]);
+			const snapshot = screen.snapshot();
+			expect(snapshot).toContain("queued part one");
+			expect(snapshot).toContain("queued part two");
+			expect(output.getRawOutput().match(/\x1b\[48;5;252m/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
 
 			input.write("/exit\r");
 			await startPromise;
