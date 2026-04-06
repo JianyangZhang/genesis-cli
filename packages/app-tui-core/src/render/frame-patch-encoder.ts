@@ -1,4 +1,5 @@
 import type { FramePatch, ScrollRegion } from "../types/index.js";
+import { measureTerminalDisplayWidth, stripAnsiControlSequences, truncatePlainText } from "./text-primitives.js";
 
 export function encodeFramePatches(patches: readonly FramePatch[], terminalWidth: number): string {
 	return patches.map((patch) => encodeFramePatch(patch, terminalWidth)).join("");
@@ -45,5 +46,6 @@ function enableAutoWrap(): string {
 
 function truncateLine(line: string, width: number): string {
 	const safeWidth = Math.max(1, width);
-	return line.length > safeWidth ? line.slice(0, safeWidth) : line;
+	const plain = stripAnsiControlSequences(line);
+	return measureTerminalDisplayWidth(plain) > safeWidth ? truncatePlainText(plain, safeWidth) : line;
 }

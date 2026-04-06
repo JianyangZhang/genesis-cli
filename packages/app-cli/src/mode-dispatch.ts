@@ -6,8 +6,9 @@
  */
 
 import { execFile, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type {
 	AppRuntime,
 	CliMode,
@@ -952,7 +953,7 @@ class InteractiveModeHandler implements ModeHandler {
 		const debugTraceId = getActiveDebugLogger()?.session.debugEnabled ? getActiveDebugLogger()?.session.traceId : undefined;
 		this._welcomeLines = buildWelcomeLines({
 			terminalWidth: process.stdout.columns ?? 80,
-			version: process.env.npm_package_version ?? "dev",
+			version: readInteractiveCliPackageVersion(),
 			model: session.state.model.displayName ?? session.state.model.id,
 			provider: session.state.model.provider,
 			greeting: pickWelcomeGreeting(),
@@ -1749,6 +1750,9 @@ class InteractiveModeHandler implements ModeHandler {
 		} else {
 			process.stdout.write(encodeResetScrollRegion());
 		}
+		process.stdout.write(
+			encodeFramePatches([{ type: "move-cursor", cursor: next.frame.cursor }], next.frame.width),
+		);
 		process.stdout.write(ansiShowCursor());
 		this._renderedFooterUi = next.footerUi;
 		this._renderedFooterStartRow = next.footerStartRow;
@@ -2050,6 +2054,16 @@ export function pickWelcomeGreeting(randomValue = Math.random()): string {
 	return WELCOME_BIBLE_GREETINGS[Math.floor(normalized * size)] ?? WELCOME_BIBLE_GREETINGS[0];
 }
 
+export function readInteractiveCliPackageVersion(packageJsonPath = resolve(__dirname, "../package.json")): string {
+	try {
+		const raw = readFileSync(packageJsonPath, "utf8");
+		const parsed = JSON.parse(raw) as { version?: unknown };
+		return typeof parsed.version === "string" && parsed.version.length > 0 ? parsed.version : "dev";
+	} catch {
+		return process.env.npm_package_version ?? "dev";
+	}
+}
+
 export function buildWelcomeLines(input: {
 	terminalWidth: number;
 	version: string;
@@ -2085,9 +2099,13 @@ export function buildWelcomeLines(input: {
 }
 
 export function formatWelcomeTopBorder(width: number, version: string): string {
-	const label = `╭─── ${INTERACTIVE_THEME.bold}${INTERACTIVE_THEME.welcomeTitle}Genesis CLI${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.muted}v${version}${INTERACTIVE_THEME.reset} `;
-	const plainWidth = measureTerminalDisplayWidth(stripAnsiWelcome(label));
-	return applyWelcomeBorderColor(`${label}${"─".repeat(Math.max(0, width - plainWidth - 1))}╮`);
+	const border = INTERACTIVE_THEME.welcomeBorder;
+	const reset = INTERACTIVE_THEME.reset;
+	const title = `${INTERACTIVE_THEME.bold}${INTERACTIVE_THEME.welcomeTitle}Genesis CLI${reset}`;
+	const versionLabel = `${INTERACTIVE_THEME.muted}v${version}${reset}`;
+	const visibleLabel = `╭─── Genesis CLI v${version} `;
+	const plainWidth = measureTerminalDisplayWidth(visibleLabel);
+	return `${border}╭─── ${reset}${title}${border} ${reset}${versionLabel}${border} ${"─".repeat(Math.max(0, width - plainWidth - 1))}╮${reset}`;
 }
 
 export function formatWelcomeBottomBorder(width: number): string {

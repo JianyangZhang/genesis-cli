@@ -39,10 +39,12 @@ import {
 	movePermissionSelection,
 	permissionDecisionFromSelection,
 	pickWelcomeGreeting,
+	readInteractiveCliPackageVersion,
 	shouldRenderInteractiveTranscriptEvent,
 	WELCOME_BIBLE_GREETINGS,
 	wrapTranscriptContent,
 } from "../mode-dispatch.js";
+import { INTERACTIVE_THEME } from "../theme.js";
 
 describe("interactive transcript formatting", () => {
 	it("formats user lines as a compact highlighted block", () => {
@@ -177,6 +179,18 @@ describe("interactive transcript formatting", () => {
 			debugTraceId: "20260406T120000Z-p123-abcdef12",
 		});
 		expect(lines.some((line) => line.includes("Debug trace: 20260406T120000Z-p123-abcdef12"))).toBe(true);
+	});
+
+	it("reapplies border styling after styled title segments in the top border", () => {
+		const line = formatWelcomeTopBorder(80, "0.0.2");
+		expect(line).toContain(`${INTERACTIVE_THEME.reset}${INTERACTIVE_THEME.welcomeBorder} `);
+		expect(line.endsWith(`╮${INTERACTIVE_THEME.reset}`)).toBe(true);
+	});
+
+	it("reads the interactive CLI package version from app-cli package.json", () => {
+		expect(readInteractiveCliPackageVersion("/Users/zhangjianyang/genesis-cli/packages/app-cli/package.json")).toBe(
+			"0.0.2",
+		);
 	});
 
 	it("keeps welcome lines within narrow terminal widths after fitting", () => {

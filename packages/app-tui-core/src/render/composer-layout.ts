@@ -21,6 +21,7 @@ export function composeSectionBlock(options: {
 	readonly separator?: string;
 	readonly bodyLines?: readonly string[];
 	readonly trailingSeparator?: boolean;
+	readonly leadingSeparator?: boolean;
 }): readonly string[] {
 	const lines: string[] = [];
 	const leadingLines = options.leadingLines ?? [];
@@ -28,7 +29,10 @@ export function composeSectionBlock(options: {
 	if (leadingLines.length > 0) {
 		lines.push(...leadingLines);
 	}
-	if (options.separator && (leadingLines.length > 0 || bodyLines.length > 0)) {
+	if (
+		options.separator &&
+		(options.leadingSeparator === true || leadingLines.length > 0 || bodyLines.length > 0)
+	) {
 		lines.push(options.separator);
 	}
 	if (bodyLines.length > 0) {
@@ -55,6 +59,7 @@ export function composePromptBlock(options: {
 			leadingLines: options.leadingLines,
 			separator: options.separator,
 			bodyLines: options.bodyLines,
+			leadingSeparator: true,
 		}),
 		`${options.prompt}${options.buffer}${options.hint ?? ""}`,
 	];

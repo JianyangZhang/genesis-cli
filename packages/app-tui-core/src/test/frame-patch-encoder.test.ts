@@ -27,4 +27,12 @@ describe("frame patch encoder", () => {
 		expect(encodeSetScrollRegion({ top: 1, bottom: 20 })).toBe("\x1b[1;20r");
 		expect(encodeResetScrollRegion()).toBe("\x1b[r");
 	});
+
+	it("does not clip ANSI-decorated lines by raw string length", () => {
+		const line = "\x1b[38;5;236m╭─── Genesis CLI ───╮\x1b[0m";
+		const encoded = encodeFramePatches([{ type: "write-line", row: 1, content: line }], 22);
+
+		expect(encoded).toContain("╭─── Genesis CLI ───╮");
+		expect(encoded).toContain("\x1b[0m");
+	});
 });

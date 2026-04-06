@@ -79,4 +79,17 @@ describe("composer layout", () => {
 		expect(rendered.block).toBe("Header\n---\nBody");
 		expect(rendered.lines).toEqual(["Header", "---", "Body"]);
 	});
+
+	it("always inserts a separator above the prompt even without leading lines", () => {
+		const result = composePromptBlock({
+			leadingLines: [],
+			separator: "---",
+			prompt: "❯ ",
+			buffer: "",
+			cursor: 0,
+		});
+
+		expect(result.lines).toEqual(["---", "❯ ", "---"]);
+		expect(result.cursorLineIndex).toBe(1);
+	});
 });
