@@ -52,13 +52,9 @@ import { INTERACTIVE_THEME } from "../theme.js";
 
 function formatLocalTraceTimestamp(value: Date): string {
 	const padTwo = (part: number): string => String(part).padStart(2, "0");
-	const offsetMinutes = -value.getTimezoneOffset();
-	const sign = offsetMinutes >= 0 ? "+" : "-";
-	const absoluteMinutes = Math.abs(offsetMinutes);
 	return (
 		`${value.getFullYear()}${padTwo(value.getMonth() + 1)}${padTwo(value.getDate())}` +
-		`T${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}` +
-		`${sign}${padTwo(Math.floor(absoluteMinutes / 60))}${padTwo(absoluteMinutes % 60)}`
+		`T${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}`
 	);
 }
 

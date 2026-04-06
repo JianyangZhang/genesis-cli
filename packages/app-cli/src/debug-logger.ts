@@ -347,17 +347,27 @@ function buildTraceId(compactTimestamp: string, pid: number, randomHexFactory: (
 }
 
 function formatCompactTimestamp(startedAt: Date): string {
-	return `${formatLocalDatePart(startedAt)}T${formatLocalTimePart(startedAt)}${formatLocalOffsetPart(startedAt)}`;
+	return `${formatLocalDatePart(startedAt)}T${formatLocalTimePart(startedAt)}`;
 }
 
 function parseTraceTimestamp(traceId: string): number | null {
-	const match = /^(\d{8})T(\d{6})(Z|[+-]\d{4})-p\d+-[0-9a-f]+$/i.exec(traceId);
+	const match = /^(\d{8})T(\d{6})(Z)?-p\d+-[0-9a-f]+$/i.exec(traceId);
 	if (!match) {
 		return null;
 	}
 	const datePart = match[1];
 	const timePart = match[2];
 	const zonePart = match[3];
+	if (!zonePart) {
+		return new Date(
+			Number(datePart.slice(0, 4)),
+			Number(datePart.slice(4, 6)) - 1,
+			Number(datePart.slice(6, 8)),
+			Number(timePart.slice(0, 2)),
+			Number(timePart.slice(2, 4)),
+			Number(timePart.slice(4, 6)),
+		).getTime();
+	}
 	const isoZone = zonePart === "Z" ? zonePart : `${zonePart.slice(0, 3)}:${zonePart.slice(3, 5)}`;
 	const iso = `${datePart.slice(0, 4)}-${datePart.slice(4, 6)}-${datePart.slice(6, 8)}T${timePart.slice(0, 2)}:${timePart.slice(2, 4)}:${timePart.slice(4, 6)}${isoZone}`;
 	const parsed = Date.parse(iso);
@@ -370,13 +380,6 @@ function formatLocalDatePart(value: Date): string {
 
 function formatLocalTimePart(value: Date): string {
 	return `${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}`;
-}
-
-function formatLocalOffsetPart(value: Date): string {
-	const offsetMinutes = -value.getTimezoneOffset();
-	const sign = offsetMinutes >= 0 ? "+" : "-";
-	const absoluteMinutes = Math.abs(offsetMinutes);
-	return `${sign}${padTwo(Math.floor(absoluteMinutes / 60))}${padTwo(absoluteMinutes % 60)}`;
 }
 
 function padTwo(value: number): string {
