@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AppRuntime, SessionFacade } from "@pickle-pee/runtime";
+import type { AppRuntime, ModelDescriptor, SessionFacade } from "@pickle-pee/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { createModelCommandHost } from "../model-command-host.js";
 
@@ -42,17 +42,17 @@ describe("createModelCommandHost", () => {
 		);
 		await writeFile(settingsPath, "{}\n", "utf8");
 
-		let currentModel = { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" };
+		let currentModel: ModelDescriptor = { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" };
 		let defaultModel = currentModel;
 		const session = {
 			state: { model: currentModel },
-			switchModel: async (model) => {
+			switchModel: async (model: ModelDescriptor) => {
 				currentModel = model;
 				(session.state as { model: typeof model }).model = model;
 			},
 		} as unknown as SessionFacade;
 		const runtime = {
-			setDefaultModel(model) {
+			setDefaultModel(model: ModelDescriptor) {
 				defaultModel = model;
 			},
 		} as unknown as AppRuntime;

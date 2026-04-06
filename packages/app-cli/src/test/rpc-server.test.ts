@@ -86,8 +86,13 @@ function createMockRuntime(sessionOrFactory: SessionFacade | (() => SessionFacad
 			},
 		} as unknown as AppRuntime["governor"],
 		planEngine: {} as AppRuntime["planEngine"],
+		recordRecentSession: async () => {},
+		listRecentSessions: async () => [],
+		searchRecentSessions: async () => [],
+		getDefaultModel: () => ({ id: "test-model", provider: "test" }),
+		setDefaultModel: () => {},
 		shutdown: async () => {},
-	} as AppRuntime;
+	} as unknown as AppRuntime;
 }
 
 /**

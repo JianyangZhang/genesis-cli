@@ -1,6 +1,7 @@
 // services/ — Formatting, event-to-output mapping, interaction state.
 export type { InteractionPhase, InteractionState, JsonEnvelope, OutputMode, RpcEnvelope } from "../types/index.js";
 export { formatEventAsText, formatPermissionPrompt, formatPlanSummaryText, formatToolStep } from "./event-formatter.js";
+export { buildInteractiveFooterLeadingLines, formatTurnNotice } from "./interactive-footer.js";
 export { initialInteractionState, reduceInteractionState } from "./interaction-state.js";
 export { eventToJsonEnvelope, sanitizeForJson } from "./json-formatter.js";
 export { formatResumeBrowserTranscriptBlocks, moveResumeBrowserSelection } from "./resume-browser.js";
