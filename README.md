@@ -12,7 +12,7 @@
 
 ## 快速开始
 
-先配置，再安装，最后启动。
+最小路径：先配置，再安装，再启动。
 
 ### 1. 配置
 
@@ -78,13 +78,13 @@ genesis
 
 ## 项目定位
 
-一个面向真实仓库工作流的代码 CLI：统一支撑 `Interactive / Print / JSON / RPC`，提供 Claude 风格 TUI、结构化工具步骤与可真实联调的 provider 主链。
+Genesis 面向真实仓库工作流，统一支撑 `Interactive / Print / JSON / RPC`，并围绕 Claude 风格 TUI、结构化工具步骤与可真实联调的 provider 主链持续演进。
 
 ---
 
 ## 顶层蓝图
 
-Genesis 采用“薄 UI、厚 contract、仓库自持内核”的结构。
+Genesis 采用“薄 UI、厚 contract、仓库自持内核”的结构，首页只保留贡献者最需要的四类信息：分层、边界、入口与当前主线。
 
 - 分层：
   - `packages/app-cli` 负责进程入口、TTY 生命周期与 interactive mode 宿主
@@ -113,6 +113,8 @@ Genesis 采用“薄 UI、厚 contract、仓库自持内核”的结构。
 
 ## 开发
 
+开发部分只保留四类高频信息：本地启动、调试反馈、提交前检查与发布入口。
+
 ### 本地开发
 
 ```bash
@@ -125,8 +127,8 @@ npm run chat:live
 ```
 
 - 前提：Node.js 20.0.0+，且 `.env.local` 中已配置可用的 `GENESIS_API_KEY`
-- 入口：默认启动 interactive 工作台；如需 print 模式可见“其他入口”
-- 预期：成功后会看到 `Genesis CLI` 欢迎卡片与 `❯ ` 提示符
+- 默认入口：`npm run chat:live` 会启动 interactive 工作台
+- 启动成功：会看到 `Genesis CLI` 欢迎卡片与 `❯ ` 提示符
 
 ### 调试与日志
 
@@ -139,7 +141,7 @@ genesis -d
 - 可见性：启动后会显示本次会话的 `trace-id`
   - 标准错误输出会打印 `trace-id` 与日志目录
   - Interactive 模式会在历史缓冲区显示 `Debug trace: ...`
-- 反馈问题时，优先附上复现步骤、`trace-id` 与 `~/.genesis-cli/debug-logs/<trace-id>/` 下的相关日志文件
+- 反馈问题：优先附上复现步骤、`trace-id` 与 `~/.genesis-cli/debug-logs/<trace-id>/` 下的相关日志文件
 
 ### 常用检查
 
@@ -151,7 +153,7 @@ npm run check
 npm run test:live:pi-mono
 ```
 
-- `npm test`：主测试入口，适合提交前完整检查
+- `npm test`：提交前主测试入口
 - `npm run test:tui`：TUI 与交互回归
 - `npm run test:live:pi-mono`：真实联调检查，要求 `.env.local` 中存在可用 API key
 
@@ -164,9 +166,9 @@ git commit -m "release 0.0.2"
 npm run publish:all
 ```
 
-- 入口：版本号提升后统一通过 `npm run publish:all` 发布
-- 校验：`publish:check` 会额外做 runtime adapter 冒烟，避免启动隐式依赖 monorepo 根目录
-- 发布后：建议再用 `npm install -g @pickle-pee/genesis-cli@latest` 与 `genesis --version` 做一次安装验证
+- 发布入口：版本号提升后统一通过 `npm run publish:all` 发布
+- 发布校验：`publish:check` 会额外做 runtime adapter 冒烟，避免启动隐式依赖 monorepo 根目录
+- 发布后验证：建议再用 `npm install -g @pickle-pee/genesis-cli@latest` 与 `genesis --version` 做一次安装验证
 
 ### 其他入口
 
@@ -182,5 +184,5 @@ npm run publish:verify
 ## 更多说明
 
 - 包级文档：`packages/*/README.md`
-- 顶层源码入口：`packages/app-cli`、`packages/app-ui`、`packages/app-runtime`、`packages/kernel`
-- 关键验证入口：`npm test`、`npm run test:tui`、`npm run build`
+- 源码入口：`packages/app-cli`、`packages/app-ui`、`packages/app-runtime`、`packages/kernel`
+- 验证入口：`npm test`、`npm run test:tui`、`npm run build`

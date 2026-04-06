@@ -12,7 +12,7 @@
 
 ## Quick Start
 
-Configure first, then install, then run.
+Minimal path: configure, install, then run.
 
 ### 1. Configure
 
@@ -78,13 +78,13 @@ genesis
 
 ## Positioning
 
-One coding CLI for real repository workflows: a unified runtime for `Interactive / Print / JSON / RPC`, Claude-like TUI behavior, structured tool steps, and a provider flow that can be exercised in live integration.
+Genesis is built for real repository workflows, with one runtime for `Interactive / Print / JSON / RPC` and a steady focus on Claude-like TUI behavior, structured tool steps, and a provider flow that can be exercised in live integration.
 
 ---
 
 ## Top-Level Blueprint
 
-Genesis follows a "thin UI, rich contracts, repository-owned kernel" structure.
+Genesis follows a "thin UI, rich contracts, repository-owned kernel" structure. This section keeps only the four things contributors need most: layers, boundaries, entry points, and the current direction.
 
 - Layers:
   - `packages/app-cli` owns process entrypoints, the TTY lifecycle, and the interactive mode host
@@ -113,6 +113,8 @@ Genesis follows a "thin UI, rich contracts, repository-owned kernel" structure.
 
 ## Development
 
+The development section keeps four high-frequency topics together: local startup, debug feedback, pre-commit checks, and release entry points.
+
 ### Local Work
 
 ```bash
@@ -125,7 +127,7 @@ npm run chat:live
 ```
 
 - Prerequisites: Node.js 20.0.0+ and a valid `GENESIS_API_KEY` in `.env.local`
-- Entry: this starts the interactive workbench by default; see "Other Entry Points" for print mode
+- Default entry: `npm run chat:live` starts the interactive workbench
 - Expected result: successful startup shows the `Genesis CLI` welcome card and the `❯ ` prompt
 
 ### Debugging And Logs
@@ -139,7 +141,7 @@ genesis -d
 - Visibility: startup shows the `trace-id` for the current session
   - stderr prints the `trace-id` and log directory
   - interactive mode shows `Debug trace: ...` in the history buffer
-- When reporting a problem, include repro steps, the `trace-id`, and the relevant log files under `~/.genesis-cli/debug-logs/<trace-id>/`
+- Problem reports: include repro steps, the `trace-id`, and the relevant log files under `~/.genesis-cli/debug-logs/<trace-id>/`
 
 ### Common Checks
 
@@ -151,7 +153,7 @@ npm run check
 npm run test:live:pi-mono
 ```
 
-- `npm test`: primary verification entry before a commit
+- `npm test`: primary pre-commit verification entry
 - `npm run test:tui`: TUI and interaction regressions
 - `npm run test:live:pi-mono`: live integration check; requires a valid API key in `.env.local`
 
@@ -164,8 +166,8 @@ git commit -m "release 0.0.2"
 npm run publish:all
 ```
 
-- Entry: after bumping versions, publish through `npm run publish:all`
-- Verification: `publish:check` adds a runtime-adapter smoke test so startup cannot silently depend on the monorepo root
+- Release entry: after bumping versions, publish through `npm run publish:all`
+- Release verification: `publish:check` adds a runtime-adapter smoke test so startup cannot silently depend on the monorepo root
 - After publish: verify the installed CLI again with `npm install -g @pickle-pee/genesis-cli@latest` and `genesis --version`
 
 ### Other Entry Points
@@ -182,5 +184,5 @@ npm run publish:verify
 ## More
 
 - package-level docs: `packages/*/README.md`
-- top-level source entry points: `packages/app-cli`, `packages/app-ui`, `packages/app-runtime`, `packages/kernel`
-- primary verification commands: `npm test`, `npm run test:tui`, `npm run build`
+- source entry points: `packages/app-cli`, `packages/app-ui`, `packages/app-runtime`, `packages/kernel`
+- verification entry points: `npm test`, `npm run test:tui`, `npm run build`
