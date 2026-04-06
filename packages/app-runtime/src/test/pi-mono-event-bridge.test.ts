@@ -236,4 +236,32 @@ describe("PiMonoEventBridge", () => {
 			}),
 		);
 	});
+
+	it("preserves compaction summary text in raw compaction events", () => {
+		const state = createInitialBridgeState({
+			model: { id: "glm-5.1", provider: "zai" },
+			toolSet: [],
+		});
+
+		const result = bridgePiMonoEvent(
+			{
+				type: "compaction_end",
+				result: {
+					tokensBefore: 512,
+					summary: "Compacted conversation body",
+				},
+			} as never,
+			state,
+		);
+
+		expect(result.rawEvents).toContainEqual(
+			expect.objectContaining({
+				type: "compaction_end",
+				payload: expect.objectContaining({
+					estimatedTokensSaved: 512,
+					compactedSummary: "Compacted conversation body",
+				}),
+			}),
+		);
+	});
 });

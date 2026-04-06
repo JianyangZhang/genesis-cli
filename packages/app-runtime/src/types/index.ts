@@ -68,6 +68,7 @@ export interface CompactionSummary {
 	readonly originalMessageCount: number;
 	readonly retainedMessageCount: number;
 	readonly estimatedTokensSaved: number;
+	readonly compactedSummary?: string;
 }
 
 export interface SessionTranscriptMessagePreview {

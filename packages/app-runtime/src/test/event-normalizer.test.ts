@@ -114,12 +114,14 @@ describe("EventNormalizer", () => {
 				originalMessageCount: 20,
 				retainedMessageCount: 5,
 				estimatedTokensSaved: 10000,
+				compactedSummary: "Compacted summary body",
 			},
 		};
 		const endResult = normalizer.normalize(endRaw);
 		expect(endResult!.type).toBe("compaction_completed");
 		if (endResult!.type === "compaction_completed") {
 			expect(endResult!.summary.originalMessageCount).toBe(20);
+			expect(endResult!.summary.compactedSummary).toBe("Compacted summary body");
 		}
 	});
 

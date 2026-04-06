@@ -662,6 +662,7 @@ class FakeInteractiveSession implements SessionFacade {
 				originalMessageCount: 3,
 				retainedMessageCount: 1,
 				estimatedTokensSaved: 128,
+				compactedSummary: "Compressed conversation:\n- User wants compact mode\n- Assistant keeps only next steps",
 			},
 		} as never);
 	}
@@ -1039,6 +1040,34 @@ describe("interactive workbench TTY", () => {
 
 			input.write("hello\r");
 			await waitFor(() => countOccurrences(screen.snapshot(), "Hi from Genesis") >= 2);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("shows compacted conversation details with ctrl+o after /compact completes", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-compact-details", compactDelayMs: 50 });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/compact\r");
+			await waitFor(() => screen.snapshot().includes("Compaction completed."));
+			await waitFor(() => screen.snapshot().includes("ctrl+o to expand"));
+
+			input.write(Buffer.from([0x0f]));
+			await waitFor(() => screen.snapshot().includes("Compaction summary"));
+			expect(screen.snapshot()).toContain("Compressed conversation:");
+			expect(screen.snapshot()).toContain("Assistant keeps only next steps");
+
+			input.write("\x1b");
+			await waitFor(() => screen.snapshot().includes("ctrl+o to expand"));
+			expect(screen.snapshot()).not.toContain("Assistant keeps only next steps");
 
 			input.write("/exit\r");
 			await startPromise;

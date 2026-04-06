@@ -8,7 +8,7 @@
 import { execFile, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { AppRuntime, CliMode, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@pickle-pee/runtime";
+import type { AppRuntime, CliMode, CompactionSummary, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@pickle-pee/runtime";
 import type { InteractionState, OutputSink, SlashCommand } from "@pickle-pee/ui";
 import {
 	ansiClearLine,
@@ -97,6 +97,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _detailPanelExpanded = false;
 	private _detailPanelScroll = 0;
 	private _thinkingBuffer = "";
+	private _compactionDetailText = "";
 	private _activeTurnUsageTotals: UsageSnapshot = emptyUsageSnapshot();
 	private _currentMessageUsage: UsageSnapshot = emptyUsageSnapshot();
 	private _lastTurnUsage: UsageSnapshot | null = null;
@@ -186,6 +187,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._detailPanelExpanded = false;
 			this._detailPanelScroll = 0;
 			this._thinkingBuffer = "";
+			this._compactionDetailText = "";
 			this._activeTurnUsageTotals = emptyUsageSnapshot();
 			this._currentMessageUsage = emptyUsageSnapshot();
 			this._lastTurnUsage = null;
@@ -1017,6 +1019,9 @@ class InteractiveModeHandler implements ModeHandler {
 				this._turnNotice = null;
 				this._turnNoticeAnimationFrame = 0;
 				this._turnStartedAt = null;
+				this._detailPanelExpanded = false;
+				this._detailPanelScroll = 0;
+				this._compactionDetailText = formatCompactionDetailText(event.summary);
 			}
 			this.renderPromptLine();
 			return;
@@ -1158,6 +1163,7 @@ class InteractiveModeHandler implements ModeHandler {
 		this._detailPanelExpanded = false;
 		this._detailPanelScroll = 0;
 		this._thinkingBuffer = "";
+		this._compactionDetailText = "";
 		this._activeTurnUsageTotals = emptyUsageSnapshot();
 		this._currentMessageUsage = emptyUsageSnapshot();
 		this.startTurnFeedback();
@@ -1179,6 +1185,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this._detailPanelExpanded = false;
 				this._detailPanelScroll = 0;
 				this._thinkingBuffer = "";
+				this._compactionDetailText = "";
 				if (hasUsageSnapshot(completedTurnUsage)) {
 					this._lastTurnUsage = completedTurnUsage;
 					this._sessionUsageTotals = addUsageSnapshots(this._sessionUsageTotals, completedTurnUsage);
@@ -1289,10 +1296,13 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentDetailPanelContentLines(): readonly string[] {
-		if (this._thinkingBuffer.trim().length === 0) {
-			return [];
+		if (this._thinkingBuffer.trim().length > 0) {
+			return wrapTranscriptContent(this._thinkingBuffer.trim(), this.terminalWidth());
 		}
-		return wrapTranscriptContent(this._thinkingBuffer.trim(), this.terminalWidth());
+		if (this._compactionDetailText.trim().length > 0) {
+			return wrapTranscriptContent(this._compactionDetailText.trim(), this.terminalWidth());
+		}
+		return [];
 	}
 
 	private shouldShowPendingOutputIndicator(activeToolLabel: string | null): boolean {
@@ -2158,6 +2168,18 @@ function summarizeActiveToolNotice(
 		return `Running ${title}`;
 	}
 	return `Running ${toolCalls.size} tools`;
+}
+
+function formatCompactionDetailText(summary: CompactionSummary): string {
+	const lines = [
+		"Compaction summary",
+		`- Messages: ${summary.originalMessageCount} -> ${summary.retainedMessageCount}`,
+		`- Estimated tokens saved: ${summary.estimatedTokensSaved}`,
+	];
+	if (summary.compactedSummary && summary.compactedSummary.trim().length > 0) {
+		lines.push("", summary.compactedSummary.trim());
+	}
+	return lines.join("\n");
 }
 
 function detailPanelScrollDeltaForKey(

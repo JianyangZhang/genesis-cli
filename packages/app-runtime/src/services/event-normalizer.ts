@@ -120,6 +120,7 @@ export class EventNormalizer {
 						originalMessageCount: (raw.payload?.originalMessageCount as number) ?? 0,
 						retainedMessageCount: (raw.payload?.retainedMessageCount as number) ?? 0,
 						estimatedTokensSaved: (raw.payload?.estimatedTokensSaved as number) ?? 0,
+						compactedSummary: (raw.payload?.compactedSummary as string | undefined) ?? undefined,
 					},
 				};
 

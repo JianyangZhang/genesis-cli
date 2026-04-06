@@ -35,7 +35,7 @@ type PiMonoBridgeEvent =
 			result?: unknown;
 	  }
 	| { type: "compaction_start" }
-	| { type: "compaction_end"; result?: { tokensBefore?: number } };
+	| { type: "compaction_end"; result?: { tokensBefore?: number; summary?: string } };
 
 export interface PiMonoBridgeState {
 	readonly model: {
@@ -182,6 +182,7 @@ export function bridgePiMonoEvent(event: PiMonoBridgeEvent, state: PiMonoBridgeS
 					originalMessageCount: 0,
 					retainedMessageCount: 0,
 					estimatedTokensSaved: event.result?.tokensBefore ?? 0,
+					compactedSummary: event.result?.summary,
 				},
 			});
 			break;
