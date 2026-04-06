@@ -4,15 +4,13 @@
 
 # Genesis CLI
 
-**An open-source coding CLI for real repositories: built with a `TTY / app-runtime / vendored kernel` layered structure, with repository-owned kernel boundaries and an ongoing focus on tightening the `session core`.**
+**An open-source coding CLI for engineering practice: organized around a layered `TTY / runtime / vendored kernel` architecture, with an ongoing focus on clearer module boundaries and long-term maintainability.**
 
 [查看中文 README](README.md)
 
 ---
 
 ## Quick Start
-
-Genesis is an open-source coding CLI for real repositories, aiming to balance product experience, engineering discipline, and long-term maintainability.
 
 ### 1. Configure First
 

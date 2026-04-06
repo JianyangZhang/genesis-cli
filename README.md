@@ -4,15 +4,13 @@
 
 # Genesis CLI
 
-**一个面向真实仓库工作的开源代码 CLI：采用 `TTY / app-runtime / vendored kernel` 分层结构，在仓库内自持内核边界，并持续围绕 `session core` 收敛。**
+**一个面向工程实践的开源代码 CLI：以分层架构组织 TTY、runtime 与 vendored kernel，并持续优化模块边界与可维护性。**
 
 [View English README](README.en.md)
 
 ---
 
 ## 快速开始
-
-Genesis 是一款面向真实仓库工作的开源代码 CLI，目标是在产品体验、工程纪律和可持续演进之间保持平衡。
 
 ### 1. 先配置
 
