@@ -136,25 +136,14 @@ genesis -d
 ```
 
 - both the published `genesis` package and local source builds support `--debug / -d`
-- on startup, Genesis prints the `trace-id` and log directory to stderr; interactive mode also shows `Debug trace: ...` in the transcript history buffer
-- logs are written under `~/.genesis-cli/debug-logs/<trace-id>/`
+- on startup, Genesis shows the `trace-id` for the current session
+  - stderr prints the `trace-id` and log directory
+  - interactive mode shows `Debug trace: ...` in the history buffer
+- debug files are written under `~/.genesis-cli/debug-logs/<trace-id>/`
 - when reporting a problem, include:
   - repro steps
   - the `trace-id`
-  - the corresponding `runtime.jsonl`, `error.jsonl`, and `crash.jsonl`
-- logs use JSONL, one structured entry per line, with core fields including:
-  - `timestamp`
-  - `level`
-  - `traceId`
-  - `pid`
-  - `scope`
-  - `message`
-  - `data`
-- level policy:
-  - default mode: `runtime.jsonl` only records `ERROR` and above
-  - `--debug`: `runtime.jsonl` records `DEBUG` and above
-  - `error.jsonl` always records errors and crashes
-  - `crash.jsonl` only records unhandled exceptions, unhandled rejections, and fatal failures
+  - the relevant log files from that directory
 
 ### Common Checks
 
