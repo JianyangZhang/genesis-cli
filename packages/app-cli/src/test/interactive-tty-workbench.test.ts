@@ -996,18 +996,72 @@ function mergeRecentSessionMetadataForTest(
 	incoming: Partial<NonNullable<SessionRecoveryData["metadata"]>> | undefined,
 ): NonNullable<SessionRecoveryData["metadata"]> {
 	const next = incoming ?? {};
-	const recentMessages = [...(existing?.recentMessages ?? [])];
-	for (const message of next.recentMessages ?? []) {
-		recentMessages.push(message);
-	}
+	const recentMessages = mergeRecentSessionMessagesForTest(existing?.recentMessages, next.recentMessages);
 	return {
-		firstPrompt: next.firstPrompt ?? existing?.firstPrompt,
+		firstPrompt: existing?.firstPrompt ?? next.firstPrompt,
 		summary: next.summary ?? existing?.summary,
 		messageCount: Math.max(existing?.messageCount ?? 0, recentMessages.length),
 		fileSizeBytes: existing?.fileSizeBytes ?? 0,
 		recentMessages,
 		resumeSummary: existing?.resumeSummary ?? null,
 	};
+}
+
+function mergeRecentSessionMessagesForTest(
+	existing: NonNullable<SessionRecoveryData["metadata"]>["recentMessages"] | undefined,
+	incoming: NonNullable<SessionRecoveryData["metadata"]>["recentMessages"] | undefined,
+): Array<{ role: "user" | "assistant"; text: string }> {
+	const previous = [...(existing ?? [])];
+	const next = [...(incoming ?? [])];
+	if (next.length === 0) {
+		return previous;
+	}
+	if (isRecentSessionMessagePrefixForTest(previous, next)) {
+		return next;
+	}
+	if (isRecentSessionMessagePrefixForTest(next, previous)) {
+		return previous;
+	}
+	const overlap = findRecentSessionMessageOverlapForTest(previous, next);
+	if (overlap > 0) {
+		return [...previous, ...next.slice(overlap)];
+	}
+	return [...previous, ...next];
+}
+
+function isRecentSessionMessagePrefixForTest(
+	prefix: ReadonlyArray<{ role: "user" | "assistant"; text: string }>,
+	full: ReadonlyArray<{ role: "user" | "assistant"; text: string }>,
+): boolean {
+	if (prefix.length > full.length) {
+		return false;
+	}
+	return prefix.every((message, index) => {
+		const candidate = full[index];
+		return candidate?.role === message.role && candidate.text === message.text;
+	});
+}
+
+function findRecentSessionMessageOverlapForTest(
+	previous: ReadonlyArray<{ role: "user" | "assistant"; text: string }>,
+	next: ReadonlyArray<{ role: "user" | "assistant"; text: string }>,
+): number {
+	const maxOverlap = Math.min(previous.length, next.length);
+	for (let size = maxOverlap; size > 0; size -= 1) {
+		let matches = true;
+		for (let index = 0; index < size; index += 1) {
+			const previousMessage = previous[previous.length - size + index];
+			const nextMessage = next[index];
+			if (previousMessage?.role !== nextMessage?.role || previousMessage?.text !== nextMessage?.text) {
+				matches = false;
+				break;
+			}
+		}
+		if (matches) {
+			return size;
+		}
+	}
+	return 0;
 }
 
 function searchRecentSessionsForTest(
@@ -1491,6 +1545,47 @@ describe("interactive workbench TTY", () => {
 			expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
 				{ role: "user", text: "hello" },
 				{ role: "assistant", text: "Hi from Genesis" },
+			]);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("preserves firstPrompt and avoids duplicates for queued follow-up turns", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-runtime-queued-history" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("slow hello\r");
+			await waitFor(() => screen.snapshot().includes("Thinking"));
+
+			input.write("queued followup\r");
+			await waitFor(() => screen.snapshot().includes("Queued: queued followup"));
+			await waitFor(() => screen.snapshot().includes("Queued follow-up reply"), 5000);
+
+			let firstPromptPersisted = false;
+			for (let attempt = 0; attempt < 250; attempt += 1) {
+				const recent = await runtime.listRecentSessions();
+				if (recent[0]?.recoveryData.metadata?.recentMessages?.length === 4) {
+					firstPromptPersisted = recent[0]?.recoveryData.metadata?.firstPrompt === "slow hello";
+					break;
+				}
+				await sleep(10);
+			}
+
+			expect(firstPromptPersisted).toBe(true);
+			const recent = await runtime.listRecentSessions();
+			expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+				{ role: "user", text: "slow hello" },
+				{ role: "assistant", text: "First delayed reply" },
+				{ role: "user", text: "queued followup" },
+				{ role: "assistant", text: "Queued follow-up reply" },
 			]);
 
 			input.write("/exit\r");

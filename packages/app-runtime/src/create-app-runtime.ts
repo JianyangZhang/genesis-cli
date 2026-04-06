@@ -198,6 +198,26 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 		liveRecentSessionMetadata.delete(session.id.value);
 	}
 
+	function canonicalizeRecentSessionRecoveryData(
+		session: SessionFacade,
+		recoveryData: SessionRecoveryData,
+	): SessionRecoveryData {
+		return {
+			...recoveryData,
+			sessionId: session.id,
+			model: {
+				...session.state.model,
+				...recoveryData.model,
+				id: recoveryData.model.id || session.state.model.id,
+				provider: recoveryData.model.provider || session.state.model.provider,
+				displayName: recoveryData.model.displayName || session.state.model.displayName,
+			},
+			toolSet: recoveryData.toolSet.length > 0 ? recoveryData.toolSet : [...session.state.toolSet],
+			workingDirectory: recoveryData.workingDirectory ?? session.context.workingDirectory,
+			agentDir: recoveryData.agentDir ?? session.context.agentDir,
+		};
+	}
+
 	return {
 		get events(): EventBus {
 			return globalBus;
@@ -221,7 +241,10 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			options?: { readonly title?: string },
 		): Promise<void> {
 			return enqueueRecentSessionWrite(async () => {
-				const merged = mergeRecoveryDataWithLiveMetadata(recoveryData, getLiveRecentSessionMetadata(session));
+				const merged = mergeRecoveryDataWithLiveMetadata(
+					canonicalizeRecentSessionRecoveryData(session, recoveryData),
+					getLiveRecentSessionMetadata(session),
+				);
 				await recordRecentSession(config.historyDir, merged, options);
 				clearLiveRecentSessionMetadata(session);
 			});
@@ -229,7 +252,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 
 		recordRecentSessionInput(session: SessionFacade, input: string, options?: { readonly title?: string }): Promise<void> {
 			return enqueueRecentSessionWrite(async () => {
-				const recoveryData = await session.snapshotRecoveryData();
+				const recoveryData = canonicalizeRecentSessionRecoveryData(session, await session.snapshotRecoveryData());
 				const metadata = applyRuntimeOwnedUserInput(getLiveRecentSessionMetadata(session), input);
 				setLiveRecentSessionMetadata(session, metadata);
 				if (shouldPersistLiveRecentSession(recoveryData)) {
@@ -240,7 +263,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 
 		recordRecentSessionAssistantText(session: SessionFacade, text: string, options?: { readonly title?: string }): Promise<void> {
 			return enqueueRecentSessionWrite(async () => {
-				const recoveryData = await session.snapshotRecoveryData();
+				const recoveryData = canonicalizeRecentSessionRecoveryData(session, await session.snapshotRecoveryData());
 				const metadata = applyRuntimeOwnedAssistantText(getLiveRecentSessionMetadata(session), text);
 				setLiveRecentSessionMetadata(session, metadata);
 				if (shouldPersistLiveRecentSession(recoveryData)) {
@@ -251,7 +274,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 
 		recordRecentSessionEvent(session: SessionFacade, event: RuntimeEvent, options?: { readonly title?: string }): Promise<void> {
 			return enqueueRecentSessionWrite(async () => {
-				const recoveryData = await session.snapshotRecoveryData();
+				const recoveryData = canonicalizeRecentSessionRecoveryData(session, await session.snapshotRecoveryData());
 				const metadata = applyRuntimeOwnedEvent(getLiveRecentSessionMetadata(session), event);
 				setLiveRecentSessionMetadata(session, metadata);
 				if (shouldPersistLiveRecentSession(recoveryData)) {

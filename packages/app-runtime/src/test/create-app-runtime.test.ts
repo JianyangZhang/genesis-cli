@@ -324,16 +324,83 @@ describe("createAppRuntime", () => {
 
 		const recent = await runtime.listRecentSessions();
 		const entryFiles = await readdir(join(historyDir, "entries"));
+		const canonicalSessionId = session.id.value;
 
 		expect(recent).toHaveLength(1);
-		expect(recent[0]?.recoveryData.sessionId.value).toBe("real-session-id");
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(canonicalSessionId);
 		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("你好 什么是桌游");
 		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
 			{ role: "user", text: "你好 什么是桌游" },
 			{ role: "assistant", text: "桌游适合多人面对面互动。" },
 			{ role: "user", text: "哈哈" },
 		]);
-		expect(entryFiles).toEqual(["real-session-id.json"]);
+		expect(entryFiles).toEqual([`${canonicalSessionId}.json`]);
+	});
+
+	it("preserves the earliest firstPrompt and deduplicates overlapping recent messages", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-history-overlap-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const sessionId = { value: "overlap-session" };
+
+		await runtime.recordRecentSession({
+			sessionId,
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				firstPrompt: "什么是桌游",
+				summary: "第一轮回答",
+				messageCount: 3,
+				fileSizeBytes: 0,
+				recentMessages: [
+					{ role: "user", text: "什么是桌游" },
+					{ role: "assistant", text: "第一轮长回答" },
+					{ role: "user", text: "哈哈" },
+				],
+				resumeSummary: null,
+			},
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		});
+
+		await runtime.recordRecentSession({
+			sessionId,
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				firstPrompt: "哈哈",
+				summary: "第二轮回答",
+				messageCount: 4,
+				fileSizeBytes: 0,
+				recentMessages: [
+					{ role: "assistant", text: "第一轮长回答" },
+					{ role: "user", text: "哈哈" },
+					{ role: "assistant", text: "第二轮短回答" },
+				],
+				resumeSummary: null,
+			},
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		});
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("什么是桌游");
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "什么是桌游" },
+			{ role: "assistant", text: "第一轮长回答" },
+			{ role: "user", text: "哈哈" },
+			{ role: "assistant", text: "第二轮短回答" },
+		]);
 	});
 
 	it("searches recent sessions by relevance and persists a fallback title", async () => {

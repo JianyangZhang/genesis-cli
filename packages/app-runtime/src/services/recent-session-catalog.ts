@@ -388,7 +388,7 @@ function mergeRecentSessionMetadata(
 	}
 	const mergedRecentMessages = mergeRecentSessionMessages(existing?.recentMessages, incoming?.recentMessages);
 	return {
-		firstPrompt: normalizeRecentSessionText(incoming?.firstPrompt) ?? normalizeRecentSessionText(existing?.firstPrompt) ?? undefined,
+		firstPrompt: normalizeRecentSessionText(existing?.firstPrompt) ?? normalizeRecentSessionText(incoming?.firstPrompt) ?? undefined,
 		summary: normalizeRecentSessionText(incoming?.summary) ?? normalizeRecentSessionText(existing?.summary) ?? undefined,
 		messageCount: Math.max(incoming?.messageCount ?? 0, existing?.messageCount ?? 0, mergedRecentMessages.length),
 		fileSizeBytes: Math.max(incoming?.fileSizeBytes ?? 0, existing?.fileSizeBytes ?? 0),
@@ -417,6 +417,10 @@ function mergeRecentSessionMessages(
 	if (isRecentSessionMessagePrefix(nextMessages, previous)) {
 		return previous;
 	}
+	const overlap = findRecentSessionMessageOverlap(previous, nextMessages);
+	if (overlap > 0) {
+		return [...previous, ...nextMessages.slice(overlap)];
+	}
 	const merged = [...previous];
 	for (const message of nextMessages) {
 		const next = appendRecentSessionMessage(merged, message);
@@ -436,6 +440,28 @@ function isRecentSessionMessagePrefix(
 		const candidate = full[index];
 		return candidate?.role === message.role && candidate.text === message.text;
 	});
+}
+
+function findRecentSessionMessageOverlap(
+	previous: readonly SessionTranscriptMessagePreview[],
+	next: readonly SessionTranscriptMessagePreview[],
+): number {
+	const maxOverlap = Math.min(previous.length, next.length);
+	for (let size = maxOverlap; size > 0; size -= 1) {
+		let matches = true;
+		for (let index = 0; index < size; index += 1) {
+			const previousMessage = previous[previous.length - size + index];
+			const nextMessage = next[index];
+			if (previousMessage?.role !== nextMessage?.role || previousMessage?.text !== nextMessage?.text) {
+				matches = false;
+				break;
+			}
+		}
+		if (matches) {
+			return size;
+		}
+	}
+	return 0;
 }
 
 function applyRecentSessionInput(recoveryData: SessionRecoveryData, input: string): SessionRecoveryData {
