@@ -5,6 +5,9 @@ export { buildInteractiveFooterLeadingLines, formatTurnNotice } from "./interact
 export { initialInteractionState, reduceInteractionState } from "./interaction-state.js";
 export { eventToJsonEnvelope, sanitizeForJson } from "./json-formatter.js";
 export {
+	buildResumeBrowserBodyBlocks,
+	buildResumeBrowserFooterHintLines,
+	buildResumeBrowserHeaderLines,
 	formatResumeBrowserTranscriptBlocks,
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,

@@ -76,12 +76,25 @@ export interface SessionTranscriptMessagePreview {
 	readonly text: string;
 }
 
+export interface SessionResumeSummary {
+	readonly title?: string;
+	readonly goal?: string;
+	readonly userIntent?: string;
+	readonly assistantState?: string;
+	readonly lastUserTurn?: string;
+	readonly lastAssistantTurn?: string;
+	readonly generatedAt: number;
+	readonly source: "rule" | "model";
+	readonly version: 1;
+}
+
 export interface SessionRecoveryMetadata {
 	readonly summary?: string;
 	readonly firstPrompt?: string;
 	readonly messageCount: number;
 	readonly fileSizeBytes: number;
 	readonly recentMessages: readonly SessionTranscriptMessagePreview[];
+	readonly resumeSummary?: SessionResumeSummary | null;
 }
 
 export interface RecentSessionEntry {
