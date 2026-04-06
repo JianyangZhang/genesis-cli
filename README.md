@@ -124,9 +124,9 @@ cp .env.example .env.local
 npm run chat:live
 ```
 
-- Node.js 20.0.0+
-- `.env.local` 中已经配置可用的 `GENESIS_API_KEY`
-- 启动成功后会看到 `Genesis CLI` 欢迎卡片与 `❯ ` 提示符
+- 前提：Node.js 20.0.0+，且 `.env.local` 中已配置可用的 `GENESIS_API_KEY`
+- 入口：默认启动 interactive 工作台；如需 print 模式可见“其他入口”
+- 预期：成功后会看到 `Genesis CLI` 欢迎卡片与 `❯ ` 提示符
 
 ### 调试与日志
 
@@ -135,15 +135,11 @@ genesis --debug
 genesis -d
 ```
 
-- 正式包与本地源码都支持 `--debug / -d`
-- 启动后会显示本次会话的 `trace-id`
+- 入口：正式包与本地源码都支持 `--debug / -d`
+- 可见性：启动后会显示本次会话的 `trace-id`
   - 标准错误输出会打印 `trace-id` 与日志目录
   - Interactive 模式会在历史缓冲区显示 `Debug trace: ...`
-- 调试文件位于 `~/.genesis-cli/debug-logs/<trace-id>/`
-- 反馈问题时，优先附上：
-  - 复现步骤
-  - `trace-id`
-  - 该目录下与问题相关的日志文件
+- 反馈问题时，优先附上复现步骤、`trace-id` 与 `~/.genesis-cli/debug-logs/<trace-id>/` 下的相关日志文件
 
 ### 常用检查
 
@@ -155,7 +151,9 @@ npm run check
 npm run test:live:pi-mono
 ```
 
-- `test:live:pi-mono` 需要 `.env.local` 中存在可用 API key
+- `npm test`：主测试入口，适合提交前完整检查
+- `npm run test:tui`：TUI 与交互回归
+- `npm run test:live:pi-mono`：真实联调检查，要求 `.env.local` 中存在可用 API key
 
 ### 发布
 
@@ -166,10 +164,9 @@ git commit -m "release 0.0.2"
 npm run publish:all
 ```
 
-- 发布脚本位于 `scripts/bump-version.mjs` 与 `scripts/publish-all.sh`
-- `publish:check` 会在临时目录里做 runtime adapter 冒烟，防止“离开 monorepo 根目录就启动失败”
-- 若 npm 账号开启写操作 2FA，发布时仍可能需要浏览器确认
-- 发布后建议用 `npm install -g @pickle-pee/genesis-cli@latest` 和 `genesis --version` 再做一次最终安装验证
+- 入口：版本号提升后统一通过 `npm run publish:all` 发布
+- 校验：`publish:check` 会额外做 runtime adapter 冒烟，避免启动隐式依赖 monorepo 根目录
+- 发布后：建议再用 `npm install -g @pickle-pee/genesis-cli@latest` 与 `genesis --version` 做一次安装验证
 
 ### 其他入口
 

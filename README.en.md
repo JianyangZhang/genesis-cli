@@ -124,9 +124,9 @@ cp .env.example .env.local
 npm run chat:live
 ```
 
-- Node.js 20.0.0+
-- a valid `GENESIS_API_KEY` in `.env.local`
-- successful startup shows the `Genesis CLI` welcome card and the `❯ ` prompt
+- Prerequisites: Node.js 20.0.0+ and a valid `GENESIS_API_KEY` in `.env.local`
+- Entry: this starts the interactive workbench by default; see "Other Entry Points" for print mode
+- Expected result: successful startup shows the `Genesis CLI` welcome card and the `❯ ` prompt
 
 ### Debugging And Logs
 
@@ -135,15 +135,11 @@ genesis --debug
 genesis -d
 ```
 
-- both the published `genesis` package and local source builds support `--debug / -d`
-- on startup, Genesis shows the `trace-id` for the current session
+- Entry: both the published `genesis` package and local source builds support `--debug / -d`
+- Visibility: startup shows the `trace-id` for the current session
   - stderr prints the `trace-id` and log directory
   - interactive mode shows `Debug trace: ...` in the history buffer
-- debug files are written under `~/.genesis-cli/debug-logs/<trace-id>/`
-- when reporting a problem, include:
-  - repro steps
-  - the `trace-id`
-  - the relevant log files from that directory
+- When reporting a problem, include repro steps, the `trace-id`, and the relevant log files under `~/.genesis-cli/debug-logs/<trace-id>/`
 
 ### Common Checks
 
@@ -155,7 +151,9 @@ npm run check
 npm run test:live:pi-mono
 ```
 
-- `test:live:pi-mono` requires a valid API key in `.env.local`
+- `npm test`: primary verification entry before a commit
+- `npm run test:tui`: TUI and interaction regressions
+- `npm run test:live:pi-mono`: live integration check; requires a valid API key in `.env.local`
 
 ### Release
 
@@ -166,10 +164,9 @@ git commit -m "release 0.0.2"
 npm run publish:all
 ```
 
-- release automation lives in `scripts/bump-version.mjs` and `scripts/publish-all.sh`
-- `publish:check` includes a runtime-adapter smoke test from a temporary directory, so startup cannot silently depend on the monorepo root
-- npm may still require browser confirmation when the account uses 2FA for writes
-- after publish, verify the installed CLI with `npm install -g @pickle-pee/genesis-cli@latest` and `genesis --version`
+- Entry: after bumping versions, publish through `npm run publish:all`
+- Verification: `publish:check` adds a runtime-adapter smoke test so startup cannot silently depend on the monorepo root
+- After publish: verify the installed CLI again with `npm install -g @pickle-pee/genesis-cli@latest` and `genesis --version`
 
 ### Other Entry Points
 
