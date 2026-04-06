@@ -19,6 +19,18 @@ import { createModeHandler } from "../mode-dispatch.js";
 
 const execFileAsync = promisify(execFile);
 
+function formatLocalTraceTimestamp(value: Date): string {
+	const padTwo = (part: number): string => String(part).padStart(2, "0");
+	const offsetMinutes = -value.getTimezoneOffset();
+	const sign = offsetMinutes >= 0 ? "+" : "-";
+	const absoluteMinutes = Math.abs(offsetMinutes);
+	return (
+		`${value.getFullYear()}${padTwo(value.getMonth() + 1)}${padTwo(value.getDate())}` +
+		`T${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}` +
+		`${sign}${padTwo(Math.floor(absoluteMinutes / 60))}${padTwo(absoluteMinutes % 60)}`
+	);
+}
+
 class FakeTtyInput extends PassThrough {
 	isTTY = true;
 	setRawMode(_enabled: boolean): void {}
@@ -1169,6 +1181,7 @@ afterEach(() => {
 
 describe("interactive workbench TTY", () => {
 	it("shows the debug trace in the welcome history buffer when debug logging is enabled", async () => {
+		const traceId = `${formatLocalTraceTimestamp(new Date("2026-04-06T12:00:00.000Z"))}-p4321-deadbeef`;
 		const logger = await initializeDebugLogger({
 			debugEnabled: true,
 			argv: ["--debug"],
@@ -1193,7 +1206,7 @@ describe("interactive workbench TTY", () => {
 		try {
 			await withPatchedProcessTty(input, output, async (screen) => {
 				const startPromise = createModeHandler("interactive").start(runtime);
-				await waitFor(() => screen.snapshot().includes("Debug trace: 20260406T120000Z-p4321-deadbeef"));
+				await waitFor(() => screen.snapshot().includes(`Debug trace: ${traceId}`));
 
 				input.write("/exit\r");
 				await startPromise;

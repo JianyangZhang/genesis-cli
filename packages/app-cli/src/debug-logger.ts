@@ -106,12 +106,13 @@ export class DebugLogger {
 	constructor(options: DebugLoggerOptions) {
 		this.io = options.io ?? defaultIo;
 		this.stderrWrite = options.stderrWrite ?? ((text) => process.stderr.write(text));
-		const startedAt = (options.now ?? (() => new Date()))().toISOString();
+		const startedAtDate = (options.now ?? (() => new Date()))();
+		const startedAt = startedAtDate.toISOString();
 		const pid = options.pid ?? process.pid;
 		const logRootDir = resolve(options.logRootDir ?? join(homedir(), ".genesis-cli", "debug-logs"));
-		const traceId = buildTraceId(startedAt, pid, options.randomHex ?? defaultRandomHex);
+		const fileTimestamp = formatCompactTimestamp(startedAtDate);
+		const traceId = buildTraceId(fileTimestamp, pid, options.randomHex ?? defaultRandomHex);
 		const sessionDir = join(logRootDir, traceId);
-		const fileTimestamp = formatCompactTimestamp(startedAt);
 		this.sessionValue = {
 			traceId,
 			startedAt,
@@ -341,25 +342,45 @@ export function getLastDebugSession(): DebugLoggerSession | null {
 	return lastLoggerSession;
 }
 
-function buildTraceId(startedAt: string, pid: number, randomHexFactory: () => string): string {
-	const compactTs = formatCompactTimestamp(startedAt);
-	return `${compactTs}-p${pid}-${randomHexFactory()}`;
+function buildTraceId(compactTimestamp: string, pid: number, randomHexFactory: () => string): string {
+	return `${compactTimestamp}-p${pid}-${randomHexFactory()}`;
 }
 
-function formatCompactTimestamp(startedAt: string): string {
-	return startedAt.replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+function formatCompactTimestamp(startedAt: Date): string {
+	return `${formatLocalDatePart(startedAt)}T${formatLocalTimePart(startedAt)}${formatLocalOffsetPart(startedAt)}`;
 }
 
 function parseTraceTimestamp(traceId: string): number | null {
-	const match = /^(\d{8})T(\d{6})Z-p\d+-[0-9a-f]+$/i.exec(traceId);
+	const match = /^(\d{8})T(\d{6})(Z|[+-]\d{4})-p\d+-[0-9a-f]+$/i.exec(traceId);
 	if (!match) {
 		return null;
 	}
 	const datePart = match[1];
 	const timePart = match[2];
-	const iso = `${datePart.slice(0, 4)}-${datePart.slice(4, 6)}-${datePart.slice(6, 8)}T${timePart.slice(0, 2)}:${timePart.slice(2, 4)}:${timePart.slice(4, 6)}Z`;
+	const zonePart = match[3];
+	const isoZone = zonePart === "Z" ? zonePart : `${zonePart.slice(0, 3)}:${zonePart.slice(3, 5)}`;
+	const iso = `${datePart.slice(0, 4)}-${datePart.slice(4, 6)}-${datePart.slice(6, 8)}T${timePart.slice(0, 2)}:${timePart.slice(2, 4)}:${timePart.slice(4, 6)}${isoZone}`;
 	const parsed = Date.parse(iso);
 	return Number.isNaN(parsed) ? null : parsed;
+}
+
+function formatLocalDatePart(value: Date): string {
+	return `${value.getFullYear()}${padTwo(value.getMonth() + 1)}${padTwo(value.getDate())}`;
+}
+
+function formatLocalTimePart(value: Date): string {
+	return `${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}`;
+}
+
+function formatLocalOffsetPart(value: Date): string {
+	const offsetMinutes = -value.getTimezoneOffset();
+	const sign = offsetMinutes >= 0 ? "+" : "-";
+	const absoluteMinutes = Math.abs(offsetMinutes);
+	return `${sign}${padTwo(Math.floor(absoluteMinutes / 60))}${padTwo(absoluteMinutes % 60)}`;
+}
+
+function padTwo(value: number): string {
+	return String(value).padStart(2, "0");
 }
 
 function isMissingPathError(error: unknown): boolean {

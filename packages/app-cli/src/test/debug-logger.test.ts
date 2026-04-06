@@ -1,13 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 import { DebugLogger, getLastDebugSession, initializeDebugLogger } from "../debug-logger.js";
 
+function formatLocalTraceTimestamp(value: Date): string {
+	const padTwo = (part: number): string => String(part).padStart(2, "0");
+	const offsetMinutes = -value.getTimezoneOffset();
+	const sign = offsetMinutes >= 0 ? "+" : "-";
+	const absoluteMinutes = Math.abs(offsetMinutes);
+	return (
+		`${value.getFullYear()}${padTwo(value.getMonth() + 1)}${padTwo(value.getDate())}` +
+		`T${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}` +
+		`${sign}${padTwo(Math.floor(absoluteMinutes / 60))}${padTwo(absoluteMinutes % 60)}`
+	);
+}
+
 describe("DebugLogger", () => {
 	it("creates a trace session with timestamp, pid and random suffix", async () => {
+		const now = new Date("2026-04-06T12:00:00.000Z");
+		const expectedTimestamp = formatLocalTraceTimestamp(now);
 		const writes: Array<{ path: string; data: string }> = [];
 		const logger = await initializeDebugLogger({
 			debugEnabled: true,
 			argv: ["--debug"],
-			now: () => new Date("2026-04-06T12:00:00.000Z"),
+			now: () => now,
 			pid: 4321,
 			randomHex: () => "deadbeef",
 			io: {
@@ -23,21 +37,23 @@ describe("DebugLogger", () => {
 			},
 		});
 
-		expect(logger.session.traceId).toBe("20260406T120000Z-p4321-deadbeef");
-		expect(getLastDebugSession()?.traceId).toBe("20260406T120000Z-p4321-deadbeef");
+		expect(logger.session.traceId).toBe(`${expectedTimestamp}-p4321-deadbeef`);
+		expect(getLastDebugSession()?.traceId).toBe(`${expectedTimestamp}-p4321-deadbeef`);
 
 		logger.debug("test.scope", "hello");
 		await logger.flush();
-		expect(writes.some((write) => write.path.endsWith("runtime-20260406T120000Z.jsonl"))).toBe(true);
+		expect(writes.some((write) => write.path.endsWith(`runtime-${expectedTimestamp}.jsonl`))).toBe(true);
 		await logger.shutdown();
 	});
 
 	it("records only error-and-above runtime logs outside debug mode", async () => {
+		const now = new Date("2026-04-06T12:00:00.000Z");
+		const expectedTimestamp = formatLocalTraceTimestamp(now);
 		const writes: Array<{ path: string; data: string }> = [];
 		const logger = new DebugLogger({
 			debugEnabled: false,
 			argv: [],
-			now: () => new Date("2026-04-06T12:00:00.000Z"),
+			now: () => now,
 			randomHex: () => "deadbeef",
 			io: {
 				async mkdir() {},
@@ -59,7 +75,7 @@ describe("DebugLogger", () => {
 		await logger.flush();
 
 		const runtimeLines = writes
-			.filter((write) => write.path.endsWith("runtime-20260406T120000Z.jsonl"))
+			.filter((write) => write.path.endsWith(`runtime-${expectedTimestamp}.jsonl`))
 			.flatMap((write) => write.data.trim().split("\n"))
 			.filter(Boolean)
 			.map((line) => JSON.parse(line) as { level: string; message: string });
@@ -67,8 +83,8 @@ describe("DebugLogger", () => {
 		expect(runtimeLines.map((line) => line.level)).toEqual(["ERROR", "CRASH"]);
 		expect(runtimeLines.map((line) => line.message)).toContain("visible");
 
-		expect(writes.some((write) => write.path.endsWith("error-20260406T120000Z.jsonl"))).toBe(true);
-		expect(writes.some((write) => write.path.endsWith("crash-20260406T120000Z.jsonl"))).toBe(true);
+		expect(writes.some((write) => write.path.endsWith(`error-${expectedTimestamp}.jsonl`))).toBe(true);
+		expect(writes.some((write) => write.path.endsWith(`crash-${expectedTimestamp}.jsonl`))).toBe(true);
 		await logger.shutdown();
 	});
 
@@ -101,6 +117,7 @@ describe("DebugLogger", () => {
 	});
 
 	it("cleans up trace directories older than seven days during startup", async () => {
+		const recentDir = `${formatLocalTraceTimestamp(new Date("2026-04-03T12:00:00.000Z"))}-p2-feedcafe`;
 		const removed: string[] = [];
 		const logger = await initializeDebugLogger({
 			debugEnabled: true,
@@ -114,7 +131,7 @@ describe("DebugLogger", () => {
 				async appendFile() {},
 				async writeFile() {},
 				async readdir() {
-					return ["20260401T115959Z-p1-deadbeef", "20260403T120000Z-p2-feedcafe", "not-a-trace-dir"];
+					return ["20260401T115959Z-p1-deadbeef", recentDir, "not-a-trace-dir"];
 				},
 				async rm(path) {
 					removed.push(path);

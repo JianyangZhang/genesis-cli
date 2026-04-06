@@ -23,6 +23,18 @@ const originalGenesisEnv = {
 	GENESIS_BOOTSTRAP_BASE_URL: process.env.GENESIS_BOOTSTRAP_BASE_URL,
 };
 
+function formatLocalTraceTimestamp(value: Date): string {
+	const padTwo = (part: number): string => String(part).padStart(2, "0");
+	const offsetMinutes = -value.getTimezoneOffset();
+	const sign = offsetMinutes >= 0 ? "+" : "-";
+	const absoluteMinutes = Math.abs(offsetMinutes);
+	return (
+		`${value.getFullYear()}${padTwo(value.getMonth() + 1)}${padTwo(value.getDate())}` +
+		`T${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}` +
+		`${sign}${padTwo(Math.floor(absoluteMinutes / 60))}${padTwo(absoluteMinutes % 60)}`
+	);
+}
+
 afterEach(() => {
 	stdoutWrite.mockClear();
 	stderrWrite.mockClear();
@@ -91,18 +103,18 @@ describe("main", () => {
 
 describe("formatDebugSessionBanner", () => {
 	it("renders trace-id and log directory for user feedback", () => {
+		const traceId = `${formatLocalTraceTimestamp(new Date("2026-04-06T12:00:00.000Z"))}-p123-deadbeef`;
 		expect(
 			formatDebugSessionBanner({
-				traceId: "20260406T120000Z-p123-deadbeef",
+				traceId,
 				startedAt: "2026-04-06T12:00:00.000Z",
 				pid: 123,
 				debugEnabled: true,
 				logRootDir: "/tmp/log-root",
-				sessionDir: "/tmp/log-root/20260406T120000Z-p123-deadbeef",
+				sessionDir: `/tmp/log-root/${traceId}`,
 			}),
 		).toBe(
-			"[genesis-debug] trace-id: 20260406T120000Z-p123-deadbeef\n" +
-				"[genesis-debug] logs: /tmp/log-root/20260406T120000Z-p123-deadbeef\n",
+			`[genesis-debug] trace-id: ${traceId}\n` + `[genesis-debug] logs: /tmp/log-root/${traceId}\n`,
 		);
 	});
 });

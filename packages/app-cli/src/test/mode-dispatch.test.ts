@@ -50,6 +50,18 @@ import {
 } from "../mode-dispatch.js";
 import { INTERACTIVE_THEME } from "../theme.js";
 
+function formatLocalTraceTimestamp(value: Date): string {
+	const padTwo = (part: number): string => String(part).padStart(2, "0");
+	const offsetMinutes = -value.getTimezoneOffset();
+	const sign = offsetMinutes >= 0 ? "+" : "-";
+	const absoluteMinutes = Math.abs(offsetMinutes);
+	return (
+		`${value.getFullYear()}${padTwo(value.getMonth() + 1)}${padTwo(value.getDate())}` +
+		`T${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}` +
+		`${sign}${padTwo(Math.floor(absoluteMinutes / 60))}${padTwo(absoluteMinutes % 60)}`
+	);
+}
+
 describe("interactive transcript formatting", () => {
 	it("formats user lines as a compact highlighted block", () => {
 		const line = formatTranscriptUserLine("Hello");
@@ -189,15 +201,16 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("shows debug trace information in the welcome buffer when provided", () => {
+		const traceId = `${formatLocalTraceTimestamp(new Date("2026-04-06T12:00:00.000Z"))}-p123-abcdef12`;
 		const lines = buildWelcomeLines({
 			terminalWidth: 80,
 			version: "0.0.0",
 			model: "GLM 5.1",
 			provider: "zai",
 			greeting: "Let there be light.",
-			debugTraceId: "20260406T120000Z-p123-abcdef12",
+			debugTraceId: traceId,
 		});
-		expect(lines.some((line) => line.includes("Debug trace: 20260406T120000Z-p123-abcdef12"))).toBe(true);
+		expect(lines.some((line) => line.includes(`Debug trace: ${traceId}`))).toBe(true);
 	});
 
 	it("reapplies border styling after styled title segments in the top border", () => {
