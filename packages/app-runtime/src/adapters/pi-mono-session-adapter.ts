@@ -10,16 +10,20 @@ type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type PiMonoModel = Record<string, unknown>;
 
 interface AgentSession {
-	readonly sessionId: string;
-	readonly sessionFile?: string;
 	readonly isStreaming: boolean;
 	subscribe(listener: (event: unknown) => void): () => void;
 	prompt(input: string): Promise<void>;
 	followUp(input: string): Promise<void>;
 	abort(): Promise<void>;
 	compact(customInstructions?: string): Promise<void>;
-	getMetadata(): Promise<SessionRecoveryData["metadata"]>;
+	getSnapshot(): Promise<AgentSessionSnapshot>;
 	dispose(): void;
+}
+
+interface AgentSessionSnapshot {
+	readonly sessionId: string;
+	readonly sessionFile?: string;
+	readonly metadata: SessionRecoveryData["metadata"];
 }
 
 interface PiMonoTool {
@@ -158,19 +162,17 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 	}
 
 	async getRecoveryData(): Promise<SessionRecoveryData> {
-		const metadata =
-			this.pendingRecoveryData?.metadata ??
-			(this.session ? await this.session.getMetadata().catch(() => null) : null);
+		const snapshot = await this.getActiveSnapshot();
 		return {
-			sessionId: { value: this.session?.sessionId ?? "unknown-session" },
+			sessionId: { value: snapshot?.sessionId ?? "unknown-session" },
 			model: this.options.model,
 			toolSet: [...this.bridgeState.toolSet],
 			planSummary: null,
 			compactionSummary: null,
-			metadata,
+			metadata: snapshot?.metadata ?? null,
 			taskState: { status: "idle", currentTaskId: null, startedAt: null },
 			workingDirectory: this.pendingRecoveryData?.workingDirectory ?? this.options.workingDirectory,
-			sessionFile: this.pendingRecoveryData?.sessionFile ?? this.session?.sessionFile,
+			sessionFile: this.pendingRecoveryData?.sessionFile ?? snapshot?.sessionFile,
 			agentDir: this.pendingRecoveryData?.agentDir ?? this.options.agentDir,
 		};
 	}
@@ -374,6 +376,15 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 			return;
 		}
 		this.session = await this.createUnderlyingSession();
+	}
+
+	private async getActiveSnapshot(): Promise<AgentSessionSnapshot | null> {
+		if (!this.session) return null;
+		try {
+			return await this.session.getSnapshot();
+		} catch {
+			return null;
+		}
 	}
 
 	private async createUnderlyingSession(): Promise<AgentSession> {

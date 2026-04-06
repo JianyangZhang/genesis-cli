@@ -340,16 +340,20 @@ class FakeAgentSession {
 		} as never);
 	}
 
-	async getMetadata() {
+	async getSnapshot() {
 		return {
-			summary: "fake summary",
-			firstPrompt: "inspect the repo",
-			messageCount: 2,
-			fileSizeBytes: 128,
-			recentMessages: [
-				{ role: "user" as const, text: "inspect the repo" },
-				{ role: "assistant" as const, text: "working on it" },
-			],
+			sessionId: "fake-session",
+			sessionFile: "/tmp/fake-session.jsonl",
+			metadata: {
+				summary: "fake summary",
+				firstPrompt: "inspect the repo",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user" as const, text: "inspect the repo" },
+					{ role: "assistant" as const, text: "working on it" },
+				],
+			},
 		};
 	}
 

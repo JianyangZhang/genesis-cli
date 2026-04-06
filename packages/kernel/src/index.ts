@@ -3,6 +3,7 @@ export {
 	type CreateAgentSessionResult,
 	createAgentSession,
 	type GenesisAgentSession,
+	type GenesisSessionSnapshot,
 } from "./agent-session.js";
 export {
 	type GenesisSessionMetadata,

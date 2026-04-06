@@ -65,6 +65,8 @@ describe("createAgentSession", () => {
 		});
 
 		await session.prompt("Please inspect the compact failure.");
+		const snapshotBeforeCompact = await session.getSnapshot();
+		expect(snapshotBeforeCompact.sessionId.length).toBeGreaterThan(0);
 		await session.compact("Preserve the failure cause and next step.");
 
 		expect(seen).toContain("compaction_start");

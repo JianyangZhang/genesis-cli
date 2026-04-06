@@ -27,9 +27,15 @@ export interface GenesisAgentSession {
 	prompt(input: string): Promise<void>;
 	followUp(input: string): Promise<void>;
 	compact(customInstructions?: string): Promise<void>;
-	getMetadata(): Promise<GenesisSessionMetadata | null>;
+	getSnapshot(): Promise<GenesisSessionSnapshot>;
 	abort(): Promise<void>;
 	dispose(): void;
+}
+
+export interface GenesisSessionSnapshot {
+	readonly sessionId: string;
+	readonly sessionFile?: string;
+	readonly metadata: GenesisSessionMetadata | null;
 }
 
 export interface CreateAgentSessionResult {
@@ -120,8 +126,16 @@ class GenesisAgentSessionImpl implements GenesisAgentSession {
 		}
 	}
 
-	getMetadata(): Promise<GenesisSessionMetadata | null> {
+	private loadMetadata(): Promise<GenesisSessionMetadata | null> {
 		return loadSessionMetadataFromSessionFile(this.sessionFile);
+	}
+
+	async getSnapshot(): Promise<GenesisSessionSnapshot> {
+		return {
+			sessionId: this.sessionId,
+			sessionFile: this.sessionFile,
+			metadata: await this.loadMetadata(),
+		};
 	}
 
 	async abort(): Promise<void> {
