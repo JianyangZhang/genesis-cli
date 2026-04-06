@@ -49,6 +49,13 @@ describe("createSlashCommandRegistry", () => {
 		reg.register(cmdWorld);
 		expect(reg.listAll()).toHaveLength(2);
 	});
+
+	it("lists only public commands for user-facing surfaces", () => {
+		const reg = createSlashCommandRegistry();
+		reg.register(cmdHello);
+		reg.register({ name: "internal", description: "hidden", type: "local", visibility: "internal" });
+		expect(reg.listPublic().map((cmd) => cmd.name)).toEqual(["hello"]);
+	});
 });
 
 describe("resolve", () => {

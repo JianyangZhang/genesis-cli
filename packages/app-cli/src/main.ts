@@ -301,16 +301,10 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	const displayName = pickOptionalString(
 		[
 			{ value: asOptionalString(flags["display-name"]), layer: "cli", detail: "--display-name" },
-			{ value: shellEnv.GENESIS_MODEL_DISPLAY_NAME, layer: "env", detail: "GENESIS_MODEL_DISPLAY_NAME" },
 			{
 				value: settingsLayers.local?.displayName,
 				layer: "local",
 				detail: localSettingsPath,
-			},
-			{
-				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_MODEL_DISPLAY_NAME"),
-				layer: "local",
-				detail: `${localSettingsPath} env.GENESIS_MODEL_DISPLAY_NAME`,
 			},
 			{
 				value: settingsLayers.project?.displayName,
@@ -318,19 +312,9 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 				detail: projectSettingsPath,
 			},
 			{
-				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_MODEL_DISPLAY_NAME"),
-				layer: "project",
-				detail: `${projectSettingsPath} env.GENESIS_MODEL_DISPLAY_NAME`,
-			},
-			{
 				value: settingsLayers.user?.displayName,
 				layer: "user",
 				detail: settingsPath,
-			},
-			{
-				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_MODEL_DISPLAY_NAME"),
-				layer: "user",
-				detail: `${settingsPath} env.GENESIS_MODEL_DISPLAY_NAME`,
 			},
 			{ value: agentConfig?.displayName, layer: "agent", detail: agentConfigPath },
 		],
@@ -691,7 +675,6 @@ function buildDefaultSettingsFile(env: NodeJS.ProcessEnv = process.env): Setting
 			GENESIS_BOOTSTRAP_API: normalizeOptionalString(env.GENESIS_BOOTSTRAP_API) ?? "openai-completions",
 			GENESIS_MODEL_PROVIDER: normalizeOptionalString(env.GENESIS_MODEL_PROVIDER) ?? "zai",
 			GENESIS_MODEL_ID: modelId,
-			GENESIS_MODEL_DISPLAY_NAME: normalizeOptionalString(env.GENESIS_MODEL_DISPLAY_NAME) ?? modelId,
 		},
 	};
 }

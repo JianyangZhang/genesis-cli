@@ -15,6 +15,7 @@ const modelCommand: SlashCommand = {
 	name: "model",
 	description: "Show the active model",
 	type: "local",
+	visibility: "internal",
 	async execute(ctx: SlashCommandContext): Promise<undefined> {
 		const model = ctx.session.state.model;
 		if (ctx.args.length === 0) {
@@ -37,6 +38,7 @@ const sessionCommand: SlashCommand = {
 	name: "session",
 	description: "Show current session information",
 	type: "local",
+	visibility: "internal",
 	async execute(ctx: SlashCommandContext): Promise<undefined> {
 		const state = ctx.session.state;
 		ctx.output.writeLine(`Session: ${state.id.value}`);
@@ -68,6 +70,7 @@ const toolsCommand: SlashCommand = {
 	name: "tools",
 	description: "List registered tools with risk levels",
 	type: "local",
+	visibility: "internal",
 	async execute(ctx: SlashCommandContext): Promise<undefined> {
 		const governor = ctx.runtime.governor;
 		const catalog = governor.catalog;
@@ -97,6 +100,7 @@ const planCommand: SlashCommand = {
 	name: "plan",
 	description: "Show current plan summary",
 	type: "local",
+	visibility: "internal",
 	async execute(ctx: SlashCommandContext): Promise<undefined> {
 		const state = ctx.session.state;
 		if (!state.planSummary) {
@@ -120,6 +124,7 @@ const compactCommand: SlashCommand = {
 	name: "compact",
 	description: "Trigger context compaction",
 	type: "local",
+	visibility: "public",
 	async execute(ctx: SlashCommandContext): Promise<undefined> {
 		await ctx.session.compact();
 		ctx.output.writeLine("Compaction completed.");

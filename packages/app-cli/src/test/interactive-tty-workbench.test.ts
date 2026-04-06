@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { promisify } from "node:util";
 import type {
 	AppRuntime,
 	RecentSessionEntry,
@@ -14,6 +16,8 @@ import { createEventBus, createPlanEngine, createToolGovernor } from "@pickle-pe
 import { afterEach, describe, expect, it } from "vitest";
 import { initializeDebugLogger } from "../debug-logger.js";
 import { createModeHandler } from "../mode-dispatch.js";
+
+const execFileAsync = promisify(execFile);
 
 class FakeTtyInput extends PassThrough {
 	isTTY = true;
@@ -188,6 +192,28 @@ async function writeSessionTranscript(
 	await writeFile(filePath, `${lines.join("\n")}\n`, "utf8");
 }
 
+async function createGitRepoFixture(options?: {
+	readonly modifiedFile?: string;
+	readonly initialContent?: string;
+	readonly updatedContent?: string | null;
+	readonly commitInitialFile?: boolean;
+}): Promise<{ readonly repoDir: string; readonly filePath: string }> {
+	const repoDir = await mkdtemp(join(tmpdir(), "genesis-git-fixture-"));
+	const filePath = join(repoDir, options?.modifiedFile ?? "notes.txt");
+	await execFileAsync("git", ["init"], { cwd: repoDir });
+	await execFileAsync("git", ["config", "user.email", "genesis@example.com"], { cwd: repoDir });
+	await execFileAsync("git", ["config", "user.name", "Genesis Test"], { cwd: repoDir });
+	await writeFile(filePath, options?.initialContent ?? "hello\n", "utf8");
+	if (options?.commitInitialFile !== false) {
+		await execFileAsync("git", ["add", "."], { cwd: repoDir });
+		await execFileAsync("git", ["commit", "-m", "init"], { cwd: repoDir });
+		if (options?.updatedContent !== null) {
+			await writeFile(filePath, options?.updatedContent ?? "hello changed\n", "utf8");
+		}
+	}
+	return { repoDir, filePath };
+}
+
 class FakeInteractiveSession implements SessionFacade {
 	readonly id: SessionFacade["id"];
 	readonly state: SessionFacade["state"];
@@ -215,8 +241,14 @@ class FakeInteractiveSession implements SessionFacade {
 		const model = { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" };
 		this.state = {
 			id: this.id,
+			status: "active",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
 			model,
 			toolSet: new Set(["bash"]),
+			planSummary: null,
+			compactionSummary: null,
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
 		} as unknown as SessionFacade["state"];
 		this.context = {
 			sessionId: this.id,
@@ -1014,6 +1046,162 @@ describe("interactive workbench TTY", () => {
 			input.write("/help revert\r");
 			await waitFor(() => screen.snapshot().includes("Unknown command: /revert"));
 			expect(screen.snapshot()).toContain("Type /help to see all commands.");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("shows only public commands in /help listings", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-help-listing" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/help\r");
+			await waitFor(() => screen.snapshot().includes("Commands:"));
+			expect(screen.snapshot()).toContain("/changes");
+			expect(screen.snapshot()).toContain("/status");
+			expect(screen.snapshot()).not.toContain("/model");
+			expect(screen.snapshot()).not.toContain("/config");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("shows a git working-tree summary for /changes", async () => {
+		const { repoDir } = await createGitRepoFixture({ modifiedFile: "notes.txt" });
+		const session = new FakeInteractiveSession({ sessionId: "session-changes", workingDirectory: repoDir });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("/changes\r");
+				await waitFor(() => screen.snapshot().includes("Working tree:"));
+				expect(screen.snapshot()).toContain("git status --porcelain:");
+				expect(screen.snapshot()).toContain("notes.txt");
+				expect(screen.snapshot()).toContain("git diff --stat:");
+				expect(screen.snapshot()).toContain("Next: /review to inspect, or /diff [file] to see patches.");
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await rm(repoDir, { recursive: true, force: true });
+		}
+	}, 10000);
+
+	it("shows a file-scoped patch for /diff <file>", async () => {
+		const { repoDir } = await createGitRepoFixture({
+			modifiedFile: "notes.txt",
+			initialContent: "hello\n",
+			updatedContent: "hello changed\n",
+		});
+		const session = new FakeInteractiveSession({ sessionId: "session-diff", workingDirectory: repoDir });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("/diff notes.txt\r");
+				await waitFor(() => output.getRawOutput().includes("Diff: notes.txt"));
+				expect(output.getRawOutput()).toContain("--- a/notes.txt");
+				expect(output.getRawOutput()).toContain("+++ b/notes.txt");
+				expect(output.getRawOutput()).toContain("+hello changed");
+				expect(output.getRawOutput()).toContain("Next: /review to see a summary, or keep iterating.");
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await rm(repoDir, { recursive: true, force: true });
+		}
+	}, 10000);
+
+	it("uses the shared working-tree summary in /review and omits hidden revert guidance", async () => {
+		const { repoDir } = await createGitRepoFixture({ modifiedFile: "notes.txt" });
+		const session = new FakeInteractiveSession({ sessionId: "session-review", workingDirectory: repoDir });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("/review\r");
+				await waitFor(() => screen.snapshot().includes("Review tips:"));
+				expect(screen.snapshot()).toContain("Working tree:");
+				expect(screen.snapshot()).toContain("git status --porcelain:");
+				expect(screen.snapshot()).toContain("/diff <file>   Inspect a specific patch");
+				expect(screen.snapshot()).toContain("Use git manually if you want to discard changes");
+				expect(screen.snapshot()).not.toContain("/revert");
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await rm(repoDir, { recursive: true, force: true });
+		}
+	}, 10000);
+
+	it("reports a clean repo in /review", async () => {
+		const { repoDir } = await createGitRepoFixture({ modifiedFile: "notes.txt", updatedContent: null });
+		const session = new FakeInteractiveSession({ sessionId: "session-review-clean", workingDirectory: repoDir });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("/review\r");
+				await waitFor(() => screen.snapshot().includes("Review: clean working tree."));
+				expect(screen.snapshot()).toContain("Next: continue chatting, or /changes if you want a snapshot.");
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await rm(repoDir, { recursive: true, force: true });
+		}
+	}, 10000);
+
+	it("keeps /status available to users as a low-cost session snapshot", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-status", workingDirectory: "/tmp/project" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/help status\r");
+			await waitFor(() => screen.snapshot().includes("/status"));
+			expect(screen.snapshot()).toContain("Show status");
+
+			input.write("/status\r");
+			await waitFor(() => screen.snapshot().includes("Session: session-status"));
+			expect(screen.snapshot()).toContain("CWD: /tmp/project");
+			expect(screen.snapshot()).toContain("Type a prompt, or /help for commands");
 
 			input.write("/exit\r");
 			await startPromise;

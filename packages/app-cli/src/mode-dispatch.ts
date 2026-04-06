@@ -295,6 +295,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "title",
 			description: "Set the current session title",
 			type: "local",
+			visibility: "internal",
 			async execute(ctx) {
 				const next = ctx.args.trim();
 				if (next.length === 0) {
@@ -313,7 +314,7 @@ class InteractiveModeHandler implements ModeHandler {
 			type: "local",
 			async execute(ctx) {
 				const query = ctx.args.trim().replace(/^\/+/, "");
-				const all = registry.listAll().slice();
+				const all = registry.listPublic().slice();
 
 				if (query.length > 0) {
 					const cmd = all.find((c) => c.name === query) ?? null;
@@ -356,6 +357,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "exit",
 			description: "Exit the interactive session",
 			type: "local",
+			visibility: "public",
 			async execute(ctx) {
 				exitRequested = true;
 				ctx.output.writeLine("Bye.");
@@ -368,6 +370,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "quit",
 			description: "Exit the interactive session (alias of /exit)",
 			type: "local",
+			visibility: "public",
 			async execute(ctx) {
 				exitRequested = true;
 				ctx.output.writeLine("Bye.");
@@ -380,6 +383,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "clear",
 			description: "Clear the transcript",
 			type: "local",
+			visibility: "public",
 			async execute(ctx) {
 				if (handler._activeTurn || handler._pendingPermissionCallId) {
 					ctx.output.writeError("Session is busy.");
@@ -403,30 +407,12 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "changes",
 			description: "Show changed files and diff summary",
 			type: "local",
+			visibility: "public",
 			async execute(ctx) {
 				const cwd = ctx.session.context.workingDirectory;
-				ctx.output.writeLine("Working tree:");
-				if (handler._changedPaths.size > 0) {
-					ctx.output.writeLine("Changed files (observed by tools):");
-					for (const path of [...handler._changedPaths].sort((a, b) => a.localeCompare(b))) {
-						ctx.output.writeLine(`  ${path}`);
-					}
-				} else {
-					ctx.output.writeLine("Changed files (observed by tools): none");
-				}
-
-				const status = await runGit(cwd, ["status", "--porcelain"]);
-				if (status.type === "ok") {
-					const trimmed = status.stdout.trim();
-					ctx.output.writeLine("git status --porcelain:");
-					ctx.output.writeLine(trimmed.length > 0 ? trimmed : "  clean");
-				}
-				const stat = await runGit(cwd, ["diff", "--stat"]);
-				if (stat.type === "ok" && stat.stdout.trim().length > 0) {
-					ctx.output.writeLine("git diff --stat:");
-					ctx.output.writeLine(`  ${stat.stdout.trimEnd().split("\n").join("\n  ")}`);
-				}
-				if (status.type === "error" || stat.type === "error") {
+				const snapshot = await inspectGitWorkingTree(cwd);
+				renderWorkingTreeSummary(ctx.output, handler._changedPaths, snapshot);
+				if (snapshot.available === false) {
 					ctx.output.writeError("git not available in this working directory.");
 					ctx.output.writeLine("Next: use /review to inspect tool-observed changes.");
 					return undefined;
@@ -440,6 +426,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "diff",
 			description: "Show git diff (optionally for a file)",
 			type: "local",
+			visibility: "public",
 			async execute(ctx) {
 				const cwd = ctx.session.context.workingDirectory;
 				const target = ctx.args.trim();
@@ -448,8 +435,7 @@ class InteractiveModeHandler implements ModeHandler {
 				} else {
 					ctx.output.writeLine(`Diff: ${target}`);
 				}
-				const args = target.length > 0 ? ["diff", "--", target] : ["diff"];
-				const diff = await runGit(cwd, args);
+				const diff = await readGitDiff(cwd, target.length > 0 ? target : null);
 				if (diff.type === "error") {
 					ctx.output.writeError("git not available in this working directory.");
 					return undefined;
@@ -464,15 +450,21 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "review",
 			description: "Review changes and decide next steps",
 			type: "local",
+			visibility: "public",
 			async execute(ctx) {
 				const cwd = ctx.session.context.workingDirectory;
-				const status = await runGit(cwd, ["status", "--porcelain"]);
-				if (status.type === "ok" && status.stdout.trim().length === 0 && handler._changedPaths.size === 0) {
+				const snapshot = await inspectGitWorkingTree(cwd);
+				if (snapshot.available && snapshot.statusLines.length === 0 && handler._changedPaths.size === 0) {
 					ctx.output.writeLine("Review: clean working tree.");
-					ctx.output.writeLine("Next: continue chatting, or run /status if you want a snapshot.");
+					ctx.output.writeLine("Next: continue chatting, or /changes if you want a snapshot.");
 					return undefined;
 				}
-				await registry.get("changes")!.execute?.(ctx);
+				renderWorkingTreeSummary(ctx.output, handler._changedPaths, snapshot);
+				if (snapshot.available === false) {
+					ctx.output.writeError("git not available in this working directory.");
+					ctx.output.writeLine("Next: continue chatting, or inspect tool-observed changes manually.");
+					return undefined;
+				}
 				ctx.output.writeLine("Review tips:");
 				ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
 				ctx.output.writeLine("  Use git manually if you want to discard changes");
@@ -485,6 +477,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "status",
 			description: "Show status",
 			type: "local",
+			visibility: "public",
 			async execute(ctx) {
 				const state = ctx.session.state;
 				ctx.output.writeLine(`Session: ${state.id.value}`);
@@ -535,6 +528,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "usage",
 			description: "Show tool usage and governance summary",
 			type: "local",
+			visibility: "internal",
 			async execute(ctx) {
 				const entries = ctx.runtime.governor.audit.getAll();
 				const total = entries.length;
@@ -560,6 +554,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "config",
 			description: "Show effective config",
 			type: "local",
+			visibility: "internal",
 			async execute(ctx) {
 				const sources = ctx.session.context.configSources ?? {};
 				ctx.output.writeLine("Precedence: default < agent < project < env < cli");
@@ -615,6 +610,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "doctor",
 			description: "Diagnose OpenAI-compatible mainline",
 			type: "local",
+			visibility: "internal",
 			async execute(ctx) {
 				const agentDir = resolveAgentDir();
 				const modelsPath = join(agentDir, "models.json");
@@ -683,6 +679,7 @@ class InteractiveModeHandler implements ModeHandler {
 			name: "resume",
 			description: "Show recent sessions or resume one",
 			type: "local",
+			visibility: "public",
 			async execute(ctx) {
 				if (handler._activeTurn || handler._pendingPermissionCallId) {
 					ctx.output.writeError("Session is busy.");
@@ -730,7 +727,7 @@ class InteractiveModeHandler implements ModeHandler {
 					void this.refreshResumeBrowserResults(runtime, state.buffer);
 					return;
 				}
-				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listAll());
+				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listPublic());
 				this.renderPromptLine();
 			},
 			onTabComplete: (state) => {
@@ -743,7 +740,7 @@ class InteractiveModeHandler implements ModeHandler {
 				const nextState = acceptFirstSlashSuggestion(state, this._commandSuggestions);
 				if (nextState) {
 					this._inputState = nextState;
-					this._commandSuggestions = computeSlashSuggestions(nextState.buffer, registry.listAll());
+					this._commandSuggestions = computeSlashSuggestions(nextState.buffer, registry.listPublic());
 					this.renderPromptLine();
 				}
 				return nextState;
@@ -1942,6 +1939,65 @@ function runGit(
 			resolve({ type: "ok", stdout: String(stdout), stderr: String(stderr) });
 		});
 	});
+}
+
+interface GitWorkingTreeSnapshot {
+	readonly available: boolean;
+	readonly statusLines: readonly string[];
+	readonly diffStatLines: readonly string[];
+}
+
+async function inspectGitWorkingTree(cwd: string): Promise<GitWorkingTreeSnapshot> {
+	const [status, diffStat] = await Promise.all([runGit(cwd, ["status", "--porcelain"]), runGit(cwd, ["diff", "--stat"])]);
+	if (status.type === "error" || diffStat.type === "error") {
+		return {
+			available: false,
+			statusLines: [],
+			diffStatLines: [],
+		};
+	}
+	return {
+		available: true,
+		statusLines: splitNonEmptyLines(status.stdout),
+		diffStatLines: splitNonEmptyLines(diffStat.stdout),
+	};
+}
+
+function renderWorkingTreeSummary(
+	output: OutputSink,
+	changedPaths: ReadonlySet<string>,
+	snapshot: GitWorkingTreeSnapshot,
+): void {
+	output.writeLine("Working tree:");
+	if (changedPaths.size > 0) {
+		output.writeLine("Changed files (observed by tools):");
+		for (const path of [...changedPaths].sort((a, b) => a.localeCompare(b))) {
+			output.writeLine(`  ${path}`);
+		}
+	} else {
+		output.writeLine("Changed files (observed by tools): none");
+	}
+	if (!snapshot.available) {
+		return;
+	}
+	output.writeLine("git status --porcelain:");
+	output.writeLine(snapshot.statusLines.length > 0 ? `  ${snapshot.statusLines.join("\n  ")}` : "  clean");
+	if (snapshot.diffStatLines.length > 0) {
+		output.writeLine("git diff --stat:");
+		output.writeLine(`  ${snapshot.diffStatLines.join("\n  ")}`);
+	}
+}
+
+function readGitDiff(cwd: string, target: string | null): Promise<{ type: "ok"; stdout: string; stderr: string } | { type: "error" }> {
+	return runGit(cwd, target ? ["diff", "--", target] : ["diff"]);
+}
+
+function splitNonEmptyLines(text: string): readonly string[] {
+	return text
+		.trim()
+		.split("\n")
+		.map((line) => line.trimEnd())
+		.filter((line) => line.length > 0);
 }
 
 function stripAnsiWelcome(text: string): string {

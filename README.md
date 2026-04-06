@@ -29,8 +29,7 @@
     "GENESIS_BOOTSTRAP_BASE_URL": "https://open.bigmodel.cn/api/coding/paas/v4/",
     "GENESIS_BOOTSTRAP_API": "openai-completions",
     "GENESIS_MODEL_PROVIDER": "zai",
-    "GENESIS_MODEL_ID": "glm-5.1",
-    "GENESIS_MODEL_DISPLAY_NAME": "GLM-5.1"
+    "GENESIS_MODEL_ID": "glm-5.1"
   }
 }
 ```

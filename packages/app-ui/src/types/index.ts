@@ -86,6 +86,7 @@ export interface RpcEnvelope {
 
 /** Command execution type, following the three-type pattern. */
 export type SlashCommandType = "prompt" | "local" | "ui";
+export type SlashCommandVisibility = "public" | "internal";
 
 /** A registered slash command. */
 export interface SlashCommand {
@@ -93,6 +94,7 @@ export interface SlashCommand {
 	readonly name: string;
 	readonly description: string;
 	readonly type: SlashCommandType;
+	readonly visibility?: SlashCommandVisibility;
 	execute?(ctx: SlashCommandContext): Promise<SlashCommandResult | undefined>;
 }
 

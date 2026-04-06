@@ -29,6 +29,9 @@ export interface SlashCommandRegistry {
 	/** List all registered commands. */
 	listAll(): readonly SlashCommand[];
 
+	/** List commands that are safe to show in user-facing help and suggestions. */
+	listPublic(): readonly SlashCommand[];
+
 	/**
 	 * Resolve raw user input to a command.
 	 * Returns `null` if the input does not start with `/`.
@@ -55,6 +58,10 @@ export function createSlashCommandRegistry(): SlashCommandRegistry {
 
 		listAll(): readonly SlashCommand[] {
 			return [...commands.values()];
+		},
+
+		listPublic(): readonly SlashCommand[] {
+			return [...commands.values()].filter((command) => (command.visibility ?? "public") === "public");
 		},
 
 		resolve(input: string): SlashCommandResolution | null {

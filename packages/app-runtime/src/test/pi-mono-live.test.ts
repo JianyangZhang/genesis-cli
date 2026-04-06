@@ -150,7 +150,7 @@ async function createLiveAdapter(options: {
 		model: {
 			provider: process.env.GENESIS_MODEL_PROVIDER!,
 			id: modelId,
-			displayName: process.env.GENESIS_MODEL_DISPLAY_NAME ?? modelId,
+			displayName: modelId,
 		},
 		toolSet: ["read", "bash", "edit", "write"],
 		thinkingLevel: options.thinkingLevel,
@@ -173,7 +173,7 @@ function createModelsJson(options: {
 				models: [
 					{
 						id: options.modelId,
-						name: process.env.GENESIS_MODEL_DISPLAY_NAME ?? options.modelId,
+						name: options.modelId,
 						reasoning: true,
 						input: ["text"],
 						contextWindow: 128000,
