@@ -91,6 +91,7 @@ export interface RecentSessionEntry {
 }
 
 export type RecentSessionMatchSource =
+	| "recent"
 	| "title"
 	| "first_prompt"
 	| "summary"

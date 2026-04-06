@@ -47,16 +47,25 @@ export async function searchRecentSessions(
 	query: string,
 ): Promise<readonly RecentSessionSearchHit[]> {
 	const normalizedQuery = normalizeRecentSessionSearchText(query);
-	if (!normalizedQuery) {
-		return [];
-	}
 	const recent = await listRecentSessions(agentDir);
+	if (!normalizedQuery) {
+		return recent.map((entry) => buildRecentSessionBrowseHit(entry)).slice(0, 10);
+	}
 	return recent
 		.map((entry) => buildRecentSessionSearchHit(entry, normalizedQuery))
 		.filter((item): item is { readonly hit: RecentSessionSearchHit; readonly score: number } => item !== null)
 		.sort((a, b) => b.score - a.score || b.hit.entry.updatedAt - a.hit.entry.updatedAt)
 		.map((item) => item.hit)
 		.slice(0, 10);
+}
+
+function buildRecentSessionBrowseHit(entry: RecentSessionEntry): RecentSessionSearchHit {
+	return {
+		entry,
+		headline: pickRecentSessionStoredTitle(entry.recoveryData, entry.title) ?? entry.recoveryData.sessionId.value,
+		snippet: buildRecentSessionBrowseSnippet(entry),
+		matchSource: "recent",
+	};
 }
 
 async function upsertRecentSession(
@@ -193,6 +202,16 @@ function buildRecentSessionSearchSnippet(text: string, query: string): string {
 	return `${prefix}${normalizedText.slice(start, end).trim()}${suffix}`;
 }
 
+function buildRecentSessionBrowseSnippet(entry: RecentSessionEntry): string {
+	const metadata = entry.recoveryData.metadata;
+	return (
+		normalizeRecentSessionText(metadata?.summary) ??
+		normalizeRecentSessionText(metadata?.recentMessages.find((message) => message.role === "assistant")?.text) ??
+		normalizeRecentSessionText(metadata?.recentMessages.find((message) => message.role === "user")?.text) ??
+		entry.recoveryData.sessionId.value
+	);
+}
+
 function scoreSearchField(field: string, query: string, source: RecentSessionMatchSource): number {
 	const sourceWeight = getRecentSessionSearchSourceWeight(source);
 	if (field === query) {
@@ -213,6 +232,8 @@ function scoreSearchField(field: string, query: string, source: RecentSessionMat
 
 function getRecentSessionSearchSourceWeight(source: RecentSessionMatchSource): number {
 	switch (source) {
+		case "recent":
+			return 0;
 		case "title":
 			return 90;
 		case "first_prompt":

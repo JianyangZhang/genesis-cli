@@ -3,6 +3,7 @@ export type { InteractionPhase, InteractionState, JsonEnvelope, OutputMode, RpcE
 export { formatEventAsText, formatPermissionPrompt, formatPlanSummaryText, formatToolStep } from "./event-formatter.js";
 export { initialInteractionState, reduceInteractionState } from "./interaction-state.js";
 export { eventToJsonEnvelope, sanitizeForJson } from "./json-formatter.js";
+export { formatResumeBrowserTranscriptBlocks, moveResumeBrowserSelection } from "./resume-browser.js";
 export {
 	createRpcError,
 	createRpcResponse,

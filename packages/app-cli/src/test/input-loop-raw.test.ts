@@ -203,6 +203,36 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("emits ctrl+v in raw mode", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const onKey = vi.fn();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true, onKey });
+		try {
+			const pending = loop.nextLine();
+			input.write(Buffer.from([0x16]));
+			input.write("\r");
+			await pending;
+			expect(onKey).toHaveBeenCalledWith("ctrlv");
+		} finally {
+			loop.close();
+		}
+	});
+
+	it("lets the host replace the raw-mode input buffer", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const loop = createInputLoop({ input, output, prompt: "", rawMode: true });
+		try {
+			const pending = loop.nextLine();
+			loop.setState({ buffer: "prefilled", cursor: 9 });
+			input.write("\r");
+			await expect(pending).resolves.toBe("prefilled");
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("applies tab completion through the raw-mode callback", async () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();

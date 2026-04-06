@@ -6,7 +6,7 @@
  * are the building blocks for the four CLI modes.
  */
 
-import type { AppRuntime, SessionFacade } from "@pickle-pee/runtime";
+import type { AppRuntime, RecentSessionSearchHit, SessionFacade } from "@pickle-pee/runtime";
 
 // ---------------------------------------------------------------------------
 // Output mode — canonical definition shared by all formatters
@@ -123,4 +123,16 @@ export interface OutputSink {
 	write(text: string): void;
 	writeLine(text: string): void;
 	writeError(text: string): void;
+}
+
+// ---------------------------------------------------------------------------
+// Resume browser
+// ---------------------------------------------------------------------------
+
+export interface ResumeBrowserState {
+	readonly query: string;
+	readonly hits: readonly RecentSessionSearchHit[];
+	readonly selectedIndex: number;
+	readonly previewExpanded: boolean;
+	readonly loading: boolean;
 }

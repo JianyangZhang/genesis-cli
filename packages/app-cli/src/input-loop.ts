@@ -35,7 +35,8 @@ export interface InputLoopOptions {
 			| "shifttab"
 			| "esc"
 			| "ctrlc"
-			| "ctrlo",
+			| "ctrlo"
+			| "ctrlv",
 	) => void;
 	/** Called when Tab is pressed in rawMode; may replace the current buffer. */
 	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
@@ -50,6 +51,8 @@ export interface InputLoopOptions {
 export interface InputLoop {
 	/** Read the next line. Returns null on EOF or after close(). */
 	nextLine(): Promise<string | null>;
+	/** Replace the current input buffer. */
+	setState(state: { buffer: string; cursor: number }): void;
 	/** Close the readline interface and release resources. */
 	close(): void;
 }
@@ -122,6 +125,7 @@ export function createInputLoop(options: InputLoopOptions = {}): InputLoop {
 				rl.close();
 			}
 		},
+		setState(): void {},
 	};
 }
 
@@ -147,7 +151,8 @@ function createRawInputLoop(options: {
 			| "shifttab"
 			| "esc"
 			| "ctrlc"
-			| "ctrlo",
+			| "ctrlo"
+			| "ctrlv",
 	) => void;
 	readonly onTabComplete?: (state: { buffer: string; cursor: number }) => { buffer: string; cursor: number } | null;
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
@@ -336,6 +341,10 @@ function createRawInputLoop(options: {
 				onKey?.("ctrlo");
 				continue;
 			}
+			if (code === 22) {
+				onKey?.("ctrlv");
+				continue;
+			}
 			if (code === 27) {
 				escapeBuffer = ch;
 				if (escapeTimeout) {
@@ -408,6 +417,7 @@ function createRawInputLoop(options: {
 				flushPrompt();
 			});
 		},
+		setState,
 		close,
 	};
 }

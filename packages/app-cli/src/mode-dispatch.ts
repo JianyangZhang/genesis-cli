@@ -13,13 +13,12 @@ import type {
 	CliMode,
 	CompactionSummary,
 	RecentSessionEntry,
-	RecentSessionMatchSource,
 	RecentSessionSearchHit,
 	RuntimeEvent,
 	SessionClosedEvent,
 	SessionFacade,
 } from "@pickle-pee/runtime";
-import type { InteractionState, OutputSink, SlashCommand } from "@pickle-pee/ui";
+import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
 import {
 	ansiClearLine,
 	ansiCursorHome,
@@ -28,7 +27,9 @@ import {
 	createSlashCommandRegistry,
 	eventToJsonEnvelope,
 	formatEventAsText,
+	formatResumeBrowserTranscriptBlocks,
 	initialInteractionState,
+	moveResumeBrowserSelection,
 	reduceInteractionState,
 } from "@pickle-pee/ui";
 import type { InputLoop } from "./input-loop.js";
@@ -126,7 +127,9 @@ class InteractiveModeHandler implements ModeHandler {
 		focusRow: number;
 		focusColumn: number;
 	} | null = null;
-	private _resumeSelectionEntries: readonly RecentSessionEntry[] | null = null;
+	private _resumeBrowser: ResumeBrowserState | null = null;
+	private _resumeSearchRequestId = 0;
+	private _inputLoop: InputLoop | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -724,26 +727,13 @@ class InteractiveModeHandler implements ModeHandler {
 				const recent = await runtime.listRecentSessions();
 				const selector = ctx.args.trim();
 				if (selector.length === 0) {
-					renderRecentSessions(ctx.output, recent, "Recent sessions:");
-					handler._resumeSelectionEntries = recent;
-					if (recent.length > 0) {
-						ctx.output.writeLine("Next: /resume <query> to search, /resume #N to open, or /resume <sessionId>.");
-					}
+					await handler.openResumeBrowser(runtime, "");
 					return undefined;
 				}
 
-				const selectionSource =
-					selector.startsWith("#") && handler._resumeSelectionEntries !== null ? handler._resumeSelectionEntries : recent;
-				const directMatch = resolveRecentSessionDirectSelection(selector, selectionSource, recent);
+				const directMatch = resolveRecentSessionDirectSelection(selector, recent, recent);
 				if (!directMatch) {
-					const matches = await runtime.searchRecentSessions(selector);
-					if (matches.length === 0) {
-						ctx.output.writeError(`Session not found: ${selector}`);
-						return undefined;
-					}
-					renderRecentSessionSearchHits(ctx.output, matches, `Search results for "${selector}":`);
-					handler._resumeSelectionEntries = matches.map((hit) => hit.entry);
-					ctx.output.writeLine("Next: /resume #N to open one of the matches.");
+					await handler.openResumeBrowser(runtime, selector);
 					return undefined;
 				}
 				const data = directMatch.recoveryData;
@@ -753,7 +743,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 				const recovered = runtime.recoverSession(data);
 				switchInteractiveSession(recovered);
-				handler._resumeSelectionEntries = null;
+				handler.closeResumeBrowser();
 				writeSessionTranscriptPreview(ctx.output, directMatch);
 				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
 				ctx.output.writeLine("Next: continue this session, or /resume to view history again.");
@@ -770,10 +760,18 @@ class InteractiveModeHandler implements ModeHandler {
 			submitNewline: false,
 			onInputStateChange: (state) => {
 				this._inputState = state;
+				if (this._resumeBrowser !== null) {
+					this._commandSuggestions = [];
+					void this.refreshResumeBrowserResults(runtime, state.buffer);
+					return;
+				}
 				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listAll());
 				this.renderPromptLine();
 			},
 			onTabComplete: (state) => {
+				if (this._resumeBrowser !== null) {
+					return null;
+				}
 				if (this._pendingPermissionCallId !== null) {
 					return null;
 				}
@@ -821,6 +819,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this.handleMouseEvent(event);
 			},
 		});
+		this._inputLoop = inputLoop;
 
 		ttySession.enter();
 		this.renderWelcome(sessionRef.current);
@@ -830,6 +829,17 @@ class InteractiveModeHandler implements ModeHandler {
 			let line = await inputLoop.nextLine();
 			while (line !== null) {
 				const trimmed = line.trim();
+
+				if (this._resumeBrowser !== null) {
+					const handled = await this.handleResumeBrowserSubmit(line, runtime, sessionRef, sink, switchInteractiveSession);
+					if (handled) {
+						if (exitRequested) {
+							break;
+						}
+						line = await inputLoop.nextLine();
+						continue;
+					}
+				}
 
 				// Permission response
 				if (this._pendingPermissionCallId !== null) {
@@ -899,6 +909,7 @@ class InteractiveModeHandler implements ModeHandler {
 			process.stdout.off("resize", onResize);
 			debouncedResizeRedraw.cancel();
 			inputLoop.close();
+			this._inputLoop = null;
 			process.stdout.write(ansiResetScrollRegion());
 			ttySession.restore();
 			sessionRef.current.events.removeAllListeners();
@@ -957,10 +968,42 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private handleSpecialKey(
-		key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc" | "ctrlo",
+		key:
+			| "up"
+			| "down"
+			| "pageup"
+			| "pagedown"
+			| "wheelup"
+			| "wheeldown"
+			| "tab"
+			| "shifttab"
+			| "esc"
+			| "ctrlo"
+			| "ctrlv",
 	): void {
+		if (this._resumeBrowser !== null) {
+			if (key === "esc") {
+				this.closeResumeBrowser();
+				return;
+			}
+			if (key === "ctrlv") {
+				this.toggleResumeBrowserPreview();
+				return;
+			}
+			if (key === "up" || key === "shifttab") {
+				this.moveResumeBrowserSelection(-1);
+				return;
+			}
+			if (key === "down" || key === "tab") {
+				this.moveResumeBrowserSelection(1);
+				return;
+			}
+		}
 		if (key === "ctrlo") {
 			this.toggleDetailPanel();
+			return;
+		}
+		if (key === "ctrlv") {
 			return;
 		}
 		if (key === "esc" && this._detailPanelExpanded) {
@@ -1163,8 +1206,133 @@ class InteractiveModeHandler implements ModeHandler {
 		const next = Math.max(0, Math.min(this._history.length, this._historyIndex + direction));
 		this._historyIndex = next;
 		const text = next === this._history.length ? "" : (this._history[next] ?? "");
-		this._inputState = { buffer: text, cursor: text.length };
-		this.renderPromptLine();
+		this._inputLoop?.setState({ buffer: text, cursor: text.length });
+	}
+
+	private async openResumeBrowser(runtime: AppRuntime, initialQuery: string): Promise<void> {
+		this._resumeBrowser = {
+			query: initialQuery,
+			hits: [],
+			selectedIndex: 0,
+			previewExpanded: false,
+			loading: true,
+		};
+		this._detailPanelExpanded = false;
+		this._detailPanelScroll = 0;
+		this._transcriptScrollOffset = 0;
+		this.clearMouseSelection(false);
+		this._commandSuggestions = [];
+		if (this._inputLoop !== null) {
+			this._inputLoop.setState({ buffer: initialQuery, cursor: initialQuery.length });
+		} else {
+			this._inputState = { buffer: initialQuery, cursor: initialQuery.length };
+			await this.refreshResumeBrowserResults(runtime, initialQuery);
+		}
+		this.rerenderInteractiveRegions();
+	}
+
+	private closeResumeBrowser(): void {
+		if (this._resumeBrowser === null) {
+			return;
+		}
+		this._resumeBrowser = null;
+		this._resumeSearchRequestId += 1;
+		this._transcriptScrollOffset = 0;
+		this.clearMouseSelection(false);
+		if (this._inputLoop !== null) {
+			this._inputLoop.setState({ buffer: "", cursor: 0 });
+		} else {
+			this._inputState = { buffer: "", cursor: 0 };
+			this._commandSuggestions = [];
+		}
+		this.rerenderInteractiveRegions();
+	}
+
+	private async refreshResumeBrowserResults(runtime: AppRuntime, query: string): Promise<void> {
+		const browser = this._resumeBrowser;
+		if (browser === null) {
+			return;
+		}
+		const selectedSessionId = browser.hits[browser.selectedIndex]?.entry.recoveryData.sessionId.value ?? null;
+		const requestId = ++this._resumeSearchRequestId;
+		const nextQuery = query;
+		this._resumeBrowser = {
+			...browser,
+			query: nextQuery,
+			loading: true,
+			selectedIndex: browser.selectedIndex,
+		};
+		this.rerenderInteractiveRegions();
+		const hits = await runtime.searchRecentSessions(nextQuery);
+		if (this._resumeBrowser === null || requestId !== this._resumeSearchRequestId) {
+			return;
+		}
+		this._resumeBrowser = {
+			...this._resumeBrowser,
+			query: nextQuery,
+			hits,
+			loading: false,
+			selectedIndex: resolveResumeBrowserSelectedIndex(hits, selectedSessionId, browser.selectedIndex),
+		};
+		this._transcriptScrollOffset = 0;
+		this.rerenderInteractiveRegions();
+	}
+
+	private moveResumeBrowserSelection(delta: number): void {
+		if (this._resumeBrowser === null) {
+			return;
+		}
+		const nextIndex = moveResumeBrowserSelection(this._resumeBrowser.selectedIndex, delta, this._resumeBrowser.hits.length);
+		if (nextIndex === this._resumeBrowser.selectedIndex) {
+			return;
+		}
+		this._resumeBrowser = {
+			...this._resumeBrowser,
+			selectedIndex: nextIndex,
+		};
+		this._transcriptScrollOffset = 0;
+		this.rerenderInteractiveRegions();
+	}
+
+	private toggleResumeBrowserPreview(): void {
+		if (this._resumeBrowser === null) {
+			return;
+		}
+		this._resumeBrowser = {
+			...this._resumeBrowser,
+			previewExpanded: !this._resumeBrowser.previewExpanded,
+		};
+		this._transcriptScrollOffset = 0;
+		this.rerenderInteractiveRegions();
+	}
+
+	private async handleResumeBrowserSubmit(
+		_line: string,
+		runtime: AppRuntime,
+		sessionRef: { current: SessionFacade },
+		sink: OutputSink,
+		switchInteractiveSession: (nextSession: SessionFacade) => void,
+	): Promise<boolean> {
+		if (this._resumeBrowser === null) {
+			return false;
+		}
+		if (this._resumeBrowser.loading) {
+			return true;
+		}
+		const hit = this._resumeBrowser.hits[this._resumeBrowser.selectedIndex] ?? this._resumeBrowser.hits[0] ?? null;
+		if (!hit) {
+			return true;
+		}
+		const data = hit.entry.recoveryData;
+		this.closeResumeBrowser();
+		this._suppressPersistOnce = true;
+		await sessionRef.current.close();
+		const recovered = runtime.recoverSession(data);
+		switchInteractiveSession(recovered);
+		writeSessionTranscriptPreview(sink, hit.entry);
+		sink.writeLine(`Resumed: ${data.sessionId.value}`);
+		sink.writeLine("Next: continue this session, or /resume to view history again.");
+		return true;
 	}
 
 	private startPromptTurn(session: SessionFacade, prompt: string, sink: OutputSink): void {
@@ -1288,7 +1456,7 @@ class InteractiveModeHandler implements ModeHandler {
 		const detailPanel = this.currentDetailPanelViewport();
 		return formatInteractiveFooter({
 			terminalWidth: process.stdout.columns ?? 80,
-			prompt: this._prompt,
+			prompt: this.currentPrompt(),
 			buffer: this._inputState.buffer,
 			cursor: this._inputState.cursor,
 			suggestions: this._commandSuggestions,
@@ -1322,6 +1490,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return wrapTranscriptContent(this._compactionDetailText.trim(), this.terminalWidth());
 		}
 		return [];
+	}
+
+	private currentPrompt(): string {
+		return this._resumeBrowser === null ? this._prompt : "Search> ";
 	}
 
 	private shouldShowPendingOutputIndicator(activeToolLabel: string | null): boolean {
@@ -1591,7 +1763,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.terminalWidth(),
 			availableRows,
 			this._transcriptScrollOffset,
-			this._welcomeLines.length,
+			this.currentWelcomeLineCount(),
 		);
 		this._renderedTranscriptViewportLines = visibleLines.map((line) => stripAnsiWelcome(line));
 		for (let row = transcriptTopRow; row <= transcriptBottomRow; row += 1) {
@@ -1672,11 +1844,14 @@ class InteractiveModeHandler implements ModeHandler {
 		return computeTranscriptDisplayRows(
 			this.currentRenderedTranscriptBlocks(),
 			this.terminalWidth(),
-			this._welcomeLines.length,
+			this.currentWelcomeLineCount(),
 		);
 	}
 
 	private currentRenderedTranscriptBlocks(): readonly string[] {
+		if (this._resumeBrowser !== null) {
+			return formatResumeBrowserTranscriptBlocks(this._resumeBrowser);
+		}
 		const welcomeBlocks = this._welcomeLines;
 		if (this._assistantBuffer.length === 0) {
 			return [...welcomeBlocks, ...this._transcriptBlocks];
@@ -1686,6 +1861,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return [...welcomeBlocks, ...this._transcriptBlocks];
 		}
 		return appendAssistantTranscriptBlock([...welcomeBlocks, ...this._transcriptBlocks], assistantBlock);
+	}
+
+	private currentWelcomeLineCount(): number {
+		return this._resumeBrowser === null ? this._welcomeLines.length : 0;
 	}
 }
 
@@ -2251,77 +2430,6 @@ function compareTerminalSelectionPoints(
 	return leftColumn - rightColumn;
 }
 
-function formatSessionAge(ts: number): string {
-	const delta = Math.max(0, Date.now() - ts);
-	const seconds = Math.floor(delta / 1000);
-	if (seconds < 60) return `${seconds}s ago`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m ago`;
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) return `${hours}h ago`;
-	const days = Math.floor(hours / 24);
-	return `${days}d ago`;
-}
-
-function renderRecentSessions(
-	output: OutputSink,
-	recent: readonly RecentSessionEntry[],
-	header: string,
-	options?: { readonly includeAge?: boolean },
-): void {
-	if (recent.length === 0) {
-		output.writeLine("No recent sessions.");
-		return;
-	}
-	output.writeLine(header);
-	let i = 0;
-	for (const entry of recent) {
-		i += 1;
-		const id = entry.recoveryData.sessionId.value;
-		const metadata = entry.recoveryData.metadata;
-		const headline = pickRecentSessionHeadline(entry);
-		const meta = [
-			options?.includeAge === false ? null : formatSessionAge(entry.updatedAt),
-			formatRecentSessionModel(entry.recoveryData.model),
-			metadata?.fileSizeBytes ? formatFileSize(metadata.fileSizeBytes) : null,
-			shortSessionId(id),
-		].filter((value): value is string => Boolean(value));
-		output.writeLine(`  #${i} ${headline}`);
-		output.writeLine(`     ${meta.join(" · ")}`);
-		for (const line of buildRecentSessionPreviewLines(entry, headline)) {
-			output.writeLine(`     ${line}`);
-		}
-	}
-}
-
-function renderRecentSessionSearchHits(
-	output: OutputSink,
-	hits: readonly RecentSessionSearchHit[],
-	header: string,
-): void {
-	if (hits.length === 0) {
-		output.writeLine("No recent sessions.");
-		return;
-	}
-	output.writeLine(header);
-	let i = 0;
-	for (const hit of hits) {
-		i += 1;
-		const entry = hit.entry;
-		const id = entry.recoveryData.sessionId.value;
-		const metadata = entry.recoveryData.metadata;
-		const meta = [
-			formatRecentSessionMatchSource(hit.matchSource),
-			formatRecentSessionModel(entry.recoveryData.model),
-			metadata?.fileSizeBytes ? formatFileSize(metadata.fileSizeBytes) : null,
-			shortSessionId(id),
-		].filter((value): value is string => Boolean(value));
-		output.writeLine(`  #${i} ${hit.headline}`);
-		output.writeLine(`     ${meta.join(" · ")}`);
-		output.writeLine(`     Match: ${hit.snippet}`);
-	}
-}
-
 function resolveRecentSessionDirectSelection(
 	selector: string,
 	displayedEntries: readonly RecentSessionEntry[],
@@ -2351,78 +2459,21 @@ function writeSessionTranscriptPreview(output: OutputSink, entry: RecentSessionE
 	}
 }
 
-function shortSessionId(sessionId: string): string {
-	return sessionId.length <= 8 ? sessionId : sessionId.slice(0, 8);
-}
-
-function formatRecentSessionMatchSource(source: RecentSessionMatchSource): string {
-	switch (source) {
-		case "title":
-			return "title match";
-		case "first_prompt":
-			return "first prompt";
-		case "summary":
-			return "summary match";
-		case "recent_user_message":
-			return "user message";
-		case "recent_assistant_message":
-			return "assistant message";
-		case "session_id":
-			return "session id";
+function resolveResumeBrowserSelectedIndex(
+	hits: readonly RecentSessionSearchHit[],
+	selectedSessionId: string | null,
+	fallbackIndex: number,
+): number {
+	if (hits.length === 0) {
+		return 0;
 	}
-}
-
-function pickRecentSessionHeadline(entry: RecentSessionEntry): string {
-	const metadata = entry.recoveryData.metadata;
-	return entry.title ?? metadata?.firstPrompt ?? metadata?.summary ?? entry.recoveryData.sessionId.value;
-}
-
-function buildRecentSessionPreviewLines(entry: RecentSessionEntry, headline: string): readonly string[] {
-	const metadata = entry.recoveryData.metadata;
-	if (!metadata) {
-		return [];
-	}
-	const lines: string[] = [];
-	const normalizedHeadline = normalizeRecentSessionPreviewText(headline);
-	const secondarySummary = normalizeRecentSessionPreviewText(metadata.summary);
-	if (secondarySummary && secondarySummary !== normalizedHeadline) {
-		lines.push(secondarySummary);
-	}
-	const previewMessages = metadata.recentMessages
-		.slice(-2)
-		.map((message: { readonly role: "user" | "assistant"; readonly text: string }) => {
-			const label = message.role === "user" ? "User" : "Assistant";
-			return `${label}: ${truncatePlainTerminalText(message.text, 96)}`;
-		})
-		.filter((line: string) => normalizeRecentSessionPreviewText(line) !== normalizedHeadline);
-	for (const line of previewMessages) {
-		if (!lines.includes(line)) {
-			lines.push(line);
+	if (selectedSessionId) {
+		const matchedIndex = hits.findIndex((hit) => hit.entry.recoveryData.sessionId.value === selectedSessionId);
+		if (matchedIndex >= 0) {
+			return matchedIndex;
 		}
 	}
-	return lines;
-}
-
-function normalizeRecentSessionPreviewText(value: string | null | undefined): string | null {
-	if (!value) {
-		return null;
-	}
-	const normalized = value.replace(/\s+/g, " ").trim();
-	return normalized.length > 0 ? normalized : null;
-}
-
-function formatFileSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes}B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-function formatRecentSessionModel(model: { readonly id?: string; readonly displayName?: string } | null | undefined): string | null {
-	const value = model?.displayName ?? model?.id ?? null;
-	if (!value) return null;
-	const normalized = value.trim();
-	if (normalized.length === 0) return null;
-	return normalized.toLowerCase() === "unknown" ? null : normalized;
+	return moveResumeBrowserSelection(fallbackIndex, 0, hits.length);
 }
 
 export function createDebouncedCallback(

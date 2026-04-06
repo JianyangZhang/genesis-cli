@@ -819,6 +819,24 @@ function searchRecentSessionsForTest(
 	query: string,
 ): readonly RecentSessionSearchHit[] {
 	const normalizedQuery = query.toLowerCase();
+	if (normalizedQuery.length === 0) {
+		return [...recentSessions]
+			.sort((a, b) => b.updatedAt - a.updatedAt)
+			.map((entry) => ({
+				entry,
+				headline:
+					entry.title ??
+					entry.recoveryData.metadata?.firstPrompt ??
+					entry.recoveryData.metadata?.summary ??
+					entry.recoveryData.sessionId.value,
+				snippet:
+					entry.recoveryData.metadata?.summary ??
+					entry.recoveryData.metadata?.recentMessages.find((message) => message.role === "assistant")?.text ??
+					entry.recoveryData.metadata?.recentMessages.find((message) => message.role === "user")?.text ??
+					entry.recoveryData.sessionId.value,
+				matchSource: "recent",
+			}));
+	}
 	return recentSessions
 		.map((entry) => buildSearchHitForTest(entry, normalizedQuery))
 		.filter((hit): hit is RecentSessionSearchHit => hit !== null)
@@ -983,7 +1001,7 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
-	it("fully redraws the transcript after /resume switches to another session", async () => {
+	it("opens a resume browser, filters as you type, and resumes the selected session", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-clear-resume-"));
 		const recoveredSessionId = "session-recovered";
 		try {
@@ -1037,21 +1055,19 @@ describe("interactive workbench TTY", () => {
 				await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
 
 				input.write("/resume\r");
-				await waitFor(() => screen.snapshot().includes("Recent sessions:"));
+				await waitFor(() => screen.snapshot().includes("Resume Session"));
+				expect(screen.snapshot()).toContain("Search: Type to search recent sessions...");
 				expect(screen.snapshot()).toContain("本地所有修改，commit & push");
 				expect(screen.snapshot()).toContain("继续推进 /resume 的体验对齐");
-				expect(screen.snapshot()).toContain("Assistant: 我会先检查工作区并整理提交内容。");
-				expect(screen.snapshot()).not.toContain(" · unknown · ");
-				expect(screen.snapshot()).toContain("Next: /resume <query> to search, /resume #N to open, or /resume <sessionId>.");
+				expect(screen.snapshot()).toContain("Type to search");
 
-				input.write("/resume commit & push\r");
-				await waitFor(() => screen.snapshot().includes('Search results for "commit & push":'));
+				input.write("commit & push");
+				await waitFor(() => screen.snapshot().includes("Search: commit & push"));
 				expect(screen.snapshot()).toContain("本地所有修改，commit & push");
 				expect(screen.snapshot()).toContain("first prompt");
 				expect(screen.snapshot()).toContain("Match: 本地所有修改，commit & push");
-				expect(screen.snapshot()).toContain("Next: /resume #N to open one of the matches.");
 
-				input.write("/resume #1\r");
+				input.write("\r");
 				await waitFor(() => screen.snapshot().includes(`Resumed: ${recoveredSessionId}`));
 
 				const snapshot = screen.snapshot();
@@ -1073,7 +1089,7 @@ describe("interactive workbench TTY", () => {
 		}
 	}, 10000);
 
-	it("opens the selected search result when /resume #N follows a search", async () => {
+	it("supports arrow selection and ctrl+v preview inside the resume browser", async () => {
 		const firstRecoveredId = "session-search-first";
 		const secondRecoveredId = "session-search-second";
 		const initialSession = new FakeInteractiveSession({ sessionId: "session-before-search" });
@@ -1137,13 +1153,22 @@ describe("interactive workbench TTY", () => {
 			const startPromise = createModeHandler("interactive").start(runtime);
 			await waitFor(() => screen.snapshot().includes("❯"));
 
-			input.write("/resume README 发布\r");
-			await waitFor(() => screen.snapshot().includes('Search results for "README 发布":'));
-			expect(screen.snapshot()).toContain("#1 README 发布说明补充");
-			expect(screen.snapshot()).toContain("#2 README 发布文案调整");
+			input.write("/resume\r");
+			await waitFor(() => screen.snapshot().includes("Resume Session"));
+			input.write("README 发布");
+			await waitFor(() => screen.snapshot().includes("Search: README 发布"));
+			expect(screen.snapshot()).toContain("❯ README 发布说明补充");
+			expect(screen.snapshot()).toContain("README 发布文案调整");
 			expect(screen.snapshot()).toContain("Match: README 发布说明补充");
 
-			input.write("/resume #2\r");
+			input.write("\u001b[B");
+			await waitFor(() => screen.snapshot().includes("❯ README 发布文案调整"));
+
+			input.write(Buffer.from([0x16]));
+			await waitFor(() => screen.snapshot().includes("Preview"));
+			expect(screen.snapshot()).toContain("First prompt: README 发布文案调整");
+
+			input.write("\r");
 			await waitFor(() => screen.snapshot().includes(`Resumed: ${firstRecoveredId}`));
 			expect(screen.snapshot()).toContain("User: README 发布文案调整");
 

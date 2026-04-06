@@ -228,6 +228,11 @@ describe("createAppRuntime", () => {
 		expect(results[0]?.snippet).toContain("README 发布说明补充");
 		expect(results[1]?.entry.recoveryData.sessionId.value).toBe("session-a");
 		expect(results[1]?.matchSource).toBe("title");
+
+		const browserResults = await runtime.searchRecentSessions("");
+		expect(browserResults[0]?.entry.recoveryData.sessionId.value).toBe("session-b");
+		expect(browserResults[0]?.matchSource).toBe("recent");
+		expect(browserResults[0]?.snippet).toContain("README 发布说明");
 	});
 
 	it("createAdapter provisions a fresh adapter per session", async () => {
