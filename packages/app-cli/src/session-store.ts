@@ -8,6 +8,14 @@ export interface RecentSessionEntry {
 	readonly updatedAt: number;
 }
 
+interface SessionRecoveryMetadataLike {
+	readonly summary?: string;
+	readonly firstPrompt?: string;
+	readonly messageCount: number;
+	readonly fileSizeBytes: number;
+	readonly recentMessages: readonly { readonly role: "user" | "assistant"; readonly text: string }[];
+}
+
 export function getSessionStoreDir(agentDir: string): string {
 	return join(agentDir, "sessions");
 }
@@ -35,10 +43,67 @@ export async function readRecentSessions(storeDir: string): Promise<readonly Rec
 	try {
 		const parsed = JSON.parse(await readFile(join(storeDir, "recent.json"), "utf8")) as unknown;
 		if (!Array.isArray(parsed)) return [];
-		return parsed as RecentSessionEntry[];
+		const recent = parsed as RecentSessionEntry[];
+		let mutated = false;
+		const hydrated = await Promise.all(
+			recent.map(async (entry) => {
+				const nextRecoveryData = await hydrateRecentSessionRecoveryData(entry.recoveryData);
+				if (nextRecoveryData !== entry.recoveryData) {
+					mutated = true;
+					return {
+						...entry,
+						recoveryData: nextRecoveryData,
+					};
+				}
+				return entry;
+			}),
+		);
+		if (mutated) {
+			try {
+				await writeFile(join(storeDir, "recent.json"), `${JSON.stringify(hydrated, null, 2)}\n`, "utf8");
+			} catch {}
+		}
+		return hydrated;
 	} catch {
 		return [];
 	}
+}
+
+async function hydrateRecentSessionRecoveryData<T extends SessionRecoveryData>(data: T): Promise<T> {
+	if (hasDisplayableSessionMetadata(data.metadata)) {
+		return data;
+	}
+	const { loadSessionMetadataFromSessionFile } = await import("@pickle-pee/kernel");
+	const loaded = await loadSessionMetadataFromSessionFile(data.sessionFile);
+	if (!loaded) {
+		return data;
+	}
+	return {
+		...data,
+		metadata: {
+			summary: loaded.summary,
+			firstPrompt: loaded.firstPrompt,
+			messageCount: loaded.messageCount,
+			fileSizeBytes: loaded.fileSizeBytes,
+			recentMessages: loaded.recentMessages.map((message) => ({
+				role: message.role,
+				text: message.text,
+			})),
+		},
+	};
+}
+
+function hasDisplayableSessionMetadata(metadata: SessionRecoveryMetadataLike | null | undefined): boolean {
+	if (!metadata) {
+		return false;
+	}
+	if (typeof metadata.summary === "string" && metadata.summary.trim().length > 0) {
+		return true;
+	}
+	if (typeof metadata.firstPrompt === "string" && metadata.firstPrompt.trim().length > 0) {
+		return true;
+	}
+	return metadata.recentMessages.some((message: { readonly text: string }) => message.text.trim().length > 0);
 }
 
 async function upsertRecentSession(storeDir: string, recoveryData: SessionRecoveryData, title?: string): Promise<void> {

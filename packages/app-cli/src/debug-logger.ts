@@ -1,4 +1,4 @@
-import { mkdir, appendFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -44,6 +44,8 @@ interface LoggerIo {
 	mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
 	appendFile(path: string, data: string, encoding: BufferEncoding): Promise<void>;
 	writeFile(path: string, data: string, encoding: BufferEncoding): Promise<void>;
+	readdir(path: string): Promise<readonly string[]>;
+	rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
 }
 
 interface DebugLoggerOptions {
@@ -63,7 +65,13 @@ const defaultIo: LoggerIo = {
 	},
 	appendFile: async (path, data, encoding) => appendFile(path, data, encoding),
 	writeFile,
+	readdir: async (path) => readdir(path),
+	rm: async (path, options) => {
+		await rm(path, options);
+	},
 };
+
+const DEBUG_LOG_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 const runtimeSeverityOrder: Record<DebugLogLevel, number> = {
 	DEBUG: 10,
@@ -103,6 +111,7 @@ export class DebugLogger {
 		const logRootDir = resolve(options.logRootDir ?? join(homedir(), ".genesis-cli", "debug-logs"));
 		const traceId = buildTraceId(startedAt, pid, options.randomHex ?? defaultRandomHex);
 		const sessionDir = join(logRootDir, traceId);
+		const fileTimestamp = formatCompactTimestamp(startedAt);
 		this.sessionValue = {
 			traceId,
 			startedAt,
@@ -111,10 +120,10 @@ export class DebugLogger {
 			logRootDir,
 			sessionDir,
 		};
-		this.runtimeLogPath = join(sessionDir, "runtime.jsonl");
-		this.errorLogPath = join(sessionDir, "error.jsonl");
-		this.crashLogPath = join(sessionDir, "crash.jsonl");
-		this.metadataPath = join(sessionDir, "session.json");
+		this.runtimeLogPath = join(sessionDir, `runtime-${fileTimestamp}.jsonl`);
+		this.errorLogPath = join(sessionDir, `error-${fileTimestamp}.jsonl`);
+		this.crashLogPath = join(sessionDir, `crash-${fileTimestamp}.jsonl`);
+		this.metadataPath = join(sessionDir, `session-${fileTimestamp}.json`);
 		this.minRuntimeLevel = options.debugEnabled ? runtimeSeverityOrder.DEBUG : runtimeSeverityOrder.ERROR;
 		this.argv = [...options.argv];
 	}
@@ -124,6 +133,7 @@ export class DebugLogger {
 	}
 
 	async initialize(): Promise<void> {
+		await this.cleanupExpiredSessions();
 		await this.ensureInitialized();
 		activeLogger = this;
 		lastLoggerSession = this.sessionValue;
@@ -253,6 +263,28 @@ export class DebugLogger {
 		}
 	}
 
+	private async cleanupExpiredSessions(): Promise<void> {
+		const cutoff = Date.parse(this.sessionValue.startedAt) - DEBUG_LOG_RETENTION_MS;
+		try {
+			const entries = await this.io.readdir(this.sessionValue.logRootDir);
+			for (const entry of entries) {
+				const entryStartedAt = parseTraceTimestamp(entry);
+				if (entryStartedAt === null || entryStartedAt >= cutoff) {
+					continue;
+				}
+				try {
+					await this.io.rm(join(this.sessionValue.logRootDir, entry), { recursive: true, force: true });
+				} catch (error) {
+					this.reportMaintenanceFailure("clean old debug logs", error);
+				}
+			}
+		} catch (error) {
+			if (!isMissingPathError(error)) {
+				this.reportMaintenanceFailure("scan debug log directory", error);
+			}
+		}
+	}
+
 	private async writeMetadata(): Promise<void> {
 		const metadata: LoggerMetadata = {
 			...this.sessionValue,
@@ -288,6 +320,11 @@ export class DebugLogger {
 		const message = error instanceof Error ? error.message : String(error);
 		this.stderrWrite(`[genesis-debug] Failed to persist debug logs: ${message}\n`);
 	}
+
+	private reportMaintenanceFailure(action: string, error: unknown): void {
+		const message = error instanceof Error ? error.message : String(error);
+		this.stderrWrite(`[genesis-debug] Failed to ${action}: ${message}\n`);
+	}
 }
 
 export async function initializeDebugLogger(options: DebugLoggerOptions): Promise<DebugLogger> {
@@ -305,8 +342,33 @@ export function getLastDebugSession(): DebugLoggerSession | null {
 }
 
 function buildTraceId(startedAt: string, pid: number, randomHexFactory: () => string): string {
-	const compactTs = startedAt.replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+	const compactTs = formatCompactTimestamp(startedAt);
 	return `${compactTs}-p${pid}-${randomHexFactory()}`;
+}
+
+function formatCompactTimestamp(startedAt: string): string {
+	return startedAt.replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function parseTraceTimestamp(traceId: string): number | null {
+	const match = /^(\d{8})T(\d{6})Z-p\d+-[0-9a-f]+$/i.exec(traceId);
+	if (!match) {
+		return null;
+	}
+	const datePart = match[1];
+	const timePart = match[2];
+	const iso = `${datePart.slice(0, 4)}-${datePart.slice(4, 6)}-${datePart.slice(6, 8)}T${timePart.slice(0, 2)}:${timePart.slice(2, 4)}:${timePart.slice(4, 6)}Z`;
+	const parsed = Date.parse(iso);
+	return Number.isNaN(parsed) ? null : parsed;
+}
+
+function isMissingPathError(error: unknown): boolean {
+	return Boolean(
+		error &&
+			typeof error === "object" &&
+			"code" in error &&
+			((error as { code?: unknown }).code === "ENOENT" || (error as { code?: unknown }).code === "ENOTDIR"),
+	);
 }
 
 function defaultRandomHex(): string {

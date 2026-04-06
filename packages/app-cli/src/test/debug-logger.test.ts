@@ -16,6 +16,10 @@ describe("DebugLogger", () => {
 					writes.push({ path, data });
 				},
 				async writeFile() {},
+				async readdir() {
+					return [];
+				},
+				async rm() {},
 			},
 		});
 
@@ -24,7 +28,7 @@ describe("DebugLogger", () => {
 
 		logger.debug("test.scope", "hello");
 		await logger.flush();
-		expect(writes.some((write) => write.path.endsWith("runtime.jsonl"))).toBe(true);
+		expect(writes.some((write) => write.path.endsWith("runtime-20260406T120000Z.jsonl"))).toBe(true);
 		await logger.shutdown();
 	});
 
@@ -41,6 +45,10 @@ describe("DebugLogger", () => {
 					writes.push({ path, data });
 				},
 				async writeFile() {},
+				async readdir() {
+					return [];
+				},
+				async rm() {},
 			},
 		});
 		await logger.initialize();
@@ -51,7 +59,7 @@ describe("DebugLogger", () => {
 		await logger.flush();
 
 		const runtimeLines = writes
-			.filter((write) => write.path.endsWith("runtime.jsonl"))
+			.filter((write) => write.path.endsWith("runtime-20260406T120000Z.jsonl"))
 			.flatMap((write) => write.data.trim().split("\n"))
 			.filter(Boolean)
 			.map((line) => JSON.parse(line) as { level: string; message: string });
@@ -59,8 +67,8 @@ describe("DebugLogger", () => {
 		expect(runtimeLines.map((line) => line.level)).toEqual(["ERROR", "CRASH"]);
 		expect(runtimeLines.map((line) => line.message)).toContain("visible");
 
-		expect(writes.some((write) => write.path.endsWith("error.jsonl"))).toBe(true);
-		expect(writes.some((write) => write.path.endsWith("crash.jsonl"))).toBe(true);
+		expect(writes.some((write) => write.path.endsWith("error-20260406T120000Z.jsonl"))).toBe(true);
+		expect(writes.some((write) => write.path.endsWith("crash-20260406T120000Z.jsonl"))).toBe(true);
 		await logger.shutdown();
 	});
 
@@ -78,6 +86,10 @@ describe("DebugLogger", () => {
 					throw new Error("EPERM");
 				},
 				async writeFile() {},
+				async readdir() {
+					return [];
+				},
+				async rm() {},
 			},
 		});
 		await logger.initialize();
@@ -85,6 +97,36 @@ describe("DebugLogger", () => {
 		logger.error("test.error", "will fail");
 		await expect(logger.flush()).resolves.toBeUndefined();
 		expect(stderrWrite).toHaveBeenCalledWith(expect.stringContaining("Failed to persist debug logs: EPERM"));
+		await logger.shutdown();
+	});
+
+	it("cleans up trace directories older than seven days during startup", async () => {
+		const removed: string[] = [];
+		const logger = await initializeDebugLogger({
+			debugEnabled: true,
+			argv: ["--debug"],
+			now: () => new Date("2026-04-10T12:00:00.000Z"),
+			pid: 4321,
+			randomHex: () => "deadbeef",
+			logRootDir: "/tmp/genesis-debug-logs",
+			io: {
+				async mkdir() {},
+				async appendFile() {},
+				async writeFile() {},
+				async readdir() {
+					return [
+						"20260401T115959Z-p1-deadbeef",
+						"20260403T120000Z-p2-feedcafe",
+						"not-a-trace-dir",
+					];
+				},
+				async rm(path) {
+					removed.push(path);
+				},
+			},
+		});
+
+		expect(removed).toEqual(["/tmp/genesis-debug-logs/20260401T115959Z-p1-deadbeef"]);
 		await logger.shutdown();
 	});
 });

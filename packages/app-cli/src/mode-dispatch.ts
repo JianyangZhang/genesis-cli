@@ -2260,7 +2260,7 @@ function renderRecentSessions(
 		i += 1;
 		const id = entry.recoveryData.sessionId.value;
 		const metadata = entry.recoveryData.metadata;
-		const headline = entry.title ?? metadata?.summary ?? metadata?.firstPrompt ?? id;
+		const headline = pickRecentSessionHeadline(entry);
 		const meta = [
 			options?.includeAge === false ? null : formatSessionAge(entry.updatedAt),
 			formatRecentSessionModel(entry.recoveryData.model),
@@ -2269,8 +2269,8 @@ function renderRecentSessions(
 		].filter((value): value is string => Boolean(value));
 		output.writeLine(`  #${i} ${headline}`);
 		output.writeLine(`     ${meta.join(" · ")}`);
-		if (metadata?.summary && entry.title && metadata.summary !== entry.title) {
-			output.writeLine(`     ${metadata.summary}`);
+		for (const line of buildRecentSessionPreviewLines(entry, headline)) {
+			output.writeLine(`     ${line}`);
 		}
 	}
 }
@@ -2322,6 +2322,45 @@ function writeSessionTranscriptPreview(output: OutputSink, entry: RecentSessionE
 
 function shortSessionId(sessionId: string): string {
 	return sessionId.length <= 8 ? sessionId : sessionId.slice(0, 8);
+}
+
+function pickRecentSessionHeadline(entry: RecentSessionEntry): string {
+	const metadata = entry.recoveryData.metadata;
+	return entry.title ?? metadata?.firstPrompt ?? metadata?.summary ?? entry.recoveryData.sessionId.value;
+}
+
+function buildRecentSessionPreviewLines(entry: RecentSessionEntry, headline: string): readonly string[] {
+	const metadata = entry.recoveryData.metadata;
+	if (!metadata) {
+		return [];
+	}
+	const lines: string[] = [];
+	const normalizedHeadline = normalizeRecentSessionPreviewText(headline);
+	const secondarySummary = normalizeRecentSessionPreviewText(metadata.summary);
+	if (secondarySummary && secondarySummary !== normalizedHeadline) {
+		lines.push(secondarySummary);
+	}
+	const previewMessages = metadata.recentMessages
+		.slice(-2)
+		.map((message) => {
+			const label = message.role === "user" ? "User" : "Assistant";
+			return `${label}: ${truncatePlainTerminalText(message.text, 96)}`;
+		})
+		.filter((line) => normalizeRecentSessionPreviewText(line) !== normalizedHeadline);
+	for (const line of previewMessages) {
+		if (!lines.includes(line)) {
+			lines.push(line);
+		}
+	}
+	return lines;
+}
+
+function normalizeRecentSessionPreviewText(value: string | null | undefined): string | null {
+	if (!value) {
+		return null;
+	}
+	const normalized = value.replace(/\s+/g, " ").trim();
+	return normalized.length > 0 ? normalized : null;
 }
 
 function formatFileSize(bytes: number): string {

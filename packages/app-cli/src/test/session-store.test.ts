@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -86,5 +86,54 @@ describe("session-store", () => {
 			{ role: "assistant", text: "Sure, here is the plan." },
 		]);
 		expect(recent[1]?.title).toBe("first");
+	});
+
+	it("hydrates missing metadata from the persisted session file", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-cli-agent-"));
+		const storeDir = getSessionStoreDir(agentDir);
+		const sessionFile = join(agentDir, "transcripts", "resume-session.jsonl");
+		await mkdir(join(agentDir, "transcripts"), { recursive: true });
+		await writeFile(
+			sessionFile,
+			[
+				JSON.stringify({
+					type: "message",
+					message: { role: "user", content: "本地所有修改，commit & push" },
+				}),
+				JSON.stringify({
+					type: "message",
+					message: { role: "assistant", content: "我先检查工作区并整理提交内容。" },
+				}),
+				JSON.stringify({
+					type: "message",
+					message: { role: "user", content: "继续推进 /resume 的体验对齐" },
+				}),
+			].join("\n") + "\n",
+			"utf8",
+		);
+
+		await writeLastSession(
+			storeDir,
+			{
+				sessionId: { value: "resume-session" },
+				model: { id: "glm-5.1", provider: "zai" },
+				toolSet: ["read"],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: null,
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				agentDir,
+				sessionFile,
+			} as any,
+		);
+
+		const recent = await readRecentSessions(storeDir);
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("本地所有修改，commit & push");
+		expect(recent[0]?.recoveryData.metadata?.summary).toBe("继续推进 /resume 的体验对齐");
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "本地所有修改，commit & push" },
+			{ role: "assistant", text: "我先检查工作区并整理提交内容。" },
+			{ role: "user", text: "继续推进 /resume 的体验对齐" },
+		]);
 	});
 });

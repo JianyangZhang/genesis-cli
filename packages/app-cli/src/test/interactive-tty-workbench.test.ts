@@ -850,6 +850,10 @@ describe("interactive workbench TTY", () => {
 				async mkdir() {},
 				async appendFile() {},
 				async writeFile() {},
+				async readdir() {
+					return [];
+				},
+				async rm() {},
 			},
 		});
 		const session = new FakeInteractiveSession({ sessionId: "session-debug-trace" });
@@ -945,17 +949,7 @@ describe("interactive workbench TTY", () => {
 					toolSet: ["bash"],
 					planSummary: null,
 					compactionSummary: null,
-					metadata: {
-						summary: "继续推进 /resume 的体验对齐",
-						firstPrompt: "本地所有修改，commit & push",
-						messageCount: 3,
-						fileSizeBytes: 256,
-						recentMessages: [
-							{ role: "user", text: "本地所有修改，commit & push" },
-							{ role: "assistant", text: "我会先检查工作区并整理提交内容。" },
-							{ role: "user", text: "继续推进 /resume 的体验对齐" },
-						],
-					},
+					metadata: null,
 					taskState: { status: "idle", currentTaskId: null, startedAt: null },
 					workingDirectory: "/tmp",
 					agentDir,
@@ -991,7 +985,9 @@ describe("interactive workbench TTY", () => {
 
 				input.write("/resume\r");
 				await waitFor(() => screen.snapshot().includes("Recent sessions:"));
+				expect(screen.snapshot()).toContain("本地所有修改，commit & push");
 				expect(screen.snapshot()).toContain("继续推进 /resume 的体验对齐");
+				expect(screen.snapshot()).toContain("Assistant: 我会先检查工作区并整理提交内容。");
 				expect(screen.snapshot()).not.toContain(" · unknown · ");
 				expect(screen.snapshot()).toContain("Next: /resume #N | /resume <sessionId|title>");
 
