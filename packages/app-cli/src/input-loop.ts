@@ -46,6 +46,8 @@ export interface InputLoopOptions {
 	readonly onMouse?: (event: { kind: "leftdown" | "leftdrag" | "leftup"; row: number; column: number }) => void;
 	/** Whether pressing Enter should emit a terminal newline in raw mode. Defaults to true. */
 	readonly submitNewline?: boolean;
+	/** Called right before a raw-mode line submission clears the buffer. */
+	readonly onSubmit?: (line: string) => void;
 }
 
 export interface InputLoop {
@@ -75,6 +77,7 @@ export function createInputLoop(options: InputLoopOptions = {}): InputLoop {
 			onTerminalEvent: options.onTerminalEvent,
 			onMouse: options.onMouse,
 			submitNewline: options.submitNewline,
+			onSubmit: options.onSubmit,
 		});
 	}
 
@@ -158,6 +161,7 @@ function createRawInputLoop(options: {
 	readonly onTerminalEvent?: (event: "focusin" | "focusout") => void;
 	readonly onMouse?: (event: { kind: "leftdown" | "leftdrag" | "leftup"; row: number; column: number }) => void;
 	readonly submitNewline?: boolean;
+	readonly onSubmit?: (line: string) => void;
 }): InputLoop {
 	const {
 		prompt,
@@ -169,6 +173,7 @@ function createRawInputLoop(options: {
 		onTerminalEvent,
 		onMouse,
 		submitNewline = true,
+		onSubmit,
 	} = options;
 	const sgrMousePattern = new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`);
 
@@ -364,6 +369,7 @@ function createRawInputLoop(options: {
 					const resolve = pendingResolve;
 					pendingResolve = null;
 					const line = buffer;
+					onSubmit?.(line);
 					clearBuffer();
 					if (submitNewline) {
 						output.write("\n");

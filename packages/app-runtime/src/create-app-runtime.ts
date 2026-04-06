@@ -9,13 +9,19 @@
 import type { ToolDefinition } from "@pickle-pee/tools";
 import type { KernelSessionAdapter } from "./adapters/kernel-session-adapter.js";
 import type { EventBus } from "./events/event-bus.js";
+import type { RuntimeEvent } from "./events/runtime-event.js";
 import { createEventBus } from "./events/event-bus.js";
 import type { ToolGovernor } from "./governance/tool-governor.js";
 import { createToolGovernor } from "./governance/tool-governor.js";
 import type { PlanEngine } from "./planning/plan-engine.js";
 import { createPlanEngine } from "./planning/plan-engine.js";
 import { createRuntimeContext } from "./runtime-context.js";
-import { listRecentSessions, recordRecentSession, searchRecentSessions } from "./services/recent-session-catalog.js";
+import {
+	listRecentSessions,
+	pruneRecentSessions,
+	recordRecentSession,
+	searchRecentSessions,
+} from "./services/recent-session-catalog.js";
 import { sessionCreated, sessionResumed } from "./session/session-events.js";
 import type { SessionFacade } from "./session/session-facade.js";
 import { SessionFacadeImpl } from "./session/session-facade.js";
@@ -26,6 +32,8 @@ import type {
 	RecentSessionEntry,
 	RecentSessionSearchHit,
 	SessionRecoveryData,
+	SessionRecoveryMetadata,
+	SessionTranscriptMessagePreview,
 } from "./types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -36,8 +44,11 @@ export interface AppRuntimeConfig {
 	/** Working directory for the session. */
 	readonly workingDirectory: string;
 
-	/** Agent directory (models/auth/session storage). */
+	/** Agent directory (models/auth/local agent state). */
 	readonly agentDir?: string;
+
+	/** Stable user-level history directory for resume catalogs. */
+	readonly historyDir?: string;
 
 	/** Optional config source map for explainability. */
 	readonly configSources?: Readonly<Record<string, { layer: string; detail: string }>>;
@@ -84,11 +95,30 @@ export interface AppRuntime {
 	/** Persist a closed session into the recent-session catalog. */
 	recordRecentSession(recoveryData: SessionRecoveryData, options?: { readonly title?: string }): Promise<void>;
 
+	/** Persist a closed session while merging runtime-owned live history. */
+	recordClosedRecentSession(
+		session: SessionFacade,
+		recoveryData: SessionRecoveryData,
+		options?: { readonly title?: string },
+	): Promise<void>;
+
+	/** Persist one user input turn into runtime-owned session history. */
+	recordRecentSessionInput(session: SessionFacade, input: string, options?: { readonly title?: string }): Promise<void>;
+
+	/** Persist one finalized assistant text block into runtime-owned session history. */
+	recordRecentSessionAssistantText(session: SessionFacade, text: string, options?: { readonly title?: string }): Promise<void>;
+
+	/** Persist event-derived session history updates owned by the runtime. */
+	recordRecentSessionEvent(session: SessionFacade, event: RuntimeEvent, options?: { readonly title?: string }): Promise<void>;
+
 	/** List recent recoverable sessions for resume flows. */
 	listRecentSessions(): Promise<readonly RecentSessionEntry[]>;
 
 	/** Search recent sessions by human-readable text, ordered by relevance. */
 	searchRecentSessions(query: string): Promise<readonly RecentSessionSearchHit[]>;
+
+	/** Compact the recent-session catalog to a bounded size. */
+	pruneRecentSessions(maxEntries?: number): Promise<{ readonly before: number; readonly after: number; readonly removed: number }>;
 
 	/** The current default model for newly created sessions. */
 	getDefaultModel(): ModelDescriptor;
@@ -114,6 +144,8 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 	let shutdown = false;
 	let staticAdapterClaimed = false;
 	let defaultModel = config.model;
+	let recentSessionWriteChain: Promise<void> = Promise.resolve();
+	const liveRecentSessionMetadata = new Map<string, SessionRecoveryMetadata>();
 
 	function assertNotShutdown(): void {
 		if (shutdown) {
@@ -141,6 +173,31 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 		);
 	}
 
+	function enqueueRecentSessionWrite(task: () => Promise<void>): Promise<void> {
+		const run = recentSessionWriteChain.then(task, task);
+		recentSessionWriteChain = run.then(() => undefined, () => undefined);
+		return run;
+	}
+
+	function getLiveRecentSessionMetadata(session: SessionFacade): SessionRecoveryMetadata {
+		return (
+			liveRecentSessionMetadata.get(session.id.value) ?? {
+				messageCount: 0,
+				fileSizeBytes: 0,
+				recentMessages: [],
+				resumeSummary: null,
+			}
+		);
+	}
+
+	function setLiveRecentSessionMetadata(session: SessionFacade, metadata: SessionRecoveryMetadata): void {
+		liveRecentSessionMetadata.set(session.id.value, metadata);
+	}
+
+	function clearLiveRecentSessionMetadata(session: SessionFacade): void {
+		liveRecentSessionMetadata.delete(session.id.value);
+	}
+
 	return {
 		get events(): EventBus {
 			return globalBus;
@@ -155,15 +212,64 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 		},
 
 		recordRecentSession(recoveryData: SessionRecoveryData, options?: { readonly title?: string }): Promise<void> {
-			return recordRecentSession(config.agentDir, recoveryData, options);
+			return enqueueRecentSessionWrite(() => recordRecentSession(config.historyDir, recoveryData, options));
+		},
+
+		recordClosedRecentSession(
+			session: SessionFacade,
+			recoveryData: SessionRecoveryData,
+			options?: { readonly title?: string },
+		): Promise<void> {
+			return enqueueRecentSessionWrite(async () => {
+				const merged = mergeRecoveryDataWithLiveMetadata(recoveryData, getLiveRecentSessionMetadata(session));
+				await recordRecentSession(config.historyDir, merged, options);
+				clearLiveRecentSessionMetadata(session);
+			});
+		},
+
+		recordRecentSessionInput(session: SessionFacade, input: string, options?: { readonly title?: string }): Promise<void> {
+			return enqueueRecentSessionWrite(async () => {
+				const recoveryData = await session.snapshotRecoveryData();
+				const metadata = applyRuntimeOwnedUserInput(getLiveRecentSessionMetadata(session), input);
+				setLiveRecentSessionMetadata(session, metadata);
+				if (shouldPersistLiveRecentSession(recoveryData)) {
+					await recordRecentSession(config.historyDir, mergeRecoveryDataWithLiveMetadata(recoveryData, metadata), options);
+				}
+			});
+		},
+
+		recordRecentSessionAssistantText(session: SessionFacade, text: string, options?: { readonly title?: string }): Promise<void> {
+			return enqueueRecentSessionWrite(async () => {
+				const recoveryData = await session.snapshotRecoveryData();
+				const metadata = applyRuntimeOwnedAssistantText(getLiveRecentSessionMetadata(session), text);
+				setLiveRecentSessionMetadata(session, metadata);
+				if (shouldPersistLiveRecentSession(recoveryData)) {
+					await recordRecentSession(config.historyDir, mergeRecoveryDataWithLiveMetadata(recoveryData, metadata), options);
+				}
+			});
+		},
+
+		recordRecentSessionEvent(session: SessionFacade, event: RuntimeEvent, options?: { readonly title?: string }): Promise<void> {
+			return enqueueRecentSessionWrite(async () => {
+				const recoveryData = await session.snapshotRecoveryData();
+				const metadata = applyRuntimeOwnedEvent(getLiveRecentSessionMetadata(session), event);
+				setLiveRecentSessionMetadata(session, metadata);
+				if (shouldPersistLiveRecentSession(recoveryData)) {
+					await recordRecentSession(config.historyDir, mergeRecoveryDataWithLiveMetadata(recoveryData, metadata), options);
+				}
+			});
 		},
 
 		listRecentSessions(): Promise<readonly RecentSessionEntry[]> {
-			return listRecentSessions(config.agentDir);
+			return listRecentSessions(config.historyDir);
 		},
 
 		searchRecentSessions(query: string): Promise<readonly RecentSessionSearchHit[]> {
-			return searchRecentSessions(config.agentDir, query);
+			return searchRecentSessions(config.historyDir, query);
+		},
+
+		pruneRecentSessions(maxEntries?: number): Promise<{ readonly before: number; readonly after: number; readonly removed: number }> {
+			return pruneRecentSessions(config.historyDir, maxEntries);
 		},
 
 		getDefaultModel(): ModelDescriptor {
@@ -242,9 +348,109 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 				}
 			}
 			sessions.clear();
+			liveRecentSessionMetadata.clear();
 			globalBus.removeAllListeners();
 		},
 	};
+}
+
+function shouldPersistLiveRecentSession(recoveryData: SessionRecoveryData): boolean {
+	return recoveryData.sessionId.value !== "unknown-session";
+}
+
+function mergeRecoveryDataWithLiveMetadata(
+	recoveryData: SessionRecoveryData,
+	metadata: SessionRecoveryMetadata,
+): SessionRecoveryData {
+	return {
+		...recoveryData,
+		metadata: mergeRuntimeOwnedMetadata(recoveryData.metadata, metadata),
+	};
+}
+
+function mergeRuntimeOwnedMetadata(
+	existing: SessionRecoveryMetadata | null | undefined,
+	live: SessionRecoveryMetadata,
+): SessionRecoveryMetadata {
+	const recentMessages = live.recentMessages.length > 0 ? live.recentMessages : (existing?.recentMessages ?? []);
+	return {
+		firstPrompt: live.firstPrompt ?? existing?.firstPrompt,
+		summary: live.summary ?? existing?.summary,
+		messageCount: Math.max(existing?.messageCount ?? 0, live.messageCount, recentMessages.length),
+		fileSizeBytes: Math.max(existing?.fileSizeBytes ?? 0, live.fileSizeBytes),
+		recentMessages,
+		resumeSummary:
+			existing?.resumeSummary?.source === "model"
+				? existing.resumeSummary
+				: live.resumeSummary ?? existing?.resumeSummary ?? null,
+	};
+}
+
+function applyRuntimeOwnedUserInput(metadata: SessionRecoveryMetadata, input: string): SessionRecoveryMetadata {
+	const text = normalizeRuntimeOwnedText(input);
+	if (!text) {
+		return metadata;
+	}
+	const recentMessages = trimRuntimeOwnedMessages([...metadata.recentMessages, { role: "user", text }]);
+	return {
+		...metadata,
+		firstPrompt: metadata.firstPrompt ?? text,
+		messageCount: Math.max(metadata.messageCount, recentMessages.length),
+		recentMessages,
+		resumeSummary: null,
+	};
+}
+
+function applyRuntimeOwnedAssistantText(metadata: SessionRecoveryMetadata, text: string): SessionRecoveryMetadata {
+	const normalized = normalizeRuntimeOwnedText(text);
+	if (!normalized) {
+		return metadata;
+	}
+	const recentMessages = appendRuntimeOwnedAssistantMessage(metadata.recentMessages, normalized);
+	return {
+		...metadata,
+		summary: metadata.summary ?? normalized,
+		messageCount: Math.max(metadata.messageCount, recentMessages.length),
+		recentMessages,
+		resumeSummary: null,
+	};
+}
+
+function applyRuntimeOwnedEvent(metadata: SessionRecoveryMetadata, event: RuntimeEvent): SessionRecoveryMetadata {
+	if (event.category !== "compaction" || event.type !== "compaction_completed") {
+		return metadata;
+	}
+	const compactedSummary = normalizeRuntimeOwnedText(event.summary.compactedSummary);
+	if (!compactedSummary) {
+		return metadata;
+	}
+	return {
+		...metadata,
+		summary: metadata.summary ?? compactedSummary,
+		resumeSummary: null,
+	};
+}
+
+function appendRuntimeOwnedAssistantMessage(
+	existing: readonly SessionTranscriptMessagePreview[],
+	text: string,
+): readonly SessionTranscriptMessagePreview[] {
+	const recentMessages = [...existing];
+	const last = recentMessages.at(-1);
+	if (last && last.role === "assistant") {
+		recentMessages[recentMessages.length - 1] = { role: "assistant", text: `${last.text}${text}` };
+		return trimRuntimeOwnedMessages(recentMessages);
+	}
+	return trimRuntimeOwnedMessages([...recentMessages, { role: "assistant", text }]);
+}
+
+function trimRuntimeOwnedMessages(messages: readonly SessionTranscriptMessagePreview[]): readonly SessionTranscriptMessagePreview[] {
+	return messages.slice(-6);
+}
+
+function normalizeRuntimeOwnedText(value: string | null | undefined): string | undefined {
+	const normalized = value?.replace(/\s+/g, " ").trim();
+	return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
 function registerBuiltinToolDefinitions(governor: ToolGovernor, toolSet: ReadonlySet<string>): void {

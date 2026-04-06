@@ -278,6 +278,35 @@ describe("createInputLoop (rawMode)", () => {
 		}
 	});
 
+	it("emits onSubmit before clearing the raw-mode buffer", async () => {
+		const input = createTtyPassThrough();
+		const output = createTtyPassThrough();
+		const submitted: string[] = [];
+		const states: Array<{ buffer: string; cursor: number }> = [];
+		const loop = createInputLoop({
+			input,
+			output,
+			prompt: "",
+			rawMode: true,
+			onInputStateChange: (state) => {
+				states.push(state);
+			},
+			onSubmit: (line) => {
+				submitted.push(line);
+			},
+		});
+		try {
+			const pending = loop.nextLine();
+			input.write("resume query");
+			input.write("\r");
+			await expect(pending).resolves.toBe("resume query");
+			expect(submitted).toEqual(["resume query"]);
+			expect(states.at(-1)).toEqual({ buffer: "", cursor: 0 });
+		} finally {
+			loop.close();
+		}
+	});
+
 	it("restores raw mode and pauses stdin on close", () => {
 		const input = createTtyPassThrough();
 		const output = createTtyPassThrough();

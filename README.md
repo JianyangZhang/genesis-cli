@@ -44,7 +44,7 @@
 - **可选项目级覆盖**
   - `.genesis/settings.json`
   - `.genesis/settings.local.json`
-  - `.genesis-local/pi-agent/models.json`
+  - `.genesis-local/agent/models.json`
 - **当前优先级（高 -> 低）**
   1. CLI flags
   2. shell 环境变量
@@ -111,7 +111,8 @@ Genesis 采用“终端宿主 / 内容语义 / 运行时契约 / 仓库自持内
 - 当前主线：
   - 继续把 interactive 渲染规则沉到 `app-tui-core`
   - 继续把内容语义从 `app-cli` 回收到 `app-ui`
-  - 保持 `app-runtime` 与 `app-tools` 的稳定契约，减少跨层兜底与隐式耦合
+  - 继续把 `/resume` 收敛为 `app-runtime` 提供结构化摘要、`app-ui` 负责展示语义、`app-cli` 只负责 TTY 接线的稳定主链
+  - 保持 `app-runtime` 与 `app-tools` 的稳定契约，并为复杂链路同步补齐 `--debug` 可观测性
 
 ---
 

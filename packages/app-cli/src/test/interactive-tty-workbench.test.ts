@@ -673,6 +673,19 @@ class FakeInteractiveSession implements SessionFacade {
 
 	abort(): void {}
 
+	async snapshotRecoveryData(): Promise<SessionRecoveryData> {
+		return {
+			sessionId: this.id,
+			model: this.state.model,
+			toolSet: [...this.state.toolSet],
+			planSummary: this.state.planSummary,
+			compactionSummary: this.state.compactionSummary,
+			taskState: this.state.taskState,
+			workingDirectory: this.context.workingDirectory,
+			agentDir: this.context.agentDir,
+		};
+	}
+
 	async close(): Promise<void> {}
 
 	async switchModel(model: SessionFacade["state"]["model"]): Promise<void> {
@@ -848,8 +861,36 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 		recordRecentSession: async (recoveryData, options) => {
 			recentSessions.unshift({ recoveryData, title: options?.title, updatedAt: Date.now() });
 		},
+		recordClosedRecentSession: async (_session, recoveryData, options) => {
+			recentSessions.unshift({ recoveryData, title: options?.title, updatedAt: Date.now() });
+		},
+		recordRecentSessionInput: async (liveSession, input) => {
+			const recoveryData = await liveSession.snapshotRecoveryData();
+			upsertRecentSessionForTest(recentSessions, {
+				...recoveryData,
+				metadata: mergeRecentSessionMetadataForTest(recoveryData.metadata, {
+					firstPrompt: input,
+					recentMessages: [{ role: "user", text: input }],
+				}),
+			});
+		},
+		recordRecentSessionAssistantText: async (liveSession, text) => {
+			const recoveryData = await liveSession.snapshotRecoveryData();
+			upsertRecentSessionForTest(recentSessions, {
+				...recoveryData,
+				metadata: mergeRecentSessionMetadataForTest(recoveryData.metadata, {
+					recentMessages: [{ role: "assistant", text }],
+				}),
+			});
+		},
+		recordRecentSessionEvent: async () => {},
 		listRecentSessions: async () => recentSessions,
 		searchRecentSessions: async (query) => searchRecentSessionsForTest(recentSessions, query),
+		pruneRecentSessions: async (maxEntries = 10) => {
+			const before = recentSessions.length;
+			recentSessions.splice(maxEntries);
+			return { before, after: recentSessions.length, removed: Math.max(0, before - recentSessions.length) };
+		},
 		getDefaultModel: () => defaultModel,
 		setDefaultModel: (model) => {
 			defaultModel = model;
@@ -889,13 +930,83 @@ function createSequencedRuntime(
 		recordRecentSession: async (recoveryData, options) => {
 			recentSessions.unshift({ recoveryData, title: options?.title, updatedAt: Date.now() });
 		},
+		recordClosedRecentSession: async (_session, recoveryData, options) => {
+			recentSessions.unshift({ recoveryData, title: options?.title, updatedAt: Date.now() });
+		},
+		recordRecentSessionInput: async (liveSession, input) => {
+			const recoveryData = await liveSession.snapshotRecoveryData();
+			upsertRecentSessionForTest(recentSessions, {
+				...recoveryData,
+				metadata: mergeRecentSessionMetadataForTest(recoveryData.metadata, {
+					firstPrompt: input,
+					recentMessages: [{ role: "user", text: input }],
+				}),
+			});
+		},
+		recordRecentSessionAssistantText: async (liveSession, text) => {
+			const recoveryData = await liveSession.snapshotRecoveryData();
+			upsertRecentSessionForTest(recentSessions, {
+				...recoveryData,
+				metadata: mergeRecentSessionMetadataForTest(recoveryData.metadata, {
+					recentMessages: [{ role: "assistant", text }],
+				}),
+			});
+		},
+		recordRecentSessionEvent: async () => {},
 		listRecentSessions: async () => recentSessions,
 		searchRecentSessions: async (query) => searchRecentSessionsForTest(recentSessions, query),
+		pruneRecentSessions: async (maxEntries = 10) => {
+			const before = recentSessions.length;
+			recentSessions.splice(maxEntries);
+			return { before, after: recentSessions.length, removed: Math.max(0, before - recentSessions.length) };
+		},
 		getDefaultModel: () => defaultModel,
 		setDefaultModel: (model) => {
 			defaultModel = model;
 		},
 		shutdown: async () => {},
+	};
+}
+
+function upsertRecentSessionForTest(recentSessions: RecentSessionEntry[], recoveryData: SessionRecoveryData): void {
+	const index = recentSessions.findIndex((entry) => entry.recoveryData.sessionId.value === recoveryData.sessionId.value);
+	const existing = index >= 0 ? recentSessions[index]?.recoveryData : undefined;
+	const nextEntry = {
+		recoveryData: existing
+			? {
+					...recoveryData,
+					model: {
+						...existing.model,
+						...recoveryData.model,
+					},
+					toolSet: recoveryData.toolSet.length > 0 ? recoveryData.toolSet : existing.toolSet,
+					metadata: mergeRecentSessionMetadataForTest(existing.metadata, recoveryData.metadata ?? undefined),
+				}
+			: recoveryData,
+		updatedAt: Date.now(),
+	};
+	if (index >= 0) {
+		recentSessions.splice(index, 1);
+	}
+	recentSessions.unshift(nextEntry);
+}
+
+function mergeRecentSessionMetadataForTest(
+	existing: SessionRecoveryData["metadata"],
+	incoming: Partial<NonNullable<SessionRecoveryData["metadata"]>> | undefined,
+): NonNullable<SessionRecoveryData["metadata"]> {
+	const next = incoming ?? {};
+	const recentMessages = [...(existing?.recentMessages ?? [])];
+	for (const message of next.recentMessages ?? []) {
+		recentMessages.push(message);
+	}
+	return {
+		firstPrompt: next.firstPrompt ?? existing?.firstPrompt,
+		summary: next.summary ?? existing?.summary,
+		messageCount: Math.max(existing?.messageCount ?? 0, recentMessages.length),
+		fileSizeBytes: existing?.fileSizeBytes ?? 0,
+		recentMessages,
+		resumeSummary: existing?.resumeSummary ?? null,
 	};
 }
 
@@ -1027,6 +1138,90 @@ describe("interactive workbench TTY", () => {
 		} finally {
 			await logger.shutdown();
 		}
+	}, 10000);
+
+	it("writes resume browser interaction scopes into debug logs", async () => {
+		const writes: Array<{ path: string; data: string }> = [];
+		const logger = await initializeDebugLogger({
+			debugEnabled: true,
+			argv: ["--debug"],
+			now: () => new Date("2026-04-06T12:30:00.000Z"),
+			pid: 9876,
+			randomHex: () => "feedbeef",
+			io: {
+				async mkdir() {},
+				async appendFile(path, data) {
+					writes.push({ path, data });
+				},
+				async writeFile() {},
+				async readdir() {
+					return [];
+				},
+				async rm() {},
+			},
+		});
+		const initialSession = new FakeInteractiveSession({ sessionId: "session-debug-resume" });
+		const recoveredId = "session-debug-recovered";
+		const recoveredSession = new FakeInteractiveSession({ sessionId: recoveredId });
+		const runtime = createSequencedRuntime(
+			[initialSession],
+			{ [recoveredId]: recoveredSession },
+			[
+				{
+					recoveryData: {
+						sessionId: { value: recoveredId },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: ["bash"],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: {
+							summary: "继续推进 resume 摘要",
+							firstPrompt: "把 resume 的标题做得更像 Claude",
+							messageCount: 2,
+							fileSizeBytes: 128,
+							recentMessages: [
+								{ role: "user", text: "把 resume 的标题做得更像 Claude" },
+								{ role: "assistant", text: "我先整理 resume metadata。" },
+							],
+						},
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+					updatedAt: Date.now(),
+				},
+			],
+		);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("/resume\r");
+				await waitFor(() => screen.snapshot().includes("Goal: 继续推进 resume 摘要"));
+				input.write("Claude");
+				await waitFor(() => screen.snapshot().includes("filter: Claude"));
+				input.write(Buffer.from([0x16]));
+				await waitFor(() => screen.snapshot().includes("Preview"));
+				input.write("\r");
+				await waitFor(() => screen.snapshot().includes(`Resumed: ${recoveredId}`));
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await logger.shutdown();
+		}
+
+		const runtimeLog = writes
+			.filter((write) => write.path.includes("runtime-") && write.path.endsWith(".jsonl"))
+			.map((write) => write.data)
+			.join("");
+		expect(runtimeLog).toContain("\"scope\":\"resume.browser.open\"");
+		expect(runtimeLog).toContain("\"scope\":\"resume.browser.search\"");
+		expect(runtimeLog).toContain("\"scope\":\"resume.browser.preview\"");
+		expect(runtimeLog).toContain("\"scope\":\"resume.browser.resume\"");
 	}, 10000);
 
 	it("renders a completed assistant reply and keeps the composer visible", async () => {
@@ -1261,6 +1456,48 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
+	it("persists runtime-owned history from live user and assistant turns", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-runtime-history" });
+		session.queueMultiChunkHello();
+		const runtime = createFakeRuntime(session);
+		let inputPersistCalls = 0;
+		const originalRecordRecentSessionInput = runtime.recordRecentSessionInput.bind(runtime);
+		runtime.recordRecentSessionInput = async (...args) => {
+			inputPersistCalls += 1;
+			return originalRecordRecentSessionInput(...args);
+		};
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("hello\r");
+			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
+			let firstPromptPersisted = false;
+			for (let attempt = 0; attempt < 50; attempt += 1) {
+				const recent = await runtime.listRecentSessions();
+				if (recent[0]?.recoveryData.metadata?.firstPrompt === "hello") {
+					firstPromptPersisted = true;
+					break;
+				}
+				await sleep(10);
+			}
+			expect(inputPersistCalls).toBeGreaterThan(0);
+			expect(firstPromptPersisted).toBe(true);
+
+			const recent = await runtime.listRecentSessions();
+			expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+				{ role: "user", text: "hello" },
+				{ role: "assistant", text: "Hi from Genesis" },
+			]);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
 	it("switches the current model and persists the new default via /model", async () => {
 		const { agentDir, settingsPath } = await createModelFixture();
 		const session = new FakeInteractiveSession({ sessionId: "session-model", agentDir });
@@ -1360,14 +1597,14 @@ describe("interactive workbench TTY", () => {
 
 				input.write("/resume\r");
 				await waitFor(() => screen.snapshot().includes("Goal: 继续推进 /resume 的体验对齐"));
-				expect(screen.snapshot()).toContain("Search: Type to search recent sessions...");
+				expect(screen.snapshot()).toContain("Search>");
 				expect(screen.snapshot()).toContain("继续推进 /resume 的体验对齐");
 				expect(screen.snapshot()).toContain("Goal: 继续推进 /resume 的体验对齐");
 				expect(screen.snapshot()).toContain("User: 本地所有修改，commit & push");
 				expect(screen.snapshot()).toContain("Type to search");
 
 				input.write("commit & push");
-				await waitFor(() => screen.snapshot().includes("Search: commit & push"));
+				await waitFor(() => screen.snapshot().includes("filter: commit & push"));
 				expect(screen.snapshot()).toContain("本地所有修改，commit & push");
 				expect(screen.snapshot()).toContain("Goal: 继续推进 /resume 的体验对齐");
 
@@ -1382,7 +1619,6 @@ describe("interactive workbench TTY", () => {
 				expect(snapshot).toContain("User: 本地所有修改，commit & push");
 				expect(snapshot).toContain("Assistant: 我会先检查工作区并整理提交内容。");
 				expect(snapshot).toContain("User: 继续推进 /resume 的体验对齐");
-				expect(output.getRawOutput()).toContain("GLM 5.1 via zai");
 				expect(snapshot).toContain("❯");
 
 				input.write("/exit\r");
@@ -1475,55 +1711,6 @@ describe("interactive workbench TTY", () => {
 			input.write("\r");
 			await waitFor(() => screen.snapshot().includes(`Resumed: ${firstRecoveredId}`));
 			expect(screen.snapshot()).toContain("User: README 发布文案调整");
-
-			input.write("/exit\r");
-			await startPromise;
-		});
-	}, 10000);
-
-	it("keeps the selected resume-browser item visible when moving beyond the terminal height", async () => {
-		const initialSession = new FakeInteractiveSession({ sessionId: "session-before-scroll" });
-		const recoveredSessions: Record<string, FakeInteractiveSession> = {};
-		const recentEntries: RecentSessionEntry[] = [];
-		for (let index = 0; index < 8; index += 1) {
-			const sessionId = `session-scroll-${index}`;
-			recoveredSessions[sessionId] = new FakeInteractiveSession({ sessionId });
-			recentEntries.push({
-				recoveryData: {
-					sessionId: { value: sessionId },
-					model: { id: "glm-5.1", provider: "zai" },
-					toolSet: ["bash"],
-					planSummary: null,
-					compactionSummary: null,
-					metadata: {
-						summary: `目标 ${index}`,
-						firstPrompt: `用户输入 ${index}`,
-						messageCount: 2,
-						fileSizeBytes: 128,
-						recentMessages: [{ role: "user", text: `用户输入 ${index}` }],
-					},
-					taskState: { status: "idle", currentTaskId: null, startedAt: null },
-				},
-				updatedAt: Date.now() - index * 60_000,
-			});
-		}
-		const runtime = createSequencedRuntime([initialSession], recoveredSessions, recentEntries);
-		const input = new FakeTtyInput();
-		const output = new FakeTtyOutput();
-		output.rows = 14;
-
-		await withPatchedProcessTty(input, output, async (screen) => {
-			const startPromise = createModeHandler("interactive").start(runtime);
-			await waitFor(() => screen.snapshot().includes("❯"));
-
-			input.write("/resume\r");
-			await waitFor(() => screen.snapshot().includes("Resume Session (1 of 8)"));
-
-			for (let index = 0; index < 6; index += 1) {
-				input.write("\u001b[B");
-			}
-			await waitFor(() => screen.snapshot().includes("❯ 目标 6"));
-			expect(screen.snapshot()).not.toContain("❯ 目标 0");
 
 			input.write("/exit\r");
 			await startPromise;

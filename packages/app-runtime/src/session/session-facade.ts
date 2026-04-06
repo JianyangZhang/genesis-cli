@@ -20,7 +20,7 @@ import type { PlanOrchestrator } from "../planning/plan-orchestrator.js";
 import { createPlanOrchestrator } from "../planning/plan-orchestrator.js";
 import { updateModel as updateContextModel, updateTaskState as updateContextTaskState } from "../runtime-context.js";
 import { EventNormalizer } from "../services/event-normalizer.js";
-import type { ModelDescriptor, RuntimeContext, SessionId, SessionState, TaskState } from "../types/index.js";
+import type { ModelDescriptor, RuntimeContext, SessionId, SessionRecoveryData, SessionState, TaskState } from "../types/index.js";
 import { generateEventId, sessionClosed } from "./session-events.js";
 import { updatePlanSummary, updateSessionModel, updateSessionStatus, updateTaskState } from "./session-state.js";
 
@@ -52,6 +52,9 @@ export interface SessionFacade {
 
 	/** Gracefully close the session, persisting state. */
 	close(): Promise<void>;
+
+	/** Capture a serializable recovery snapshot without closing the session. */
+	snapshotRecoveryData(): Promise<SessionRecoveryData>;
 
 	/** Resolve a pending permission request. */
 	resolvePermission(callId: string, decision: "allow" | "allow_for_session" | "allow_once" | "deny"): Promise<void>;
@@ -212,6 +215,11 @@ export class SessionFacadeImpl implements SessionFacade {
 
 		// Keep the running lock until the active stream actually settles.
 		this._adapter.abort();
+	}
+
+	async snapshotRecoveryData(): Promise<SessionRecoveryData> {
+		this.assertOpen();
+		return this._adapter.getRecoveryData();
 	}
 
 	async close(): Promise<void> {

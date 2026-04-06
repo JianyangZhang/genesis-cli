@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
@@ -60,7 +61,7 @@ interface PiMonoSdk {
 		};
 	};
 	SessionManager: {
-		create(cwd: string): unknown;
+		create(cwd: string, sessionStorageDir?: string): unknown;
 		open(sessionPath: string): unknown;
 	};
 	createAgentSession(options: CreateAgentSessionOptions): Promise<{ session: AgentSession }>;
@@ -93,6 +94,7 @@ interface ExtendedRecoveryData extends SessionRecoveryData {
 export interface PiMonoSessionAdapterOptions {
 	readonly workingDirectory: string;
 	readonly agentDir?: string;
+	readonly historyDir?: string;
 	readonly model: ModelDescriptor;
 	readonly toolSet?: readonly string[];
 	readonly thinkingLevel?: ThinkingLevel;
@@ -440,16 +442,20 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		if (!model) {
 			throw new Error(
 				`Model ${this.currentModel.provider}/${this.currentModel.id} is not configured in ${
-					agentDir ?? "~/.pi/agent"
+					agentDir ?? ".genesis-local/agent"
 				}/models.json`,
 			);
 		}
 
 		const tools = this.wrapTools(createToolsForSet(workingDirectory, toolSet, sdk));
+		const sessionStorageDir = this.options.historyDir ? join(this.options.historyDir, "session-files") : undefined;
+		if (sessionStorageDir) {
+			await mkdir(sessionStorageDir, { recursive: true });
+		}
 		const sessionManager =
 			recovery?.sessionFile && recovery.sessionFile.length > 0
 				? sdk.SessionManager.open(recovery.sessionFile)
-				: sdk.SessionManager.create(workingDirectory);
+				: sdk.SessionManager.create(workingDirectory, sessionStorageDir);
 
 		const session = await defaultCreateSession({
 			cwd: workingDirectory,

@@ -16,6 +16,7 @@ export interface CliOptions {
 	readonly debug: boolean;
 	readonly workingDirectory: string;
 	readonly agentDir: string;
+	readonly historyDir: string;
 	readonly settingsPath: string;
 	readonly model: ModelDescriptor;
 	readonly toolSet: readonly string[];
@@ -129,6 +130,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 		const runtime = createAppRuntime({
 			workingDirectory: options.workingDirectory,
 			agentDir: options.agentDir,
+			historyDir: options.historyDir,
 			configSources: options.configSources,
 			mode: options.mode,
 			model: options.model,
@@ -137,11 +139,14 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 				new PiMonoSessionAdapter({
 					workingDirectory: options.workingDirectory,
 					agentDir: options.agentDir,
+					historyDir: options.historyDir,
 					model,
 					toolSet: options.toolSet,
 					thinkingLevel: options.thinkingLevel,
 				}),
 		});
+		const recentSessionPrune = await runtime.pruneRecentSessions(10);
+		logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
 
 		const handler = createModeHandler(options.mode, {
 			modelHost: {
@@ -196,7 +201,8 @@ interface LoadedSettingsLayers {
 
 export async function resolveCliOptions(flags: Readonly<Record<string, string | boolean>>): Promise<CliOptions> {
 	const workingDirectory = resolve(readStringFlag(flags, "cwd", process.cwd()));
-	const agentDir = resolve(readStringFlag(flags, "agent-dir", resolve(".genesis-local/pi-agent")));
+	const agentDir = resolve(readStringFlag(flags, "agent-dir", resolve(".genesis-local/agent")));
+	const historyDir = resolve(homedir(), ".genesis-cli", "sessions");
 	const settingsPath = resolve(homedir(), ".genesis-cli", "settings.json");
 	const shellEnv: NodeJS.ProcessEnv = { ...process.env };
 	try {
@@ -218,7 +224,7 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	sources.agentDir =
 		typeof flags["agent-dir"] === "string"
 			? { layer: "cli", detail: "--agent-dir" }
-			: { layer: "default", detail: ".genesis-local/pi-agent" };
+			: { layer: "default", detail: ".genesis-local/agent" };
 
 	const provider = pickString(
 		[
@@ -510,6 +516,7 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 		debug,
 		workingDirectory,
 		agentDir,
+		historyDir,
 		settingsPath,
 		model: {
 			id: modelId,

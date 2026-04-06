@@ -34,6 +34,7 @@ import {
 	computeTranscriptDisplayRows as computeTranscriptDisplayRowsFromTuiCore,
 	computeVisibleViewportLines,
 	countRenderedTerminalRows as countRenderedTerminalRowsFromTuiCore,
+	createScreenFrame,
 	createInteractiveModePlan,
 	detectTerminalCapabilities,
 	diffScreenFrames,
@@ -60,6 +61,9 @@ import {
 import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
 import {
 	ansiShowCursor,
+	buildResumeBrowserBodyBlocks,
+	buildResumeBrowserFooterHintLines,
+	buildResumeBrowserHeaderLines,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	createBuiltinCommands,
 	createSlashCommandRegistry,
@@ -170,11 +174,15 @@ class InteractiveModeHandler implements ModeHandler {
 		focusColumn: number;
 	} | null = null;
 	private _resumeBrowser: ResumeBrowserState | null = null;
+	private _resumeBrowserScrollOffset = 0;
+	private _resumeBrowserSubmitPending = false;
 	private _resumeSearchRequestId = 0;
 	private _inputLoop: InputLoop | null = null;
 	private _activeLocalCommand: Promise<void> | null = null;
 	private _sessionRef: { current: SessionFacade } | null = null;
 	private _sink: OutputSink | null = null;
+	private _runtime: AppRuntime | null = null;
+	private _recentSessionPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -197,6 +205,7 @@ class InteractiveModeHandler implements ModeHandler {
 		};
 		this._sessionRef = sessionRef;
 		this._sink = sink;
+		this._runtime = runtime;
 
 		// Slash command registry
 		const registry = createSlashCommandRegistry();
@@ -247,7 +256,7 @@ class InteractiveModeHandler implements ModeHandler {
 		const resolveAgentDir = (): string => {
 			return (
 				sessionRef.current.context.agentDir ??
-				join(sessionRef.current.context.workingDirectory, ".genesis-local", "pi-agent")
+				join(sessionRef.current.context.workingDirectory, ".genesis-local", "agent")
 			);
 		};
 
@@ -284,8 +293,15 @@ class InteractiveModeHandler implements ModeHandler {
 			this._renderedFooterStartRow = null;
 			this._lastScreenFrame = null;
 			this._transcriptScrollOffset = 0;
-			this._sessionRef = null;
-			this._sink = null;
+			this._resumeBrowserScrollOffset = 0;
+			this._resumeBrowserSubmitPending = false;
+			if (this._recentSessionPersistTimer !== null) {
+				clearTimeout(this._recentSessionPersistTimer);
+				this._recentSessionPersistTimer = null;
+			}
+			this._sessionRef = sessionRef;
+			this._sink = sink;
+			this._runtime = runtime;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -295,7 +311,9 @@ class InteractiveModeHandler implements ModeHandler {
 					return;
 				}
 				try {
-					void runtime.recordRecentSession((event as SessionClosedEvent).recoveryData, { title: sessionTitle });
+					void runtime.recordClosedRecentSession(sessionRef.current, (event as SessionClosedEvent).recoveryData, {
+						title: sessionTitle,
+					});
 				} catch {}
 			});
 
@@ -348,6 +366,9 @@ class InteractiveModeHandler implements ModeHandler {
 					this._pendingPermissionCallId = null;
 				}
 				this.handleTranscriptEvent(event);
+				if (shouldPersistRecentSessionForEvent(event)) {
+					this.scheduleRecentSessionPersist(runtime, sessionRef.current, event, sessionTitle);
+				}
 			});
 			detachSessionStateListener = sessionRef.current.onStateChange((state) => {
 				if (state.model.id !== sessionRef.current.state.model.id || state.model.provider !== sessionRef.current.state.model.provider) {
@@ -804,6 +825,11 @@ class InteractiveModeHandler implements ModeHandler {
 			onInputStateChange: (state) => {
 				this._inputState = state;
 				if (this._resumeBrowser !== null) {
+					if (this._resumeBrowserSubmitPending && state.buffer.length === 0) {
+						this._resumeBrowserSubmitPending = false;
+						this.renderPromptLine();
+						return;
+					}
 					this._commandSuggestions = [];
 					void this.refreshResumeBrowserResults(runtime, state.buffer);
 					return;
@@ -851,6 +877,11 @@ class InteractiveModeHandler implements ModeHandler {
 					return;
 				}
 				this.handleSpecialKey(key);
+			},
+			onSubmit: (line) => {
+				if (this._resumeBrowser !== null && line.length >= 0) {
+					this._resumeBrowserSubmitPending = true;
+				}
 			},
 			onMouse: (event) => {
 				this.handleMouseEvent(event);
@@ -1044,6 +1075,22 @@ class InteractiveModeHandler implements ModeHandler {
 				this.moveResumeBrowserSelection(1);
 				return;
 			}
+			if (key === "pageup") {
+				this.moveResumeBrowserSelection(-Math.max(1, this.currentResumeBrowserBodyViewportRows() - 1));
+				return;
+			}
+			if (key === "pagedown") {
+				this.moveResumeBrowserSelection(Math.max(1, this.currentResumeBrowserBodyViewportRows() - 1));
+				return;
+			}
+			if (key === "wheelup") {
+				this.moveResumeBrowserSelection(-1);
+				return;
+			}
+			if (key === "wheeldown") {
+				this.moveResumeBrowserSelection(1);
+				return;
+			}
 		}
 		if (key === "ctrlo") {
 			this.toggleDetailPanel();
@@ -1181,11 +1228,15 @@ class InteractiveModeHandler implements ModeHandler {
 			}
 			return;
 		}
+		const assistantText = this._assistantBuffer;
 		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
 		if (assistantBlock !== null) {
 			const previousRows = this.currentTranscriptDisplayRows();
 			this.rememberAssistantTranscriptBlock(assistantBlock);
 			this.adjustTranscriptScrollForGrowth(previousRows, this.currentTranscriptDisplayRows());
+			if (this._runtime !== null && this._sessionRef !== null) {
+				void this._runtime.recordRecentSessionAssistantText(this._sessionRef.current, assistantText);
+			}
 		}
 		this._assistantBuffer = "";
 		if (redrawPrompt) {
@@ -1273,8 +1324,14 @@ class InteractiveModeHandler implements ModeHandler {
 		this._detailPanelExpanded = false;
 		this._detailPanelScroll = 0;
 		this._transcriptScrollOffset = 0;
+		this._resumeBrowserScrollOffset = 0;
+		this._resumeBrowserSubmitPending = false;
 		this.clearMouseSelection(false);
 		this._commandSuggestions = [];
+		getActiveDebugLogger()?.debug("resume.browser.open", "Opened resume browser", {
+			initialQuery,
+			transcriptScrollOffset: this._transcriptScrollOffset,
+		});
 		if (this._inputLoop !== null) {
 			this._inputLoop.setState({ buffer: initialQuery, cursor: initialQuery.length });
 		} else {
@@ -1288,9 +1345,17 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser === null) {
 			return;
 		}
+		getActiveDebugLogger()?.debug("resume.browser.close", "Closed resume browser", {
+			query: this._resumeBrowser.query,
+			selectedIndex: this._resumeBrowser.selectedIndex,
+			resultCount: this._resumeBrowser.hits.length,
+			previewExpanded: this._resumeBrowser.previewExpanded,
+		});
 		this._resumeBrowser = null;
 		this._resumeSearchRequestId += 1;
 		this._transcriptScrollOffset = 0;
+		this._resumeBrowserScrollOffset = 0;
+		this._resumeBrowserSubmitPending = false;
 		this.clearMouseSelection(false);
 		if (this._inputLoop !== null) {
 			this._inputLoop.setState({ buffer: "", cursor: 0 });
@@ -1327,6 +1392,18 @@ class InteractiveModeHandler implements ModeHandler {
 			loading: false,
 			selectedIndex: resolveResumeBrowserSelectedIndex(hits, selectedSessionId, browser.selectedIndex),
 		};
+		if (browser.query !== nextQuery) {
+			this._resumeBrowserScrollOffset = 0;
+		}
+		getActiveDebugLogger()?.debug("resume.browser.search", "Refreshed resume browser results", {
+			query: nextQuery,
+			requestId,
+			resultCount: hits.length,
+			selectedIndex: this._resumeBrowser.selectedIndex,
+			topHit: summarizeResumeBrowserHit(hits[0]),
+			selectedHit: summarizeResumeBrowserHit(hits[this._resumeBrowser.selectedIndex]),
+			scrollOffset: this._resumeBrowserScrollOffset,
+		});
 		this.ensureResumeBrowserSelectionVisible();
 		this.rerenderInteractiveRegions();
 	}
@@ -1343,6 +1420,12 @@ class InteractiveModeHandler implements ModeHandler {
 			...this._resumeBrowser,
 			selectedIndex: nextIndex,
 		};
+		getActiveDebugLogger()?.debug("resume.browser.selection", "Moved resume browser selection", {
+			delta,
+			selectedIndex: nextIndex,
+			selectedHit: summarizeResumeBrowserHit(this._resumeBrowser.hits[nextIndex]),
+			scrollOffset: this._resumeBrowserScrollOffset,
+		});
 		this.ensureResumeBrowserSelectionVisible();
 		this.rerenderInteractiveRegions();
 	}
@@ -1355,12 +1438,17 @@ class InteractiveModeHandler implements ModeHandler {
 			...this._resumeBrowser,
 			previewExpanded: !this._resumeBrowser.previewExpanded,
 		};
+		getActiveDebugLogger()?.debug("resume.browser.preview", "Toggled resume browser preview", {
+			previewExpanded: this._resumeBrowser.previewExpanded,
+			selectedIndex: this._resumeBrowser.selectedIndex,
+			selectedHit: summarizeResumeBrowserHit(this._resumeBrowser.hits[this._resumeBrowser.selectedIndex]),
+		});
 		this.ensureResumeBrowserSelectionVisible();
 		this.rerenderInteractiveRegions();
 	}
 
 	private async handleResumeBrowserSubmit(
-		_line: string,
+		line: string,
 		runtime: AppRuntime,
 		sessionRef: { current: SessionFacade },
 		sink: OutputSink,
@@ -1369,6 +1457,12 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser === null) {
 			return false;
 		}
+		getActiveDebugLogger()?.debug("resume.browser.submit", "Handling resume browser submit", {
+			line,
+			loading: this._resumeBrowser.loading,
+			selectedIndex: this._resumeBrowser.selectedIndex,
+			hitCount: this._resumeBrowser.hits.length,
+		});
 		if (this._resumeBrowser.loading) {
 			return true;
 		}
@@ -1377,6 +1471,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return true;
 		}
 		const data = hit.entry.recoveryData;
+		getActiveDebugLogger()?.debug("resume.browser.resume", "Resuming selected session", {
+			selectedIndex: this._resumeBrowser.selectedIndex,
+			selectedHit: summarizeResumeBrowserHit(hit),
+		});
 		this.closeResumeBrowser();
 		this._suppressPersistOnce = true;
 		await sessionRef.current.close();
@@ -1410,6 +1508,9 @@ class InteractiveModeHandler implements ModeHandler {
 		this._currentMessageUsage = emptyUsageSnapshot();
 		this.startTurnFeedback();
 		this.rememberHistory(input);
+		if (this._runtime !== null) {
+			void this._runtime.recordRecentSessionInput(session, input);
+		}
 		const sendTurn =
 			mode === "continue" ? (value: string) => session.continue(value) : (value: string) => session.prompt(value);
 		this._activeTurn = sendTurn(input)
@@ -1492,25 +1593,57 @@ class InteractiveModeHandler implements ModeHandler {
 		return this._activeTurn !== null || this._activeLocalCommand !== null || this._turnNotice === "compacting";
 	}
 
+	private scheduleRecentSessionPersist(runtime: AppRuntime, session: SessionFacade, event: RuntimeEvent, title?: string): void {
+		if (this._suppressPersistOnce) {
+			return;
+		}
+		if (this._recentSessionPersistTimer !== null) {
+			clearTimeout(this._recentSessionPersistTimer);
+		}
+		this._recentSessionPersistTimer = setTimeout(() => {
+			this._recentSessionPersistTimer = null;
+			void this.enqueueRecentSessionPersist(runtime, session, event, title);
+		}, 120);
+	}
+
+	private async enqueueRecentSessionPersist(
+		runtime: AppRuntime,
+		session: SessionFacade,
+		event: RuntimeEvent,
+		title?: string,
+	): Promise<void> {
+		try {
+			await runtime.recordRecentSessionEvent(session, event, { title });
+			getActiveDebugLogger()?.debug("resume.history.persist", "Persisted runtime-owned session history update", {
+				sessionId: session.id.value,
+				category: event.category,
+				type: event.type,
+			});
+		} catch (error) {
+			getActiveDebugLogger()?.error("resume.history.persist", "Failed to persist runtime-owned session history update", {
+				error,
+				sessionId: session.id.value,
+				category: event.category,
+				type: event.type,
+			});
+		}
+	}
+
 	private ensureResumeBrowserSelectionVisible(): void {
 		if (this._resumeBrowser === null) {
 			return;
 		}
-		const viewportRows = Math.max(1, this.currentTranscriptViewportRows());
-		const selectedLineOffset = this.currentRenderedTranscriptBlocks()[0]
-			?.split("\n")
-			.findIndex((line) => line.startsWith("❯ "));
-		if (selectedLineOffset === undefined || selectedLineOffset < 0) {
+		const viewportRows = Math.max(1, this.currentResumeBrowserBodyViewportRows());
+		const selectedRange = this.currentResumeBrowserSelectedRowRange();
+		if (selectedRange === null) {
 			return;
 		}
-		if (selectedLineOffset < this._transcriptScrollOffset) {
-			this._transcriptScrollOffset = selectedLineOffset;
-			return;
+		if (selectedRange.start < this._resumeBrowserScrollOffset) {
+			this._resumeBrowserScrollOffset = selectedRange.start;
+		} else if (selectedRange.end >= this._resumeBrowserScrollOffset + viewportRows) {
+			this._resumeBrowserScrollOffset = selectedRange.end - viewportRows + 1;
 		}
-		if (selectedLineOffset >= this._transcriptScrollOffset + viewportRows) {
-			this._transcriptScrollOffset = selectedLineOffset - viewportRows + 1;
-		}
-		this.clampTranscriptScrollOffset();
+		this.clampResumeBrowserScrollOffset();
 	}
 
 	private toggleDetailPanel(): void {
@@ -1649,7 +1782,11 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private rerenderInteractiveRegions(): void {
 		this.clearMouseSelection(false);
-		this.clampTranscriptScrollOffset();
+		if (this._resumeBrowser !== null) {
+			this.clampResumeBrowserScrollOffset();
+		} else {
+			this.clampTranscriptScrollOffset();
+		}
 		this.fullRedrawInteractiveScreen();
 	}
 
@@ -1706,6 +1843,79 @@ class InteractiveModeHandler implements ModeHandler {
 		return Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
 	}
 
+	private currentResumeBrowserTopLines(): readonly string[] {
+		return this._resumeBrowser === null ? [] : buildResumeBrowserHeaderLines(this._resumeBrowser);
+	}
+
+	private currentResumeBrowserBodyBlocks(): readonly string[] {
+		return this._resumeBrowser === null ? [] : buildResumeBrowserBodyBlocks(this._resumeBrowser);
+	}
+
+	private buildResumeBrowserFooterUi(): InteractiveFooterRenderResult {
+		const terminalWidth = this.terminalWidth();
+		const separator = formatInteractiveInputSeparator(computeInteractiveFooterSeparatorWidth(terminalWidth));
+		const layout = composePromptBlock({
+			leadingLines: buildResumeBrowserFooterHintLines(),
+			separator,
+			prompt: "Search> ",
+			buffer: formatInteractivePromptBuffer(this._inputState.buffer, false),
+			cursor: this._inputState.cursor,
+		});
+		return materializeComposerBlock(layout, terminalWidth);
+	}
+
+	private currentResumeBrowserBodyViewportRows(): number {
+		const footerHeight = this.buildResumeBrowserFooterUi().lines.length;
+		const topHeight = Math.min(this.currentResumeBrowserTopLines().length, Math.max(0, this.terminalHeight() - footerHeight));
+		return Math.max(0, this.terminalHeight() - topHeight - footerHeight);
+	}
+
+	private currentResumeBrowserBodyDisplayRows(): number {
+		return this.currentResumeBrowserBodyBlocks().reduce(
+			(total, block) => total + countRenderedTerminalRows(block.split("\n"), this.terminalWidth()),
+			0,
+		);
+	}
+
+	private currentResumeBrowserBodyMaxScroll(): number {
+		return Math.max(0, this.currentResumeBrowserBodyDisplayRows() - this.currentResumeBrowserBodyViewportRows());
+	}
+
+	private clampResumeBrowserScrollOffset(): void {
+		this._resumeBrowserScrollOffset = Math.max(
+			0,
+			Math.min(this._resumeBrowserScrollOffset, this.currentResumeBrowserBodyMaxScroll()),
+		);
+	}
+
+	private currentResumeBrowserSelectedRowRange(): { start: number; end: number } | null {
+		if (this._resumeBrowser === null) {
+			return null;
+		}
+		const blocks = this.currentResumeBrowserBodyBlocks();
+		const selectedBlock = blocks[this._resumeBrowser.selectedIndex];
+		if (!selectedBlock) {
+			return null;
+		}
+		let start = 0;
+		for (let index = 0; index < this._resumeBrowser.selectedIndex; index += 1) {
+			start += countRenderedTerminalRows((blocks[index] ?? "").split("\n"), this.terminalWidth());
+		}
+		let end = start + Math.max(0, countRenderedTerminalRows(selectedBlock.split("\n"), this.terminalWidth()) - 1);
+		const previewBlock = blocks[this._resumeBrowser.selectedIndex + 1];
+		if (
+			this._resumeBrowser.previewExpanded &&
+			previewBlock &&
+			previewBlock.startsWith("Preview\n")
+		) {
+			end += countRenderedTerminalRows(previewBlock.split("\n"), this.terminalWidth());
+		}
+		return {
+			start,
+			end,
+		};
+	}
+
 	private currentTranscriptMaxScroll(): number {
 		return Math.max(0, this.currentTranscriptDisplayRows() - this.currentTranscriptViewportRows());
 	}
@@ -1718,6 +1928,9 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private isTranscriptMouseRow(row: number): boolean {
+		if (this._resumeBrowser !== null) {
+			return false;
+		}
 		const footerStartRow =
 			this._renderedFooterStartRow ??
 			computeFooterStartRowFromTuiCore(
@@ -1794,7 +2007,11 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderInteractiveScreenState(options: { readonly resetScrollRegion?: boolean } = {}): void {
-		this.clampTranscriptScrollOffset();
+		if (this._resumeBrowser !== null) {
+			this.clampResumeBrowserScrollOffset();
+		} else {
+			this.clampTranscriptScrollOffset();
+		}
 		if (options.resetScrollRegion) {
 			process.stdout.write(encodeResetScrollRegion());
 		}
@@ -1809,6 +2026,17 @@ class InteractiveModeHandler implements ModeHandler {
 			frame: summarizeScreenFrame(next.frame),
 			patches: summarizeFramePatches(patches),
 		});
+		if (this._resumeBrowser !== null) {
+			getActiveDebugLogger()?.debug("resume.browser.layout", "Rendered resume browser layout", {
+				headerLineCount: this.currentResumeBrowserTopLines().length,
+				bodyViewportRows: this.currentResumeBrowserBodyViewportRows(),
+				bodyDisplayRows: this.currentResumeBrowserBodyDisplayRows(),
+				scrollOffset: this._resumeBrowserScrollOffset,
+				selectedIndex: this._resumeBrowser.selectedIndex,
+				previewExpanded: this._resumeBrowser.previewExpanded,
+				footerStartRow: next.footerStartRow,
+			});
+		}
 		process.stdout.write(encodeFramePatches(patches, next.frame.width));
 		if (next.pinFooterToBottom) {
 			process.stdout.write(
@@ -1837,6 +2065,9 @@ class InteractiveModeHandler implements ModeHandler {
 	} {
 		const terminalWidth = this.terminalWidth();
 		const terminalHeight = this.terminalHeight();
+		if (this._resumeBrowser !== null) {
+			return this.buildResumeBrowserScreenFrame(terminalWidth, terminalHeight);
+		}
 		const footerUi = this.buildFooterUi();
 		const availableRows = Math.max(0, terminalHeight - footerUi.lines.length);
 		const visibleLines = computeVisibleTranscriptLines(
@@ -1873,11 +2104,73 @@ class InteractiveModeHandler implements ModeHandler {
 		return materializeInteractiveScreenFrame(composed, footerUi, terminalWidth);
 	}
 
+	private buildResumeBrowserScreenFrame(
+		terminalWidth: number,
+		terminalHeight: number,
+	): {
+		readonly frame: ScreenFrame;
+		readonly footerUi: InteractiveFooterRenderResult;
+		readonly footerStartRow: number;
+		readonly pinFooterToBottom: boolean;
+	} {
+		const footerUi = this.buildResumeBrowserFooterUi();
+		const headerLines = this.currentResumeBrowserTopLines();
+		const topHeight = Math.min(headerLines.length, Math.max(0, terminalHeight - footerUi.lines.length));
+		const topVisibleLines = headerLines.slice(0, topHeight).map((line) => fitTerminalLine(line, terminalWidth));
+		const availableBodyRows = Math.max(0, terminalHeight - topVisibleLines.length - footerUi.lines.length);
+		const totalBodyRows = this.currentResumeBrowserBodyDisplayRows();
+		const maxTopOffset = Math.max(0, totalBodyRows - availableBodyRows);
+		const topOffset = Math.max(0, Math.min(this._resumeBrowserScrollOffset, maxTopOffset));
+		const bodyVisibleLines = computeVisibleTranscriptLines(
+			this.currentResumeBrowserBodyBlocks(),
+			terminalWidth,
+			availableBodyRows,
+			Math.max(0, maxTopOffset - topOffset),
+			0,
+		).map((line) => fitTerminalLine(line, terminalWidth));
+		this._renderedTranscriptViewportLines = bodyVisibleLines.map((line) => stripAnsiWelcome(line));
+		const footerStartRow = Math.max(1, terminalHeight - footerUi.lines.length + 1);
+		const screenLines = Array.from({ length: terminalHeight }, () => "");
+		for (const [index, line] of topVisibleLines.entries()) {
+			screenLines[index] = line;
+		}
+		for (const [index, line] of bodyVisibleLines.entries()) {
+			const row = topVisibleLines.length + index;
+			if (row >= footerStartRow - 1) {
+				break;
+			}
+			screenLines[row] = line;
+		}
+		for (const [index, line] of footerUi.lines.entries()) {
+			const row = footerStartRow - 1 + index;
+			if (row >= 0 && row < screenLines.length) {
+				screenLines[row] = fitTerminalLine(line ?? "", terminalWidth);
+			}
+		}
+		return {
+			frame: createScreenFrame({
+				width: terminalWidth,
+				height: terminalHeight,
+				lines: screenLines,
+				cursor: {
+					row: footerStartRow + footerUi.cursorLineIndex,
+					column: computeFooterCursorColumnFromTuiCore(terminalWidth, footerUi.cursorColumn),
+				},
+			}),
+			footerUi: { ...footerUi, renderedWidth: terminalWidth },
+			footerStartRow,
+			pinFooterToBottom: true,
+		};
+	}
+
 	private selectionColumnsForRow(row: number): { startColumn: number; endColumn: number } | null {
 		return computeSelectionColumnsForRow(this.currentSelectionRange(), row, this.terminalWidth());
 	}
 
 	private currentSelectionRange(): TerminalSelectionRange | null {
+		if (this._resumeBrowser !== null) {
+			return null;
+		}
 		if (this._mouseSelection === null) {
 			return null;
 		}
@@ -2601,6 +2894,31 @@ function resolveResumeBrowserSelectedIndex(
 		}
 	}
 	return moveResumeBrowserSelection(fallbackIndex, 0, hits.length);
+}
+
+function summarizeResumeBrowserHit(hit: RecentSessionSearchHit | null | undefined): Record<string, unknown> | null {
+	if (!hit) {
+		return null;
+	}
+	return {
+		sessionId: hit.entry.recoveryData.sessionId.value,
+		matchSource: hit.matchSource,
+		headline: hit.headline,
+		title: hit.entry.title,
+		summarySource: hit.entry.recoveryData.metadata?.resumeSummary?.source ?? "legacy",
+		summaryVersion: hit.entry.recoveryData.metadata?.resumeSummary?.version ?? null,
+	};
+}
+
+function shouldPersistRecentSessionForEvent(event: RuntimeEvent): boolean {
+	switch (event.category) {
+		case "compaction":
+			return event.type === "compaction_completed";
+		case "session":
+			return event.type === "session_resumed";
+		default:
+			return false;
+	}
 }
 
 export function createDebouncedCallback(

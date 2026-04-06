@@ -44,7 +44,7 @@ Minimal path: configure, install, then run.
 - **Optional project-level overrides**
   - `.genesis/settings.json`
   - `.genesis/settings.local.json`
-  - `.genesis-local/pi-agent/models.json`
+  - `.genesis-local/agent/models.json`
 - **Current precedence (highest -> lowest)**
   1. CLI flags
   2. shell environment variables
@@ -111,7 +111,8 @@ Genesis follows a layered "terminal host / content semantics / runtime contracts
 - Current direction:
   - keep moving interactive rendering rules into `app-tui-core`
   - keep moving content semantics out of `app-cli` and back into `app-ui`
-  - keep `app-runtime` and `app-tools` contracts stable while reducing cross-layer fallbacks and implicit coupling
+  - keep refining `/resume` into a stable chain where `app-runtime` provides structured summaries, `app-ui` owns presentation semantics, and `app-cli` stays focused on TTY wiring
+  - keep `app-runtime` and `app-tools` contracts stable, and add `--debug` observability alongside every complex workflow
 
 ---
 
