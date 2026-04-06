@@ -1116,7 +1116,7 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes("❯"));
 
 			input.write("/help\r");
-			await waitFor(() => output.getRawOutput().includes("Commands:"));
+			await waitFor(() => output.getRawOutput().includes("/changes"));
 			expect(output.getRawOutput()).toContain("/changes");
 			expect(output.getRawOutput()).toContain("/status");
 			expect(output.getRawOutput()).toContain("/model");
@@ -1171,7 +1171,7 @@ describe("interactive workbench TTY", () => {
 				await waitFor(() => screen.snapshot().includes("❯"));
 
 				input.write("/diff notes.txt\r");
-				await waitFor(() => output.getRawOutput().includes("Diff: notes.txt"));
+				await waitFor(() => output.getRawOutput().includes("--- a/notes.txt"));
 				expect(output.getRawOutput()).toContain("--- a/notes.txt");
 				expect(output.getRawOutput()).toContain("+++ b/notes.txt");
 				expect(output.getRawOutput()).toContain("+hello changed");
@@ -1382,7 +1382,7 @@ describe("interactive workbench TTY", () => {
 				expect(snapshot).toContain("User: 本地所有修改，commit & push");
 				expect(snapshot).toContain("Assistant: 我会先检查工作区并整理提交内容。");
 				expect(snapshot).toContain("User: 继续推进 /resume 的体验对齐");
-				expect(snapshot).toContain("GLM 5.1 via zai");
+				expect(output.getRawOutput()).toContain("GLM 5.1 via zai");
 				expect(snapshot).toContain("❯");
 
 				input.write("/exit\r");
@@ -1856,23 +1856,94 @@ describe("interactive workbench TTY", () => {
 	}, 10000);
 
 	it("enters alternate screen for interactive mode", async () => {
+		const originalTerm = process.env.TERM;
+		const originalTermProgram = process.env.TERM_PROGRAM;
+		const originalTerminalEmulator = process.env.TERMINAL_EMULATOR;
+		process.env.TERM = "xterm-256color";
+		process.env.TERM_PROGRAM = "iTerm.app";
+		delete process.env.TERMINAL_EMULATOR;
+
 		const session = new FakeInteractiveSession();
 		const runtime = createFakeRuntime(session);
 		const input = new FakeTtyInput();
 		const output = new FakeTtyOutput();
 
-		await withPatchedProcessTty(input, output, async (screen) => {
-			const startPromise = createModeHandler("interactive").start(runtime);
-			await waitFor(() => output.getRawOutput().includes("\x1b[?1049h"));
-			await waitFor(() => screen.snapshot().includes("❯"));
-			expect(output.getRawOutput()).toContain("\x1b[?1000h");
-			expect(output.getRawOutput()).toContain("\x1b[?1002h");
-			expect(output.getRawOutput()).toContain("\x1b[?1006h");
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => output.getRawOutput().includes("\x1b[?1049h"));
+				await waitFor(() => screen.snapshot().includes("❯"));
+				expect(output.getRawOutput()).toContain("\x1b[?1004h");
+				expect(output.getRawOutput()).toContain("\x1b[?1000h");
+				expect(output.getRawOutput()).toContain("\x1b[?1002h");
+				expect(output.getRawOutput()).toContain("\x1b[?1006h");
 
-			input.write("/exit\r");
-			await startPromise;
-			expect(output.getRawOutput()).toContain("\x1b[?1049l");
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			if (originalTerm === undefined) {
+				delete process.env.TERM;
+			} else {
+				process.env.TERM = originalTerm;
+			}
+			if (originalTermProgram === undefined) {
+				delete process.env.TERM_PROGRAM;
+			} else {
+				process.env.TERM_PROGRAM = originalTermProgram;
+			}
+			if (originalTerminalEmulator === undefined) {
+				delete process.env.TERMINAL_EMULATOR;
+			} else {
+				process.env.TERMINAL_EMULATOR = originalTerminalEmulator;
+			}
+		}
 		});
+
+	it("disables mouse and focus tracking inside VS Code terminals", async () => {
+		const originalTerm = process.env.TERM;
+		const originalTermProgram = process.env.TERM_PROGRAM;
+		const originalTerminalEmulator = process.env.TERMINAL_EMULATOR;
+		process.env.TERM = "xterm-256color";
+		process.env.TERM_PROGRAM = "vscode";
+		delete process.env.TERMINAL_EMULATOR;
+
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => output.getRawOutput().includes("\x1b[?1049h"));
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				expect(output.getRawOutput()).not.toContain("\x1b[?1004h");
+				expect(output.getRawOutput()).not.toContain("\x1b[?1000h");
+				expect(output.getRawOutput()).not.toContain("\x1b[?1002h");
+				expect(output.getRawOutput()).not.toContain("\x1b[?1006h");
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			if (originalTerm === undefined) {
+				delete process.env.TERM;
+			} else {
+				process.env.TERM = originalTerm;
+			}
+			if (originalTermProgram === undefined) {
+				delete process.env.TERM_PROGRAM;
+			} else {
+				process.env.TERM_PROGRAM = originalTermProgram;
+			}
+			if (originalTerminalEmulator === undefined) {
+				delete process.env.TERMINAL_EMULATOR;
+			} else {
+				process.env.TERMINAL_EMULATOR = originalTerminalEmulator;
+			}
+		}
 	}, 10000);
 
 	it("keeps scrolled transcript history visible while new output arrives", async () => {

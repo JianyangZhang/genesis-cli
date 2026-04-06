@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { createInteractiveModePlan } from "@pickle-pee/tui-core";
 import { describe, expect, it, vi } from "vitest";
 import { createTtySession } from "../tty-session.js";
 
@@ -34,7 +35,20 @@ describe("createTtySession", () => {
 			written += chunk.toString("utf8");
 		});
 
-		const session = createTtySession({ input, output, restoreTermios });
+		const session = createTtySession({
+			input,
+			output,
+			restoreTermios,
+			modePlan: createInteractiveModePlan({
+				hostFamily: "native",
+				alternateScreen: true,
+				mouseTracking: true,
+				focusReporting: true,
+				bracketedPaste: false,
+				synchronizedOutput: false,
+				extendedKeys: false,
+			}),
+		});
 		session.enter();
 		session.restore();
 
@@ -57,7 +71,20 @@ describe("createTtySession", () => {
 		const input = createTtyInput();
 		const output = createTtyOutput();
 		const restoreTermios = vi.fn();
-		const session = createTtySession({ input, output, restoreTermios });
+		const session = createTtySession({
+			input,
+			output,
+			restoreTermios,
+			modePlan: createInteractiveModePlan({
+				hostFamily: "native",
+				alternateScreen: true,
+				mouseTracking: true,
+				focusReporting: true,
+				bracketedPaste: false,
+				synchronizedOutput: false,
+				extendedKeys: false,
+			}),
+		});
 
 		session.enter();
 		session.restore();
@@ -73,7 +100,20 @@ describe("createTtySession", () => {
 		output.on("data", (chunk) => {
 			written += chunk.toString("utf8");
 		});
-		const session = createTtySession({ input, output, restoreTermios: vi.fn() });
+		const session = createTtySession({
+			input,
+			output,
+			restoreTermios: vi.fn(),
+			modePlan: createInteractiveModePlan({
+				hostFamily: "native",
+				alternateScreen: true,
+				mouseTracking: true,
+				focusReporting: true,
+				bracketedPaste: false,
+				synchronizedOutput: false,
+				extendedKeys: false,
+			}),
+		});
 
 		session.enter();
 		session.refresh();
@@ -93,8 +133,15 @@ describe("createTtySession", () => {
 			input,
 			output,
 			restoreTermios: vi.fn(),
-			useAlternateScreen: false,
-			enableMouseTracking: false,
+			modePlan: createInteractiveModePlan({
+				hostFamily: "native",
+				alternateScreen: false,
+				mouseTracking: false,
+				focusReporting: true,
+				bracketedPaste: false,
+				synchronizedOutput: false,
+				extendedKeys: false,
+			}),
 		});
 
 		session.enter();
@@ -119,8 +166,15 @@ describe("createTtySession", () => {
 			input,
 			output,
 			restoreTermios: vi.fn(),
-			useAlternateScreen: false,
-			enableMouseTracking: false,
+			modePlan: createInteractiveModePlan({
+				hostFamily: "native",
+				alternateScreen: false,
+				mouseTracking: false,
+				focusReporting: true,
+				bracketedPaste: false,
+				synchronizedOutput: false,
+				extendedKeys: false,
+			}),
 		});
 
 		session.enter();
@@ -132,5 +186,35 @@ describe("createTtySession", () => {
 		expect(written).not.toContain("\x1b[?1002h");
 		expect(written).not.toContain("\x1b[?1006h");
 		expect(written.match(new RegExp(`${String.fromCharCode(27)}\\[\\?1004h`, "g"))?.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("can disable focus reporting when the host terminal misbehaves", () => {
+		const input = createTtyInput();
+		const output = createTtyOutput();
+		let written = "";
+		output.on("data", (chunk) => {
+			written += chunk.toString("utf8");
+		});
+		const session = createTtySession({
+			input,
+			output,
+			restoreTermios: vi.fn(),
+			modePlan: createInteractiveModePlan({
+				hostFamily: "vscode-xtermjs",
+				alternateScreen: true,
+				mouseTracking: true,
+				focusReporting: false,
+				bracketedPaste: false,
+				synchronizedOutput: false,
+				extendedKeys: false,
+			}),
+		});
+
+		session.enter();
+		session.restore();
+
+		expect(written).not.toContain("\x1b[?1004h");
+		expect(written).not.toContain("\x1b[?1004l");
+		expect(written).toContain("\x1b[?1000h");
 	});
 });

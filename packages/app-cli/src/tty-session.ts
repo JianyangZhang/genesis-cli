@@ -1,14 +1,8 @@
 import { spawnSync } from "node:child_process";
 import {
-	ansiDisableFocusReporting,
-	ansiDisableMouseTracking,
-	ansiEnableFocusReporting,
-	ansiEnableMouseTracking,
-	ansiEnterAlternateScreen,
-	ansiExitAlternateScreen,
-	ansiHideCursor,
-	ansiShowCursor,
-} from "@pickle-pee/ui";
+	createInteractiveModePlan,
+	type TerminalModePlan,
+} from "@pickle-pee/tui-core";
 
 type TtyInput = NodeJS.ReadableStream & {
 	isTTY?: boolean;
@@ -26,8 +20,7 @@ interface TtySessionOptions {
 	readonly output?: TtyOutput;
 	readonly restoreTermios?: () => void;
 	readonly onResume?: () => void;
-	readonly useAlternateScreen?: boolean;
-	readonly enableMouseTracking?: boolean;
+	readonly modePlan?: TerminalModePlan;
 }
 
 export interface TtySession {
@@ -41,8 +34,17 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 	const output = options.output ?? (process.stdout as TtyOutput);
 	const restoreTermios = options.restoreTermios ?? defaultRestoreTermios;
 	const onResume = options.onResume;
-	const useAlternateScreen = options.useAlternateScreen ?? true;
-	const enableMouseTracking = options.enableMouseTracking ?? true;
+	const modePlan =
+		options.modePlan ??
+		createInteractiveModePlan({
+			hostFamily: "native",
+			alternateScreen: true,
+			mouseTracking: true,
+			focusReporting: true,
+			bracketedPaste: false,
+			synchronizedOutput: false,
+			extendedKeys: false,
+		});
 	let active = false;
 	let restored = false;
 
@@ -55,15 +57,10 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 		signalHandlers.clear();
 	};
 
-	const writeActiveModes = (reenterAlternateScreen: boolean): void => {
-		if (useAlternateScreen && reenterAlternateScreen) {
-			output.write(ansiEnterAlternateScreen());
+	const writeModeSequence = (sequence: string): void => {
+		if (sequence.length > 0) {
+			output.write(sequence);
 		}
-		output.write(ansiEnableFocusReporting());
-		if (enableMouseTracking) {
-			output.write(ansiEnableMouseTracking());
-		}
-		output.write(ansiHideCursor());
 	};
 
 	return {
@@ -72,10 +69,7 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 				return;
 			}
 			active = true;
-			if (useAlternateScreen) {
-				output.write(ansiEnterAlternateScreen());
-			}
-			writeActiveModes(false);
+			writeModeSequence(modePlan.enter);
 
 			for (const signal of ["SIGINT", "SIGTERM", "SIGCONT"] as const) {
 				const listener = () => {
@@ -106,7 +100,7 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 			try {
 				input.setRawMode?.(true);
 			} catch {}
-			writeActiveModes(reenterAlternateScreen);
+			writeModeSequence(reenterAlternateScreen ? modePlan.reenter : modePlan.refresh);
 		},
 
 		restore(): void {
@@ -123,14 +117,7 @@ export function createTtySession(options: TtySessionOptions = {}): TtySession {
 				input.pause?.();
 			} catch {}
 			try {
-				output.write(ansiShowCursor());
-				output.write(ansiDisableFocusReporting());
-				if (enableMouseTracking) {
-					output.write(ansiDisableMouseTracking());
-				}
-				if (useAlternateScreen) {
-					output.write(ansiExitAlternateScreen());
-				}
+				writeModeSequence(modePlan.exit);
 			} catch {}
 			try {
 				restoreTermios();

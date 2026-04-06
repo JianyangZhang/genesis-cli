@@ -5,7 +5,7 @@
 	"description": "Genesis CLI, a next-generation coding CLI built on pi-mono",
 	"workspaces": ["packages/*"],
 	"scripts": {
-		"build": "npm run build -w @pickle-pee/pi-ai && npm run build -w @pickle-pee/kernel && npm run build -w @pickle-pee/tools && npm run build -w @pickle-pee/runtime && npm run build -w @pickle-pee/ui && npm run build -w @pickle-pee/config && npm run build -w @pickle-pee/extensions && npm run build -w @pickle-pee/evaluation && npm run build -w @pickle-pee/genesis-cli",
+		"build": "npm run build -w @pickle-pee/pi-ai && npm run build -w @pickle-pee/kernel && npm run build -w @pickle-pee/tools && npm run build -w @pickle-pee/runtime && npm run build -w @pickle-pee/tui-core && npm run build -w @pickle-pee/ui && npm run build -w @pickle-pee/config && npm run build -w @pickle-pee/extensions && npm run build -w @pickle-pee/evaluation && npm run build -w @pickle-pee/genesis-cli",
 		"chat": "node ./packages/app-cli/dist/main.js",
 		"chat:live": "node --env-file=.env.local ./packages/app-cli/dist/main.js",
 		"check": "npm run check:lint && npm run check:format && npm run check:types",

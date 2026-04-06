@@ -13,6 +13,7 @@
 			"@pickle-pee/kernel": ["packages/kernel/src/index.ts"],
 			"@pickle-pee/pi-ai": ["packages/pi-ai/src/index.ts"],
 			"@pickle-pee/runtime": ["packages/app-runtime/src/index.ts"],
+			"@pickle-pee/tui-core": ["packages/app-tui-core/src/index.ts"],
 			"@pickle-pee/tools": ["packages/app-tools/src/index.ts"],
 			"@pickle-pee/ui": ["packages/app-ui/src/index.ts"]
 		},

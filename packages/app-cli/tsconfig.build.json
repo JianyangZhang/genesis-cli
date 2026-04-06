@@ -5,6 +5,8 @@
 		"paths": {
 			"@pickle-pee/config": ["../app-config/dist/index.d.ts"],
 			"@pickle-pee/runtime": ["../app-runtime/dist/index.d.ts"],
+			"@pickle-pee/tui-core": ["../app-tui-core/dist/index"],
+			"@pickle-pee/tui-core/*": ["../app-tui-core/dist/*"],
 			"@pickle-pee/ui": ["../app-ui/dist/index.d.ts"]
 		}
 	},

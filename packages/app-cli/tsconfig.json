@@ -8,6 +8,7 @@
 	"references": [
 		{ "path": "../app-config" },
 		{ "path": "../app-runtime" },
+		{ "path": "../app-tui-core" },
 		{ "path": "../app-ui" }
 	]
 }

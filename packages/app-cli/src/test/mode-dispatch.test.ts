@@ -3,6 +3,7 @@ import {
 	acceptFirstSlashSuggestion,
 	appendAssistantTranscriptBlock,
 	appendTranscriptBlockWithSpacer,
+	buildInteractiveFooterLeadingLines,
 	buildWelcomeLines,
 	computeFooterCursorColumn,
 	computeFooterCursorRowsFromEnd,
@@ -62,6 +63,24 @@ describe("interactive transcript formatting", () => {
 
 	it("formats a full-width separator for the input area", () => {
 		expect(formatInteractiveInputSeparator(5)).toContain("─────");
+	});
+
+	it("builds footer leading lines from turn notices, usage, detail panel, and queued inputs", () => {
+		const lines = buildInteractiveFooterLeadingLines({
+			terminalWidth: 80,
+			turnNotice: null,
+			lastTurnUsage: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0, totalTokens: 1500 },
+			sessionUsage: { input: 2400, output: 600, cacheRead: 0, cacheWrite: 0, totalTokens: 3000 },
+			detailPanelSummary: "2 files changed",
+			detailPanelExpanded: true,
+			detailPanelLines: ["- file-a.ts", "- file-b.ts"],
+			queuedInputs: ["follow-up question"],
+		});
+
+		expect(lines.some((line) => line.includes("Last turn"))).toBe(true);
+		expect(lines.some((line) => line.includes("Session"))).toBe(true);
+		expect(lines.some((line) => line.includes("2 files changed"))).toBe(true);
+		expect(lines.some((line) => line.includes("Queued"))).toBe(true);
 	});
 
 	it("formats the footer from a unified composer state", () => {

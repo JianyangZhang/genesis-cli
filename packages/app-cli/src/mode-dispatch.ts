@@ -18,10 +18,42 @@ import type {
 	SessionClosedEvent,
 	SessionFacade,
 } from "@pickle-pee/runtime";
+import {
+	composePromptBlock,
+	composeSectionBlock,
+	composeScreenWithFooter,
+	computeEphemeralRows,
+	computeFooterCursorColumn as computeFooterCursorColumnFromTuiCore,
+	computeFooterCursorRowsFromEnd as computeFooterCursorRowsFromEndFromTuiCore,
+	computeFooterCursorRowsUp as computeFooterCursorRowsUpFromTuiCore,
+	computePromptCursorColumn as computePromptCursorColumnFromTuiCore,
+	computeSelectionColumnsForRow,
+	computeFooterStartRow as computeFooterStartRowFromTuiCore,
+	computePromptCursorRowsUp as computePromptCursorRowsUpFromTuiCore,
+	computeTranscriptDisplayRows as computeTranscriptDisplayRowsFromTuiCore,
+	computeVisibleViewportLines,
+	countRenderedTerminalRows as countRenderedTerminalRowsFromTuiCore,
+	createInteractiveModePlan,
+	detectTerminalCapabilities,
+	diffScreenFrames,
+	encodeFramePatches,
+	encodeResetScrollRegion,
+	encodeSetScrollRegion,
+	extractPlainTextSelection as extractPlainTextSelectionFromTuiCore,
+	fitTerminalLine as fitTerminalLineFromTuiCore,
+	materializeComposerBlock,
+	materializeTextBlock,
+	stripAnsiControlSequences,
+	renderSelectedPlainLine,
+	truncatePlainText as truncatePlainTextFromTuiCore,
+	type ComposedScreen,
+	type RenderedComposerBlock,
+	type ScreenFrame,
+	type TerminalSelectionRange,
+	wrapTranscriptContent as wrapTranscriptContentFromTuiCore,
+} from "@pickle-pee/tui-core";
 import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
 import {
-	ansiClearLine,
-	ansiCursorHome,
 	ansiShowCursor,
 	createBuiltinCommands,
 	createSlashCommandRegistry,
@@ -121,6 +153,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _pendingPermissionSelection = 0;
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
 	private _renderedFooterStartRow: number | null = null;
+	private _lastScreenFrame: ScreenFrame | null = null;
 	private _welcomeLines: readonly string[] = [];
 	private _transcriptScrollOffset = 0;
 	private _renderedTranscriptViewportLines: readonly string[] = [];
@@ -164,12 +197,22 @@ class InteractiveModeHandler implements ModeHandler {
 		let sessionTitle: string | undefined;
 		let exitRequested = false;
 		let inputLoop: InputLoop | null = null;
+		const terminalCapabilities = detectTerminalCapabilities({
+			term: process.env.TERM,
+			termProgram: process.env.TERM_PROGRAM,
+			terminalEmulator: process.env.TERMINAL_EMULATOR,
+			tmux: process.env.TMUX,
+		});
+		const terminalModePlan = createInteractiveModePlan({
+			...terminalCapabilities,
+			// Old input-loop path does not yet parse bracketed paste envelopes safely.
+			bracketedPaste: false,
+		});
 		const ttySession = createTtySession({
 			onResume: () => {
 				this.rerenderInteractiveRegions();
 			},
-			useAlternateScreen: true,
-			enableMouseTracking: true,
+			modePlan: terminalModePlan,
 		});
 		const debouncedResizeRedraw = createDebouncedCallback(() => {
 			this.rerenderInteractiveRegions();
@@ -218,6 +261,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._pendingPermissionSelection = 0;
 			this._renderedFooterUi = null;
 			this._renderedFooterStartRow = null;
+			this._lastScreenFrame = null;
 			this._transcriptScrollOffset = 0;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
@@ -785,12 +829,6 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				this.handleSpecialKey(key);
 			},
-			onTerminalEvent: (event) => {
-				if (event === "focusin") {
-					ttySession.refresh();
-					this.rerenderInteractiveRegions();
-				}
-			},
 			onMouse: (event) => {
 				this.handleMouseEvent(event);
 			},
@@ -888,7 +926,7 @@ class InteractiveModeHandler implements ModeHandler {
 			detachSessionStateSubscription(detachSessionStateListener);
 			inputLoop.close();
 			this._inputLoop = null;
-			process.stdout.write(ansiResetScrollRegion());
+			process.stdout.write(encodeResetScrollRegion());
 			ttySession.restore();
 			sessionRef.current.events.removeAllListeners();
 			await sessionRef.current.close();
@@ -1577,7 +1615,7 @@ class InteractiveModeHandler implements ModeHandler {
 		const footerUi = this.buildFooterUi();
 		const transcriptTopRow = 1;
 		const transcriptBottomRow =
-			computeFooterStartRow(0, this.terminalHeight(), footerUi.lines.length, this.currentTranscriptDisplayRows()) -
+			computeFooterStartRowFromTuiCore(this.terminalHeight(), footerUi.lines.length, this.currentTranscriptDisplayRows()) -
 			1;
 		return Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
 	}
@@ -1596,8 +1634,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private isTranscriptMouseRow(row: number): boolean {
 		const footerStartRow =
 			this._renderedFooterStartRow ??
-			computeFooterStartRow(
-				0,
+			computeFooterStartRowFromTuiCore(
 				this.terminalHeight(),
 				this.currentFooterHeight(),
 				this.currentTranscriptDisplayRows(),
@@ -1636,49 +1673,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderFooterRegion(): void {
-		const ui = this.buildFooterUi();
-		const footerHeight = ui.lines.length;
-		const startRow = computeFooterStartRow(
-			0,
-			this.terminalHeight(),
-			footerHeight,
-			this.currentTranscriptDisplayRows(),
-		);
-		const oldStartRow = this._renderedFooterStartRow;
-		const oldHeight = this._renderedFooterUi?.lines.length ?? 0;
-		const footerMoved = oldStartRow !== null && oldStartRow !== startRow;
-		if (oldStartRow !== null && oldStartRow !== startRow) {
-			for (let index = 0; index < oldHeight; index += 1) {
-				this.writeAbsoluteTerminalLine(oldStartRow + index, "");
-			}
-		}
-		if (startRow === Math.max(1, this.terminalHeight() - footerHeight + 1)) {
-			this.applyTranscriptViewport(footerHeight);
-		}
-		for (let index = 0; index < footerHeight; index += 1) {
-			const row = startRow + index;
-			const line = fitTerminalLine(ui.lines[index] ?? "", this.terminalWidth());
-			this.writeAbsoluteTerminalLine(row, line);
-		}
-		for (let index = footerHeight; index < oldHeight; index += 1) {
-			this.writeAbsoluteTerminalLine(startRow + index, "");
-		}
-		process.stdout.write(
-			ansiCursorTo(
-				startRow + ui.cursorLineIndex,
-				computeFooterCursorColumn(this.terminalWidth(), ui.cursorColumn) + 1,
-			),
-		);
-		process.stdout.write(ansiShowCursor());
-		this._renderedFooterUi = { ...ui, renderedWidth: this.terminalWidth() };
-		this._renderedFooterStartRow = startRow;
-		if (footerMoved) {
-			this.renderTranscriptViewport();
-		}
-	}
-
-	private applyTranscriptViewport(footerHeight: number): void {
-		process.stdout.write(ansiSetScrollRegion(1, this.transcriptBottomRow(footerHeight)));
+		this.renderInteractiveScreenState();
 	}
 
 	private appendTranscriptLines(lines: readonly string[]): void {
@@ -1686,20 +1681,6 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this.fullRedrawInteractiveScreen();
-	}
-
-	private writeAbsoluteTerminalLine(row: number, line: string): void {
-		process.stdout.write(ansiDisableAutoWrap());
-		process.stdout.write(ansiCursorTo(row, 1));
-		process.stdout.write(ansiClearLine());
-		process.stdout.write(line);
-		process.stdout.write(ansiEnableAutoWrap());
-	}
-
-	private clearVisibleScreenRows(): void {
-		for (let row = 1; row <= this.terminalHeight(); row += 1) {
-			this.writeAbsoluteTerminalLine(row, "");
-		}
 	}
 
 	private rememberTranscriptBlock(text: string, newline: boolean): void {
@@ -1719,102 +1700,91 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private fullRedrawInteractiveScreen(): void {
-		this.clampTranscriptScrollOffset();
-		process.stdout.write(ansiResetScrollRegion());
-		process.stdout.write(ansiCursorHome());
-		this.clearVisibleScreenRows();
-		this._renderedFooterUi = null;
-		this._renderedFooterStartRow = null;
-		this.renderTranscriptViewport();
-		this.renderFooterRegion();
+		this.renderInteractiveScreenState({ resetScrollRegion: true });
 	}
 
 	private renderTranscriptViewport(): void {
+		this.renderInteractiveScreenState();
+	}
+
+	private renderInteractiveScreenState(options: { readonly resetScrollRegion?: boolean } = {}): void {
+		this.clampTranscriptScrollOffset();
+		if (options.resetScrollRegion) {
+			process.stdout.write(encodeResetScrollRegion());
+		}
+		const next = this.buildInteractiveScreenFrame();
+		process.stdout.write(encodeFramePatches(diffScreenFrames(this._lastScreenFrame, next.frame), next.frame.width));
+		if (next.pinFooterToBottom) {
+			process.stdout.write(
+				encodeSetScrollRegion({
+					top: 1,
+					bottom: this.transcriptBottomRow(next.footerUi.lines.length),
+				}),
+			);
+		} else {
+			process.stdout.write(encodeResetScrollRegion());
+		}
+		process.stdout.write(ansiShowCursor());
+		this._renderedFooterUi = next.footerUi;
+		this._renderedFooterStartRow = next.footerStartRow;
+		this._lastScreenFrame = next.frame;
+	}
+
+	private buildInteractiveScreenFrame(): {
+		readonly frame: ScreenFrame;
+		readonly footerUi: InteractiveFooterRenderResult;
+		readonly footerStartRow: number;
+		readonly pinFooterToBottom: boolean;
+	} {
+		const terminalWidth = this.terminalWidth();
+		const terminalHeight = this.terminalHeight();
 		const footerUi = this.buildFooterUi();
-		const transcriptTopRow = 1;
-		const transcriptBottomRow =
-			computeFooterStartRow(0, this.terminalHeight(), footerUi.lines.length, this.currentTranscriptDisplayRows()) -
-			1;
-		const availableRows = Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
+		const availableRows = Math.max(0, terminalHeight - footerUi.lines.length);
 		const visibleLines = computeVisibleTranscriptLines(
 			this.currentRenderedTranscriptBlocks(),
-			this.terminalWidth(),
+			terminalWidth,
 			availableRows,
 			this._transcriptScrollOffset,
 			this.currentWelcomeLineCount(),
 		);
 		this._renderedTranscriptViewportLines = visibleLines.map((line) => stripAnsiWelcome(line));
-		for (let row = transcriptTopRow; row <= transcriptBottomRow; row += 1) {
-			const index = row - transcriptTopRow;
-			const visibleLine = visibleLines[index] ?? "";
+
+		const bodyLines = visibleLines.map((visibleLine, index) => {
 			const plainLine = this._renderedTranscriptViewportLines[index] ?? "";
+			const row = index + 1;
 			const selectionColumns = this.selectionColumnsForRow(row);
-			const renderedLine =
-				selectionColumns === null
-					? fitTerminalLine(visibleLine, this.terminalWidth())
-					: renderSelectedPlainTranscriptLine(
-							plainLine,
-							selectionColumns.startColumn,
-							selectionColumns.endColumn,
-							this.terminalWidth(),
-						);
-			this.writeAbsoluteTerminalLine(row, renderedLine);
-		}
+			return selectionColumns === null
+				? fitTerminalLine(visibleLine, terminalWidth)
+				: renderSelectedPlainLine(plainLine, selectionColumns.startColumn, selectionColumns.endColumn, terminalWidth);
+		});
+
+		const composed = composeScreenWithFooter({
+			width: terminalWidth,
+			height: terminalHeight,
+			bodyLines,
+			footer: {
+				lines: footerUi.lines.map((line: string) => fitTerminalLine(line ?? "", terminalWidth)),
+				cursorLineIndex: footerUi.cursorLineIndex,
+				cursorColumn: footerUi.cursorColumn,
+			},
+		});
+
+		return materializeInteractiveScreenFrame(composed, footerUi, terminalWidth);
 	}
 
 	private selectionColumnsForRow(row: number): { startColumn: number; endColumn: number } | null {
+		return computeSelectionColumnsForRow(this.currentSelectionRange(), row, this.terminalWidth());
+	}
+
+	private currentSelectionRange(): TerminalSelectionRange | null {
 		if (this._mouseSelection === null) {
 			return null;
 		}
-		const start =
-			compareTerminalSelectionPoints(
-				this._mouseSelection.anchorRow,
-				this._mouseSelection.anchorColumn,
-				this._mouseSelection.focusRow,
-				this._mouseSelection.focusColumn,
-			) <= 0
-				? {
-						row: this._mouseSelection.anchorRow,
-						column: this._mouseSelection.anchorColumn,
-					}
-				: {
-						row: this._mouseSelection.focusRow,
-						column: this._mouseSelection.focusColumn,
-					};
-		const end =
-			start.row === this._mouseSelection.anchorRow && start.column === this._mouseSelection.anchorColumn
-				? {
-						row: this._mouseSelection.focusRow,
-						column: this._mouseSelection.focusColumn,
-					}
-				: {
-						row: this._mouseSelection.anchorRow,
-						column: this._mouseSelection.anchorColumn,
-					};
-		if (row < start.row || row > end.row) {
-			return null;
-		}
-		if (start.row === end.row) {
-			return {
-				startColumn: Math.min(start.column, end.column),
-				endColumn: Math.max(start.column, end.column),
-			};
-		}
-		if (row === start.row) {
-			return {
-				startColumn: start.column,
-				endColumn: this.terminalWidth() + 1,
-			};
-		}
-		if (row === end.row) {
-			return {
-				startColumn: 1,
-				endColumn: end.column,
-			};
-		}
 		return {
-			startColumn: 1,
-			endColumn: this.terminalWidth() + 1,
+			startRow: this._mouseSelection.anchorRow,
+			startColumn: this._mouseSelection.anchorColumn,
+			endRow: this._mouseSelection.focusRow,
+			endColumn: this._mouseSelection.focusColumn,
 		};
 	}
 
@@ -2023,7 +1993,7 @@ function detachSessionStateSubscription(unsubscribe: (() => void) | null): void 
 }
 
 function stripAnsiWelcome(text: string): string {
-	return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g"), "");
+	return stripAnsiControlSequences(text);
 }
 
 function applyWelcomeBorderColor(text: string): string {
@@ -2114,7 +2084,7 @@ export function formatWelcomeCenteredLine(contentWidth: number, text: string): s
 }
 
 export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
-	return measureTerminalDisplayWidth(prompt) + measureTerminalDisplayWidth(buffer.slice(0, cursor));
+	return computePromptCursorColumnFromTuiCore(prompt, buffer, cursor);
 }
 
 export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boolean {
@@ -2156,17 +2126,81 @@ export function formatInteractivePermissionBlock(
 	},
 	selectedIndex = 0,
 ): string {
-	const lines = formatInteractivePermissionBodyLines(details, selectedIndex);
-	lines.splice(1, 0, "────────────────────────────────────────");
-	return lines.join("\n");
+	const bodyLines = formatInteractivePermissionBodyLines(details, selectedIndex);
+	return materializeTextBlock(
+		composeSectionBlock({
+			leadingLines: bodyLines.slice(0, 1),
+			separator: "────────────────────────────────────────",
+			bodyLines: bodyLines.slice(1),
+		}),
+	).block;
 }
 
-export interface InteractiveFooterRenderResult {
-	readonly block: string;
-	readonly lines: readonly string[];
-	readonly cursorLineIndex: number;
-	readonly cursorColumn: number;
-	readonly renderedWidth: number;
+export type InteractiveFooterRenderResult = RenderedComposerBlock;
+
+export function buildInteractiveFooterLeadingLines(state: {
+	readonly terminalWidth: number;
+	readonly turnNotice: "thinking" | "responding" | "tool" | "compacting" | null;
+	readonly turnNoticeAnimationFrame?: number;
+	readonly elapsedMs?: number | null;
+	readonly currentTurnUsage?: UsageSnapshot | null;
+	readonly lastTurnUsage?: UsageSnapshot | null;
+	readonly sessionUsage?: UsageSnapshot | null;
+	readonly activeToolLabel?: string | null;
+	readonly showPendingOutputIndicator?: boolean;
+	readonly detailPanelExpanded?: boolean;
+	readonly detailPanelSummary?: string | null;
+	readonly detailPanelLines?: readonly string[];
+	readonly queuedInputs?: readonly string[];
+}): readonly string[] {
+	const leadingLines: string[] = [];
+	if (state.turnNotice !== null) {
+		leadingLines.push(
+			formatTurnNotice(state.turnNotice, {
+				animationFrame: state.turnNoticeAnimationFrame ?? 0,
+				elapsedMs: state.elapsedMs ?? null,
+				usage: state.currentTurnUsage ?? null,
+				showPendingOutputIndicator: state.showPendingOutputIndicator ?? false,
+				queuedCount: state.queuedInputs?.length ?? 0,
+				toolLabel: state.activeToolLabel ?? null,
+			}),
+		);
+	} else {
+		if (hasUsageSnapshot(state.lastTurnUsage ?? null)) {
+			leadingLines.push(formatUsageSummaryLine("Last turn", state.lastTurnUsage!));
+		}
+		if (hasUsageSnapshot(state.sessionUsage ?? null)) {
+			leadingLines.push(formatUsageSummaryLine("Session", state.sessionUsage!));
+		}
+	}
+	if ((state.detailPanelSummary?.length ?? 0) > 0) {
+		leadingLines.push(`${INTERACTIVE_THEME.muted}↳ ${state.detailPanelSummary}${INTERACTIVE_THEME.reset}`);
+		if (state.detailPanelExpanded) {
+			leadingLines.push(...(state.detailPanelLines ?? []));
+		}
+	}
+	if ((state.queuedInputs?.length ?? 0) > 0) {
+		leadingLines.push(...formatQueuedPromptPreviewLines(state.queuedInputs ?? [], state.terminalWidth));
+	}
+	return leadingLines;
+}
+
+function materializeInteractiveScreenFrame(
+	composed: ComposedScreen,
+	footerUi: InteractiveFooterRenderResult,
+	terminalWidth: number,
+): {
+	readonly frame: ScreenFrame;
+	readonly footerUi: InteractiveFooterRenderResult;
+	readonly footerStartRow: number;
+	readonly pinFooterToBottom: boolean;
+} {
+	return {
+		frame: composed.frame,
+		footerUi: { ...footerUi, renderedWidth: terminalWidth },
+		footerStartRow: composed.footerStartRow,
+		pinFooterToBottom: composed.pinFooterToBottom,
+	};
 }
 
 export interface InteractiveStreamingRenderResult {
@@ -2205,62 +2239,35 @@ export function formatInteractiveFooter(state: {
 	} | null;
 }): InteractiveFooterRenderResult {
 	const separator = formatInteractiveInputSeparator(computeInteractiveFooterSeparatorWidth(state.terminalWidth));
-	const lines: string[] = [];
-	if (state.turnNotice !== null) {
-		lines.push(
-			formatTurnNotice(state.turnNotice, {
-				animationFrame: state.turnNoticeAnimationFrame ?? 0,
-				elapsedMs: state.elapsedMs ?? null,
-				usage: state.currentTurnUsage ?? null,
-				showPendingOutputIndicator: state.showPendingOutputIndicator ?? false,
-				queuedCount: state.queuedInputs?.length ?? 0,
-				toolLabel: state.activeToolLabel ?? null,
-			}),
-		);
-	} else {
-		if (hasUsageSnapshot(state.lastTurnUsage ?? null)) {
-			lines.push(formatUsageSummaryLine("Last turn", state.lastTurnUsage!));
-		}
-		if (hasUsageSnapshot(state.sessionUsage ?? null)) {
-			lines.push(formatUsageSummaryLine("Session", state.sessionUsage!));
-		}
-	}
-	if ((state.detailPanelSummary?.length ?? 0) > 0) {
-		lines.push(`${INTERACTIVE_THEME.muted}↳ ${state.detailPanelSummary}${INTERACTIVE_THEME.reset}`);
-		if (state.detailPanelExpanded) {
-			lines.push(...(state.detailPanelLines ?? []));
-		}
-	}
-	if ((state.queuedInputs?.length ?? 0) > 0) {
-		lines.push(...formatQueuedPromptPreviewLines(state.queuedInputs ?? [], state.terminalWidth));
-	}
-	lines.push(separator);
+	const leadingLines = buildInteractiveFooterLeadingLines(state);
 	if (state.permission !== null) {
-		lines.push(...formatInteractivePermissionBodyLines(state.permission.details, state.permission.selectedIndex));
 		const prompt = "choice [Enter/1/2/3]> ";
-		lines.push(`${prompt}${state.buffer}`);
-		lines.push(separator);
-		return {
-			block: lines.join("\n"),
-			lines,
-			cursorLineIndex: lines.length - 2,
-			cursorColumn: computePromptCursorColumn(prompt, state.buffer, state.cursor),
-			renderedWidth: Math.max(1, state.terminalWidth),
-		};
+		const layout = composePromptBlock({
+			leadingLines,
+			separator,
+			bodyLines: formatInteractivePermissionBodyLines(
+				state.permission.details,
+				state.permission.selectedIndex,
+			),
+			prompt,
+			buffer: state.buffer,
+			cursor: state.cursor,
+		});
+		return materializeComposerBlock(layout, state.terminalWidth);
 	}
 	const hint = formatSlashSuggestionHint(
 		state.suggestions,
 		state.terminalWidth - computePromptCursorColumn(state.prompt, state.buffer, state.buffer.length),
 	);
-	lines.push(`${state.prompt}${formatInteractivePromptBuffer(state.buffer, false)}${hint}`);
-	lines.push(separator);
-	return {
-		block: lines.join("\n"),
-		lines,
-		cursorLineIndex: lines.length - 2,
-		cursorColumn: computePromptCursorColumn(state.prompt, state.buffer, state.cursor),
-		renderedWidth: Math.max(1, state.terminalWidth),
-	};
+	const layout = composePromptBlock({
+		leadingLines,
+		separator,
+		prompt: state.prompt,
+		buffer: formatInteractivePromptBuffer(state.buffer, false),
+		cursor: state.cursor,
+		hint,
+	});
+	return materializeComposerBlock(layout, state.terminalWidth);
 }
 
 export function movePermissionSelection(current: number, direction: -1 | 1): number {
@@ -2459,18 +2466,6 @@ function transcriptScrollDeltaForKey(
 		default:
 			return 0;
 	}
-}
-
-function compareTerminalSelectionPoints(
-	leftRow: number,
-	leftColumn: number,
-	rightRow: number,
-	rightColumn: number,
-): number {
-	if (leftRow !== rightRow) {
-		return leftRow - rightRow;
-	}
-	return leftColumn - rightColumn;
 }
 
 function resolveRecentSessionDirectSelection(
@@ -2679,26 +2674,26 @@ export function computeInteractiveFooterSeparatorWidth(terminalWidth: number): n
 }
 
 export function computeFooterCursorColumn(width: number, cursorColumn: number): number {
-	const safeWidth = Math.max(1, width);
-	return Math.max(0, cursorColumn % safeWidth);
+	return computeFooterCursorColumnFromTuiCore(width, cursorColumn) - 1;
+}
+
+export function computeFooterStartRow(
+	welcomeLineCount: number,
+	terminalHeight: number,
+	footerHeight: number,
+	transcriptRows: number,
+): number {
+	const naturalStartRow = welcomeLineCount + 1 + Math.max(0, transcriptRows);
+	const bottomAnchoredStartRow = Math.max(1, terminalHeight - footerHeight + 1);
+	return Math.min(naturalStartRow, bottomAnchoredStartRow);
 }
 
 export function countRenderedTerminalRows(lines: readonly string[], width: number): number {
-	const safeWidth = Math.max(1, width);
-	let total = 0;
-	for (const line of lines) {
-		const plain = stripAnsiWelcome(line);
-		const visibleWidth = Math.max(1, measureTerminalDisplayWidth(plain));
-		total += Math.max(1, Math.ceil(visibleWidth / safeWidth));
-	}
-	return total;
+	return countRenderedTerminalRowsFromTuiCore(lines, width);
 }
 
 export function computePromptCursorRowsUp(lines: readonly string[], width: number, cursorColumn: number): number {
-	const safeWidth = Math.max(1, width);
-	const rowsBeforePrompt = countRenderedTerminalRows(lines.slice(0, 1), safeWidth);
-	const promptRowOffset = Math.floor(Math.max(0, cursorColumn) / safeWidth);
-	return rowsBeforePrompt + promptRowOffset;
+	return computePromptCursorRowsUpFromTuiCore(lines, width, cursorColumn);
 }
 
 export function computeFooterCursorRowsUp(
@@ -2707,10 +2702,7 @@ export function computeFooterCursorRowsUp(
 	cursorLineIndex: number,
 	cursorColumn: number,
 ): number {
-	const safeWidth = Math.max(1, width);
-	const rowsBeforeCursor = countRenderedTerminalRows(lines.slice(0, cursorLineIndex), safeWidth);
-	const cursorRowOffset = Math.floor(Math.max(0, cursorColumn) / safeWidth);
-	return rowsBeforeCursor + cursorRowOffset;
+	return computeFooterCursorRowsUpFromTuiCore(lines, width, cursorLineIndex, cursorColumn);
 }
 
 export function computeFooterCursorRowsFromEnd(
@@ -2719,66 +2711,22 @@ export function computeFooterCursorRowsFromEnd(
 	cursorLineIndex: number,
 	cursorColumn: number,
 ): number {
-	const totalRows = countRenderedTerminalRows(lines, width);
-	const rowsUp = computeFooterCursorRowsUp(lines, width, cursorLineIndex, cursorColumn);
-	return Math.max(0, totalRows - rowsUp - 1);
+	return computeFooterCursorRowsFromEndFromTuiCore(lines, width, cursorLineIndex, cursorColumn);
 }
 
 export function computeInteractiveEphemeralRows(
 	streaming: InteractiveStreamingRenderResult | null,
 	footer: InteractiveFooterRenderResult | null,
 ): number {
-	const footerRowsUp =
-		footer === null
-			? 0
-			: computeFooterCursorRowsUp(footer.lines, footer.renderedWidth, footer.cursorLineIndex, footer.cursorColumn);
-	const streamingRows = streaming === null ? 0 : countRenderedTerminalRows(streaming.lines, streaming.renderedWidth);
-	return footerRowsUp + streamingRows;
-}
-
-function ansiCursorTo(row: number, column: number): string {
-	return `\x1b[${Math.max(1, row)};${Math.max(1, column)}H`;
-}
-
-function ansiSetScrollRegion(top: number, bottom: number): string {
-	return `\x1b[${Math.max(1, top)};${Math.max(1, bottom)}r`;
-}
-
-function ansiResetScrollRegion(): string {
-	return "\x1b[r";
-}
-
-function ansiDisableAutoWrap(): string {
-	return "\x1b[?7l";
-}
-
-function ansiEnableAutoWrap(): string {
-	return "\x1b[?7h";
+	return computeEphemeralRows(streaming, footer);
 }
 
 export function fitTerminalLine(line: string, width: number): string {
-	const safeWidth = Math.max(1, width);
-	const visibleWidth = measureTerminalDisplayWidth(stripAnsiWelcome(line));
-	if (visibleWidth <= safeWidth) {
-		return `${line}${" ".repeat(safeWidth - visibleWidth)}`;
-	}
-	const truncated = truncatePlainTerminalText(stripAnsiWelcome(line), safeWidth);
-	return `${truncated}${" ".repeat(Math.max(0, safeWidth - measureTerminalDisplayWidth(truncated)))}`;
+	return fitTerminalLineFromTuiCore(line, width);
 }
 
 function truncatePlainTerminalText(text: string, width: number): string {
-	const safeWidth = Math.max(1, width);
-	let output = "";
-	let used = 0;
-	for (const ch of text) {
-		const charWidth = measureTerminalDisplayWidth(ch);
-		if (used + charWidth > safeWidth) {
-			break;
-		}
-		output += ch;
-		used += charWidth;
-	}
-	return output;
+	return truncatePlainTextFromTuiCore(text, width);
 }
 
 function formatQueuedPromptPreviewLines(queuedInputs: readonly string[], terminalWidth: number): readonly string[] {
@@ -2932,31 +2880,7 @@ export function mergeStreamingText(existing: string, incoming: string): string {
 }
 
 export function wrapTranscriptContent(content: string, width: number): readonly string[] {
-	if (content.length === 0) {
-		return [""];
-	}
-	const lines: string[] = [];
-	let current = "";
-	let currentWidth = 0;
-	for (const ch of content.replace(/\r\n/g, "\n")) {
-		if (ch === "\n") {
-			lines.push(current);
-			current = "";
-			currentWidth = 0;
-			continue;
-		}
-		const charWidth = measureTerminalDisplayWidth(ch);
-		if (currentWidth + charWidth > width && current.length > 0) {
-			lines.push(current);
-			current = ch;
-			currentWidth = charWidth;
-			continue;
-		}
-		current += ch;
-		currentWidth += charWidth;
-	}
-	lines.push(current);
-	return lines;
+	return wrapTranscriptContentFromTuiCore(content, width);
 }
 
 export function computeVisibleTranscriptLines(
@@ -2966,18 +2890,14 @@ export function computeVisibleTranscriptLines(
 	offsetFromBottom = 0,
 	unwrappedLeadingBlockCount = 0,
 ): readonly string[] {
-	if (maxRows <= 0 || blocks.length === 0) {
-		return [];
-	}
-	const flattened = flattenTranscriptLines(blocks, width, unwrappedLeadingBlockCount);
-	if (flattened.length <= maxRows) {
-		return flattened;
-	}
-	const maxOffset = Math.max(0, flattened.length - maxRows);
-	const clampedOffset = Math.max(0, Math.min(offsetFromBottom, maxOffset));
-	const end = flattened.length - clampedOffset;
-	const start = Math.max(0, end - maxRows);
-	return flattened.slice(start, end);
+	return computeVisibleViewportLines({
+		blocks,
+		width,
+		maxRows,
+		offsetFromBottom,
+		unwrappedLeadingBlockCount,
+		wrapLine: wrapTranscriptContent,
+	});
 }
 
 export function extractPlainTextSelection(
@@ -2989,64 +2909,7 @@ export function extractPlainTextSelection(
 		endColumn: number;
 	},
 ): string {
-	if (lines.length === 0) {
-		return "";
-	}
-	const startFirst =
-		selection.startRow < selection.endRow ||
-		(selection.startRow === selection.endRow && selection.startColumn <= selection.endColumn);
-	const start = startFirst
-		? { row: selection.startRow, column: selection.startColumn }
-		: { row: selection.endRow, column: selection.endColumn };
-	const end = startFirst
-		? { row: selection.endRow, column: selection.endColumn }
-		: { row: selection.startRow, column: selection.startColumn };
-	const selectedLines: string[] = [];
-	for (let row = start.row; row <= end.row; row += 1) {
-		const line = lines[row] ?? "";
-		const fromColumn = row === start.row ? start.column : 1;
-		const toColumn = row === end.row ? end.column : Number.MAX_SAFE_INTEGER;
-		selectedLines.push(slicePlainTextByDisplayColumns(line, fromColumn - 1, toColumn - 1));
-	}
-	return selectedLines
-		.join("\n")
-		.replace(/\s+$/g, "")
-		.replace(/\n[ \t]+$/gm, "");
-}
-
-function renderSelectedPlainTranscriptLine(
-	line: string,
-	startColumn: number,
-	endColumn: number,
-	width: number,
-): string {
-	const safeStart = Math.max(1, Math.min(startColumn, endColumn));
-	const safeEnd = Math.max(safeStart, Math.max(startColumn, endColumn));
-	const before = slicePlainTextByDisplayColumns(line, 0, safeStart - 1);
-	const selected = slicePlainTextByDisplayColumns(line, safeStart - 1, safeEnd - 1);
-	const after = slicePlainTextByDisplayColumns(line, safeEnd - 1, Number.MAX_SAFE_INTEGER);
-	const inverse = "\x1b[7m";
-	const reset = "\x1b[0m";
-	return fitTerminalLine(`${before}${inverse}${selected.length > 0 ? selected : " "}${reset}${after}`, width);
-}
-
-function slicePlainTextByDisplayColumns(text: string, startColumn: number, endColumnExclusive: number): string {
-	const start = Math.max(0, startColumn);
-	const end = Math.max(start, endColumnExclusive);
-	let output = "";
-	let used = 0;
-	for (const ch of text) {
-		const charWidth = measureTerminalDisplayWidth(ch);
-		const nextUsed = used + charWidth;
-		if (nextUsed > start && used < end) {
-			output += ch;
-		}
-		if (used >= end) {
-			break;
-		}
-		used = nextUsed;
-	}
-	return output;
+	return extractPlainTextSelectionFromTuiCore(lines, selection);
 }
 
 function copyTextToClipboard(text: string): void {
@@ -3072,7 +2935,7 @@ export function computeTranscriptDisplayRows(
 	width: number,
 	unwrappedLeadingBlockCount = 0,
 ): number {
-	return flattenTranscriptLines(blocks, width, unwrappedLeadingBlockCount).length;
+	return computeTranscriptDisplayRowsFromTuiCore(blocks, width, unwrappedLeadingBlockCount);
 }
 
 export function materializeAssistantTranscriptBlock(buffer: string): string | null {
@@ -3105,31 +2968,6 @@ function findLastNonEmptyBlockIndex(blocks: readonly string[]): number {
 		}
 	}
 	return -1;
-}
-
-export function computeFooterStartRow(
-	welcomeLineCount: number,
-	terminalHeight: number,
-	footerHeight: number,
-	transcriptRows: number,
-): number {
-	const naturalStartRow = welcomeLineCount + 1 + Math.max(0, transcriptRows);
-	const bottomAnchoredStartRow = Math.max(1, terminalHeight - footerHeight + 1);
-	return Math.min(naturalStartRow, bottomAnchoredStartRow);
-}
-
-function flattenTranscriptLines(blocks: readonly string[], width: number, unwrappedLeadingBlockCount = 0): string[] {
-	const flattened: string[] = [];
-	for (const [index, block] of blocks.entries()) {
-		for (const logicalLine of block.split("\n")) {
-			if (index < unwrappedLeadingBlockCount) {
-				flattened.push(logicalLine);
-				continue;
-			}
-			flattened.push(...wrapTranscriptContent(logicalLine, width));
-		}
-	}
-	return flattened;
 }
 
 function isTranscriptUserBlock(block: string): boolean {
