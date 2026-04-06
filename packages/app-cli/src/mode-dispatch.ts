@@ -1583,6 +1583,12 @@ class InteractiveModeHandler implements ModeHandler {
 	): void {
 		this._activeLocalCommand = command
 			.catch((error: unknown) => {
+				if (this._turnNotice === "compacting") {
+					this.stopTurnNoticeAnimation();
+					this._turnNotice = null;
+					this._turnNoticeAnimationFrame = 0;
+					this._turnStartedAt = null;
+				}
 				this._lastError = error instanceof Error ? error.message : String(error);
 				getActiveDebugLogger()?.error("interactive.local_command", "Local command failed", { error });
 				sink.writeError(this._lastError);

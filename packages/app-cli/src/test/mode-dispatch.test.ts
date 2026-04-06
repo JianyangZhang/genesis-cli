@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
@@ -205,9 +206,9 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("reads the interactive CLI package version from app-cli package.json", () => {
-		expect(readInteractiveCliPackageVersion("/Users/zhangjianyang/genesis-cli/packages/app-cli/package.json")).toBe(
-			"0.0.2",
-		);
+		const packageJsonPath = "/Users/zhangjianyang/genesis-cli/packages/app-cli/package.json";
+		const expectedVersion = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version: string };
+		expect(readInteractiveCliPackageVersion(packageJsonPath)).toBe(expectedVersion.version);
 	});
 
 	it("keeps welcome lines within narrow terminal widths after fitting", () => {

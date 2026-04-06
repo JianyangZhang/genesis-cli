@@ -1370,11 +1370,13 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes("❯"));
 
 			input.write("/help\r");
-			await waitFor(() => output.getRawOutput().includes("/changes"));
-			expect(output.getRawOutput()).toContain("/changes");
-			expect(output.getRawOutput()).toContain("/status");
-			expect(output.getRawOutput()).toContain("/model");
-			expect(output.getRawOutput()).not.toContain("/config");
+			await waitFor(() => output.getRawOutput().includes("Ctrl+C"));
+			const rawOutput = output.getRawOutput();
+			expect(rawOutput).toContain("/changes");
+			expect(rawOutput).toContain("/status");
+			expect(rawOutput).toContain("/model");
+			expect(rawOutput).not.toContain("/config");
+			expect(screen.snapshot()).toContain("Tips:");
 
 			input.write("/exit\r");
 			await startPromise;
@@ -1923,6 +1925,7 @@ describe("interactive workbench TTY", () => {
 			expect(screen.snapshot()).toContain("❯");
 
 			input.write("hello\r");
+			await waitFor(() => session.getReceivedPrompts().includes("hello"));
 			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
 
 			input.write("/exit\r");
