@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@pickle-pee/config": "0.0.2",
-    "@pickle-pee/kernel": "0.0.2",
     "@pickle-pee/runtime": "0.0.2",
     "@pickle-pee/ui": "0.0.2"
   },

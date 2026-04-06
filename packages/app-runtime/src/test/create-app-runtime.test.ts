@@ -1,3 +1,6 @@
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createAppRuntime } from "../create-app-runtime.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
@@ -124,6 +127,48 @@ describe("createAppRuntime", () => {
 
 		expect(adapter.resumeCalled).toBe(true);
 		expect(adapter.lastResumeData).toEqual(recoveryData);
+	});
+
+	it("records and lists recent sessions via the runtime contract", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recent-"));
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+
+		const recoveryData = {
+			sessionId: { value: "recent-session" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "resume this task",
+				firstPrompt: "resume this task",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user" as const, text: "resume this task" },
+					{ role: "assistant" as const, text: "Sure." },
+				],
+			},
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+		};
+
+		await runtime.recordRecentSession(recoveryData, { title: "recent" });
+		const recent = await runtime.listRecentSessions();
+		const last = JSON.parse(await readFile(join(agentDir, "sessions", "last.json"), "utf8")) as {
+			sessionId: { value: string };
+		};
+
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.title).toBe("recent");
+		expect(recent[0]?.recoveryData.sessionId.value).toBe("recent-session");
+		expect(last.sessionId.value).toBe("recent-session");
 	});
 
 	it("createAdapter provisions a fresh adapter per session", async () => {

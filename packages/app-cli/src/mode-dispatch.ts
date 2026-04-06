@@ -8,7 +8,15 @@
 import { execFile, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { AppRuntime, CliMode, CompactionSummary, RuntimeEvent, SessionClosedEvent, SessionFacade } from "@pickle-pee/runtime";
+import type {
+	AppRuntime,
+	CliMode,
+	CompactionSummary,
+	RecentSessionEntry,
+	RuntimeEvent,
+	SessionClosedEvent,
+	SessionFacade,
+} from "@pickle-pee/runtime";
 import type { InteractionState, OutputSink, SlashCommand } from "@pickle-pee/ui";
 import {
 	ansiClearLine,
@@ -26,7 +34,6 @@ import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import { createRpcServer } from "./rpc-server.js";
-import { getSessionStoreDir, readRecentSessions, type RecentSessionEntry, writeLastSession } from "./session-store.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { INTERACTIVE_THEME } from "./theme.js";
 import { createTtySession } from "./tty-session.js";
@@ -208,8 +215,7 @@ class InteractiveModeHandler implements ModeHandler {
 					return;
 				}
 				try {
-					const dir = getSessionStoreDir(resolveAgentDir());
-					void writeLastSession(dir, (event as SessionClosedEvent).recoveryData, { title: sessionTitle });
+					void runtime.recordRecentSession((event as SessionClosedEvent).recoveryData, { title: sessionTitle });
 				} catch {}
 			});
 
@@ -712,8 +718,7 @@ class InteractiveModeHandler implements ModeHandler {
 					return undefined;
 				}
 
-				const dir = getSessionStoreDir(resolveAgentDir());
-				const recent = await readRecentSessions(dir);
+				const recent = await runtime.listRecentSessions();
 				const selector = ctx.args.trim();
 				if (selector.length === 0) {
 					renderRecentSessions(ctx.output, recent, "Recent sessions:");
@@ -2342,11 +2347,11 @@ function buildRecentSessionPreviewLines(entry: RecentSessionEntry, headline: str
 	}
 	const previewMessages = metadata.recentMessages
 		.slice(-2)
-		.map((message) => {
+		.map((message: { readonly role: "user" | "assistant"; readonly text: string }) => {
 			const label = message.role === "user" ? "User" : "Assistant";
 			return `${label}: ${truncatePlainTerminalText(message.text, 96)}`;
 		})
-		.filter((line) => normalizeRecentSessionPreviewText(line) !== normalizedHeadline);
+		.filter((line: string) => normalizeRecentSessionPreviewText(line) !== normalizedHeadline);
 	for (const line of previewMessages) {
 		if (!lines.includes(line)) {
 			lines.push(line);

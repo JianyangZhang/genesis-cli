@@ -2,12 +2,11 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import type { AppRuntime, RuntimeEvent, SessionFacade } from "@pickle-pee/runtime";
+import type { AppRuntime, RecentSessionEntry, RuntimeEvent, SessionFacade, SessionRecoveryData } from "@pickle-pee/runtime";
 import { createEventBus, createPlanEngine, createToolGovernor } from "@pickle-pee/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { initializeDebugLogger } from "../debug-logger.js";
 import { createModeHandler } from "../mode-dispatch.js";
-import { getSessionStoreDir } from "../session-store.js";
 
 class FakeTtyInput extends PassThrough {
 	isTTY = true;
@@ -756,12 +755,17 @@ class FakeInteractiveSession implements SessionFacade {
 
 function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 	const events = createEventBus();
+	const recentSessions: RecentSessionEntry[] = [];
 	return {
 		createSession: () => session,
 		recoverSession: () => session,
 		events,
 		governor: createToolGovernor(),
 		planEngine: createPlanEngine(),
+		recordRecentSession: async (recoveryData, options) => {
+			recentSessions.unshift({ recoveryData, title: options?.title, updatedAt: Date.now() });
+		},
+		listRecentSessions: async () => recentSessions,
 		shutdown: async () => {},
 	};
 }
@@ -769,9 +773,11 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 function createSequencedRuntime(
 	sessions: readonly FakeInteractiveSession[],
 	recoveredSessions: Readonly<Record<string, FakeInteractiveSession>> = {},
+	initialRecentSessions: readonly RecentSessionEntry[] = [],
 ): AppRuntime {
 	const events = createEventBus();
 	let createIndex = 0;
+	const recentSessions = [...initialRecentSessions];
 	return {
 		createSession: () => {
 			const next = sessions[createIndex];
@@ -791,6 +797,10 @@ function createSequencedRuntime(
 		events,
 		governor: createToolGovernor(),
 		planEngine: createPlanEngine(),
+		recordRecentSession: async (recoveryData, options) => {
+			recentSessions.unshift({ recoveryData, title: options?.title, updatedAt: Date.now() });
+		},
+		listRecentSessions: async () => recentSessions,
 		shutdown: async () => {},
 	};
 }
@@ -933,35 +943,36 @@ describe("interactive workbench TTY", () => {
 
 	it("fully redraws the transcript after /resume switches to another session", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-clear-resume-"));
-		const sessionStoreDir = getSessionStoreDir(agentDir);
 		const recoveredSessionId = "session-recovered";
 		try {
-			await mkdir(sessionStoreDir, { recursive: true });
 			const sessionFile = join(agentDir, "transcript.jsonl");
 			await writeSessionTranscript(sessionFile, recoveredSessionId, [
 				{ role: "user", content: "本地所有修改，commit & push" },
 				{ role: "assistant", content: "我会先检查工作区并整理提交内容。" },
 				{ role: "user", content: "继续推进 /resume 的体验对齐" },
 			]);
-				const recoveredData = {
-					sessionId: { value: recoveredSessionId },
-					model: { id: "unknown", provider: "zai" },
-					toolSet: ["bash"],
-					planSummary: null,
-					compactionSummary: null,
-					metadata: null,
-					taskState: { status: "idle", currentTaskId: null, startedAt: null },
-					workingDirectory: "/tmp",
-					agentDir,
-					sessionFile,
-				};
-				await writeFile(join(sessionStoreDir, "last.json"), `${JSON.stringify(recoveredData, null, 2)}\n`, "utf8");
-				await writeFile(
-					join(sessionStoreDir, "recent.json"),
-				`${JSON.stringify([{ recoveryData: recoveredData, updatedAt: Date.now() }], null, 2)}\n`,
-					"utf8",
-				);
-
+			const recoveredData: SessionRecoveryData = {
+				sessionId: { value: recoveredSessionId },
+				model: { id: "unknown", provider: "zai" },
+				toolSet: ["bash"],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: {
+					summary: "继续推进 /resume 的体验对齐",
+					firstPrompt: "本地所有修改，commit & push",
+					messageCount: 3,
+					fileSizeBytes: 256,
+					recentMessages: [
+						{ role: "user", text: "本地所有修改，commit & push" },
+						{ role: "assistant", text: "我会先检查工作区并整理提交内容。" },
+						{ role: "user", text: "继续推进 /resume 的体验对齐" },
+					],
+				},
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				workingDirectory: "/tmp",
+				agentDir,
+				sessionFile,
+			};
 			const initialSession = new FakeInteractiveSession({
 				sessionId: "session-before-resume",
 				agentDir,
@@ -972,7 +983,7 @@ describe("interactive workbench TTY", () => {
 			});
 			const runtime = createSequencedRuntime([initialSession], {
 				[recoveredSessionId]: recoveredSession,
-			});
+			}, [{ recoveryData: recoveredData, updatedAt: Date.now() }]);
 			const input = new FakeTtyInput();
 			const output = new FakeTtyOutput();
 

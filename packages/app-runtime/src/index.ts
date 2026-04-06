@@ -141,6 +141,7 @@ export type {
 	CliMode,
 	CompactionSummary,
 	ModelDescriptor,
+	RecentSessionEntry,
 	RuntimeContext,
 	SessionId,
 	SessionRecoveryData,

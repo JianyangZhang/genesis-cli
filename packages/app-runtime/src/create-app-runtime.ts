@@ -15,11 +15,12 @@ import { createToolGovernor } from "./governance/tool-governor.js";
 import type { PlanEngine } from "./planning/plan-engine.js";
 import { createPlanEngine } from "./planning/plan-engine.js";
 import { createRuntimeContext } from "./runtime-context.js";
+import { listRecentSessions, recordRecentSession } from "./services/recent-session-catalog.js";
 import { sessionCreated, sessionResumed } from "./session/session-events.js";
 import type { SessionFacade } from "./session/session-facade.js";
 import { SessionFacadeImpl } from "./session/session-facade.js";
 import { createInitialSessionState, recoverSessionState } from "./session/session-state.js";
-import type { CliMode, ModelDescriptor, SessionRecoveryData } from "./types/index.js";
+import type { CliMode, ModelDescriptor, RecentSessionEntry, SessionRecoveryData } from "./types/index.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -73,6 +74,12 @@ export interface AppRuntime {
 
 	/** Plan engine — shared immutable state machine for plan management. */
 	readonly planEngine: PlanEngine;
+
+	/** Persist a closed session into the recent-session catalog. */
+	recordRecentSession(recoveryData: SessionRecoveryData, options?: { readonly title?: string }): Promise<void>;
+
+	/** List recent recoverable sessions for resume flows. */
+	listRecentSessions(): Promise<readonly RecentSessionEntry[]>;
 
 	/** Shut down the runtime and release resources. */
 	shutdown(): Promise<void>;
@@ -129,6 +136,14 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 
 		get planEngine(): PlanEngine {
 			return planEngine;
+		},
+
+		recordRecentSession(recoveryData: SessionRecoveryData, options?: { readonly title?: string }): Promise<void> {
+			return recordRecentSession(config.agentDir, recoveryData, options);
+		},
+
+		listRecentSessions(): Promise<readonly RecentSessionEntry[]> {
+			return listRecentSessions(config.agentDir);
 		},
 
 		createSession(): SessionFacade {

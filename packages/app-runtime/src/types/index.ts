@@ -84,6 +84,12 @@ export interface SessionRecoveryMetadata {
 	readonly recentMessages: readonly SessionTranscriptMessagePreview[];
 }
 
+export interface RecentSessionEntry {
+	readonly recoveryData: SessionRecoveryData;
+	readonly title?: string;
+	readonly updatedAt: number;
+}
+
 // ---------------------------------------------------------------------------
 // Plan — canonical types live in planning/plan-types.ts. Re-exported here for
 // backward compatibility so that consumers importing from types/index.js
