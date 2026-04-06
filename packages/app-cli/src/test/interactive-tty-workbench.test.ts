@@ -156,6 +156,31 @@ function countOccurrences(snapshot: string, needle: string): number {
 	return snapshot.split(needle).length - 1;
 }
 
+async function writeSessionTranscript(
+	filePath: string,
+	sessionId: string,
+	messages: ReadonlyArray<{ role: "user" | "assistant"; content: string }>,
+): Promise<void> {
+	const lines = [
+		JSON.stringify({
+			type: "session",
+			id: sessionId,
+			timestamp: new Date().toISOString(),
+			cwd: "/tmp",
+		}),
+		...messages.map((message, index) =>
+			JSON.stringify({
+				type: "message",
+				id: `${sessionId}-m-${index + 1}`,
+				parentId: index === 0 ? null : `${sessionId}-m-${index}`,
+				timestamp: new Date(Date.now() + index).toISOString(),
+				message: { role: message.role, content: message.content },
+			}),
+		),
+	];
+	await writeFile(filePath, `${lines.join("\n")}\n`, "utf8");
+}
+
 class FakeInteractiveSession implements SessionFacade {
 	readonly id: SessionFacade["id"];
 	readonly state: SessionFacade["state"];
@@ -844,6 +869,12 @@ describe("interactive workbench TTY", () => {
 		const recoveredSessionId = "session-recovered";
 		try {
 			await mkdir(sessionStoreDir, { recursive: true });
+			const sessionFile = join(agentDir, "transcript.jsonl");
+			await writeSessionTranscript(sessionFile, recoveredSessionId, [
+				{ role: "user", content: "本地所有修改，commit & push" },
+				{ role: "assistant", content: "我会先检查工作区并整理提交内容。" },
+				{ role: "user", content: "继续推进 /resume 的体验对齐" },
+			]);
 				const recoveredData = {
 					sessionId: { value: recoveredSessionId },
 					model: { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" },
@@ -853,11 +884,12 @@ describe("interactive workbench TTY", () => {
 					taskState: { status: "idle", currentTaskId: null, startedAt: null },
 					workingDirectory: "/tmp",
 					agentDir,
+				sessionFile,
 				};
 				await writeFile(join(sessionStoreDir, "last.json"), `${JSON.stringify(recoveredData, null, 2)}\n`, "utf8");
 				await writeFile(
 					join(sessionStoreDir, "recent.json"),
-					`${JSON.stringify([{ recoveryData: recoveredData, updatedAt: Date.now(), title: "Recovered chat" }], null, 2)}\n`,
+				`${JSON.stringify([{ recoveryData: recoveredData, updatedAt: Date.now() }], null, 2)}\n`,
 					"utf8",
 				);
 
@@ -884,8 +916,8 @@ describe("interactive workbench TTY", () => {
 
 				input.write("/resume\r");
 				await waitFor(() => screen.snapshot().includes("Recent sessions:"));
-				expect(screen.snapshot()).toContain("Recovered chat");
-				expect(screen.snapshot()).toContain(`#1 ${recoveredSessionId}`);
+				expect(screen.snapshot()).toContain("继续推进 /resume 的体验对齐");
+				expect(screen.snapshot()).toContain("glm-5.1");
 				expect(screen.snapshot()).toContain("Next: /resume #N | /resume <sessionId|title>");
 
 				input.write("/resume #1\r");
@@ -895,7 +927,11 @@ describe("interactive workbench TTY", () => {
 				expect(snapshot).toContain("continue this session");
 				expect(snapshot).not.toContain("Hi from Genesis");
 				expect(snapshot).not.toContain("session-before-resume");
-				expect(snapshot).toContain("Genesis CLI");
+				expect(snapshot).toContain("Restored context:");
+				expect(snapshot).toContain("User: 本地所有修改，commit & push");
+				expect(snapshot).toContain("Assistant: 我会先检查工作区并整理提交内容。");
+				expect(snapshot).toContain("User: 继续推进 /resume 的体验对齐");
+				expect(snapshot).toContain("GLM 5.1 via zai");
 				expect(snapshot).toContain("❯");
 
 				input.write("/exit\r");

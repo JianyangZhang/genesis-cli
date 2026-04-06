@@ -25,7 +25,7 @@ import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
-import { getSessionStoreDir, readRecentSessions, type RecentSessionEntry, writeLastSession } from "./session-store.js";
+import { enrichRecentSessions, getSessionStoreDir, readRecentSessions, type RecentSessionEntry, writeLastSession } from "./session-store.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { INTERACTIVE_THEME } from "./theme.js";
 import { createTtySession } from "./tty-session.js";
@@ -710,7 +710,7 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				const dir = getSessionStoreDir(resolveAgentDir());
-				const recent = await readRecentSessions(dir);
+				const recent = await enrichRecentSessions(await readRecentSessions(dir));
 				const selector = ctx.args.trim();
 				if (selector.length === 0) {
 					renderRecentSessions(ctx.output, recent, "Recent sessions:");
@@ -720,17 +720,19 @@ class InteractiveModeHandler implements ModeHandler {
 					return undefined;
 				}
 
-				const data = resolveRecentSessionSelection(selector, recent, ctx.output);
-				if (!data) {
+				const match = resolveRecentSessionSelection(selector, recent, ctx.output);
+				if (!match) {
 					ctx.output.writeError(`Session not found: ${selector}`);
 					return undefined;
 				}
+				const data = match.recoveryData;
 
 				handler._suppressPersistOnce = true;
 				await sessionRef.current.close();
 
 				const recovered = runtime.recoverSession(data);
 				switchInteractiveSession(recovered);
+				writeSessionTranscriptPreview(ctx.output, match);
 				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
 				ctx.output.writeLine("Next: continue this session, or /resume to view history again.");
 				return undefined;
@@ -2205,10 +2207,18 @@ function renderRecentSessions(
 	for (const entry of recent) {
 		i += 1;
 		const id = entry.recoveryData.sessionId.value;
-		const model = entry.recoveryData.model.id;
-		const title = entry.title ? ` — ${entry.title}` : "";
-		const age = options?.includeAge === false ? "" : ` — ${formatSessionAge(entry.updatedAt)}`;
-		output.writeLine(`  #${i} ${id} (${model})${title}${age}`);
+		const headline = entry.title ?? entry.summary ?? entry.firstPrompt ?? id;
+		const meta = [
+			options?.includeAge === false ? null : formatSessionAge(entry.updatedAt),
+			entry.recoveryData.model.id,
+			entry.fileSizeBytes ? formatFileSize(entry.fileSizeBytes) : null,
+			shortSessionId(id),
+		].filter((value): value is string => Boolean(value));
+		output.writeLine(`  #${i} ${headline}`);
+		output.writeLine(`     ${meta.join(" · ")}`);
+		if (entry.summary && entry.title && entry.summary !== entry.title) {
+			output.writeLine(`     ${entry.summary}`);
+		}
 	}
 }
 
@@ -2216,22 +2226,24 @@ function resolveRecentSessionSelection(
 	selector: string,
 	recent: readonly RecentSessionEntry[],
 	output: OutputSink,
-): RecentSessionEntry["recoveryData"] | null {
+): RecentSessionEntry | null {
 	const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
 	const idx = Number.parseInt(idxText, 10);
 	if (Number.isFinite(idx) && idx >= 1 && idx <= recent.length) {
-		return recent[idx - 1]?.recoveryData ?? null;
+		return recent[idx - 1] ?? null;
 	}
 
-	const exact = recent.find((entry) => entry.recoveryData.sessionId.value === selector)?.recoveryData ?? null;
+	const exact = recent.find((entry) => entry.recoveryData.sessionId.value === selector) ?? null;
 	if (exact) return exact;
 
 	const prefixMatches = recent.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
-	if (prefixMatches.length === 1) return prefixMatches[0]!.recoveryData;
+	if (prefixMatches.length === 1) return prefixMatches[0]!;
 
 	const q = selector.toLowerCase();
-	const titleMatches = recent.filter((entry) => (entry.title ?? "").toLowerCase().includes(q));
-	if (titleMatches.length === 1) return titleMatches[0]!.recoveryData;
+	const titleMatches = recent.filter((entry) =>
+		[entry.title, entry.summary, entry.firstPrompt].some((value) => (value ?? "").toLowerCase().includes(q)),
+	);
+	if (titleMatches.length === 1) return titleMatches[0]!;
 
 	const candidates = [...prefixMatches, ...titleMatches].slice(0, 10);
 	if (candidates.length > 1) {
@@ -2241,6 +2253,26 @@ function resolveRecentSessionSelection(
 	}
 
 	return null;
+}
+
+function writeSessionTranscriptPreview(output: OutputSink, entry: RecentSessionEntry): void {
+	const preview = entry.recentMessages ?? [];
+	if (preview.length === 0) return;
+	output.writeLine("Restored context:");
+	for (const item of preview) {
+		const label = item.role === "user" ? "User" : "Assistant";
+		output.writeLine(`  ${label}: ${truncatePlainTerminalText(item.text, 88)}`);
+	}
+}
+
+function shortSessionId(sessionId: string): string {
+	return sessionId.length <= 8 ? sessionId : sessionId.slice(0, 8);
+}
+
+function formatFileSize(bytes: number): string {
+	if (bytes < 1024) return `${bytes}B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 export function createDebouncedCallback(

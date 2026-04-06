@@ -1,10 +1,16 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SessionRecoveryData } from "@pickle-pee/runtime";
+import { loadSessionPreviewMetadata, type SessionTranscriptMessagePreview } from "./session-preview.js";
 
 export interface RecentSessionEntry {
 	readonly recoveryData: SessionRecoveryData;
 	readonly title?: string;
+	readonly summary?: string;
+	readonly firstPrompt?: string;
+	readonly messageCount?: number;
+	readonly fileSizeBytes?: number;
+	readonly recentMessages?: readonly SessionTranscriptMessagePreview[];
 	readonly updatedAt: number;
 }
 
@@ -43,12 +49,38 @@ export async function readRecentSessions(storeDir: string): Promise<readonly Rec
 
 async function upsertRecentSession(storeDir: string, recoveryData: SessionRecoveryData, title?: string): Promise<void> {
 	const existing = await readRecentSessions(storeDir);
+	const preview = await loadSessionPreviewMetadata(recoveryData.sessionFile);
 	const next: RecentSessionEntry = {
 		recoveryData,
 		title,
+		summary: title ?? preview?.summary,
+		firstPrompt: preview?.firstPrompt,
+		messageCount: preview?.messageCount,
+		fileSizeBytes: preview?.fileSizeBytes,
+		recentMessages: preview?.recentMessages,
 		updatedAt: Date.now(),
 	};
 	const filtered = existing.filter((entry) => entry.recoveryData.sessionId.value !== recoveryData.sessionId.value);
 	const compacted = [next, ...filtered].slice(0, 25);
 	await writeFile(join(storeDir, "recent.json"), `${JSON.stringify(compacted, null, 2)}\n`, "utf8");
+}
+
+export async function enrichRecentSessions(entries: readonly RecentSessionEntry[]): Promise<readonly RecentSessionEntry[]> {
+	return Promise.all(
+		entries.map(async (entry) => {
+			if (entry.summary || entry.recentMessages?.length) {
+				return entry;
+			}
+			const preview = await loadSessionPreviewMetadata(entry.recoveryData.sessionFile);
+			if (!preview) return entry;
+			return {
+				...entry,
+				summary: entry.title ?? preview.summary,
+				firstPrompt: preview.firstPrompt,
+				messageCount: preview.messageCount,
+				fileSizeBytes: preview.fileSizeBytes,
+				recentMessages: preview.recentMessages,
+			} satisfies RecentSessionEntry;
+		}),
+	);
 }
