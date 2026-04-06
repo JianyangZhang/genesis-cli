@@ -173,6 +173,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private _resumeSearchRequestId = 0;
 	private _inputLoop: InputLoop | null = null;
 	private _activeLocalCommand: Promise<void> | null = null;
+	private _sessionRef: { current: SessionFacade } | null = null;
+	private _sink: OutputSink | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -193,6 +195,8 @@ class InteractiveModeHandler implements ModeHandler {
 				this.writeTranscriptText(`Error: ${text}`, true);
 			},
 		};
+		this._sessionRef = sessionRef;
+		this._sink = sink;
 
 		// Slash command registry
 		const registry = createSlashCommandRegistry();
@@ -280,6 +284,8 @@ class InteractiveModeHandler implements ModeHandler {
 			this._renderedFooterStartRow = null;
 			this._lastScreenFrame = null;
 			this._transcriptScrollOffset = 0;
+			this._sessionRef = null;
+			this._sink = null;
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
@@ -1124,6 +1130,13 @@ class InteractiveModeHandler implements ModeHandler {
 				this._detailPanelExpanded = false;
 				this._detailPanelScroll = 0;
 				this._compactionDetailText = formatCompactionDetailText(event.summary);
+				if (this._activeLocalCommand === null && this._activeTurn === null && this._sessionRef !== null && this._sink !== null) {
+					const queuedInputBatch = this.drainQueuedInputs();
+					if (queuedInputBatch !== null) {
+						this.startQueuedContinueTurn(this._sessionRef.current, queuedInputBatch, this._sink);
+						return;
+					}
+				}
 			}
 			this.renderPromptLine();
 			return;
@@ -1314,7 +1327,7 @@ class InteractiveModeHandler implements ModeHandler {
 			loading: false,
 			selectedIndex: resolveResumeBrowserSelectedIndex(hits, selectedSessionId, browser.selectedIndex),
 		};
-		this._transcriptScrollOffset = 0;
+		this.ensureResumeBrowserSelectionVisible();
 		this.rerenderInteractiveRegions();
 	}
 
@@ -1330,7 +1343,7 @@ class InteractiveModeHandler implements ModeHandler {
 			...this._resumeBrowser,
 			selectedIndex: nextIndex,
 		};
-		this._transcriptScrollOffset = 0;
+		this.ensureResumeBrowserSelectionVisible();
 		this.rerenderInteractiveRegions();
 	}
 
@@ -1342,7 +1355,7 @@ class InteractiveModeHandler implements ModeHandler {
 			...this._resumeBrowser,
 			previewExpanded: !this._resumeBrowser.previewExpanded,
 		};
-		this._transcriptScrollOffset = 0;
+		this.ensureResumeBrowserSelectionVisible();
 		this.rerenderInteractiveRegions();
 	}
 
@@ -1477,6 +1490,27 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private isInteractionBusy(): boolean {
 		return this._activeTurn !== null || this._activeLocalCommand !== null || this._turnNotice === "compacting";
+	}
+
+	private ensureResumeBrowserSelectionVisible(): void {
+		if (this._resumeBrowser === null) {
+			return;
+		}
+		const viewportRows = Math.max(1, this.currentTranscriptViewportRows());
+		const selectedLineOffset = this.currentRenderedTranscriptBlocks()[0]
+			?.split("\n")
+			.findIndex((line) => line.startsWith("❯ "));
+		if (selectedLineOffset === undefined || selectedLineOffset < 0) {
+			return;
+		}
+		if (selectedLineOffset < this._transcriptScrollOffset) {
+			this._transcriptScrollOffset = selectedLineOffset;
+			return;
+		}
+		if (selectedLineOffset >= this._transcriptScrollOffset + viewportRows) {
+			this._transcriptScrollOffset = selectedLineOffset - viewportRows + 1;
+		}
+		this.clampTranscriptScrollOffset();
 	}
 
 	private toggleDetailPanel(): void {

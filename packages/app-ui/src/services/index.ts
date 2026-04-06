@@ -4,7 +4,11 @@ export { formatEventAsText, formatPermissionPrompt, formatPlanSummaryText, forma
 export { buildInteractiveFooterLeadingLines, formatTurnNotice } from "./interactive-footer.js";
 export { initialInteractionState, reduceInteractionState } from "./interaction-state.js";
 export { eventToJsonEnvelope, sanitizeForJson } from "./json-formatter.js";
-export { formatResumeBrowserTranscriptBlocks, moveResumeBrowserSelection } from "./resume-browser.js";
+export {
+	formatResumeBrowserTranscriptBlocks,
+	measureResumeBrowserSelectedLineOffset,
+	moveResumeBrowserSelection,
+} from "./resume-browser.js";
 export {
 	createRpcError,
 	createRpcResponse,

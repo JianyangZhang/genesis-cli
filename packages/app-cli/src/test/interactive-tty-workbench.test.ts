@@ -1359,17 +1359,17 @@ describe("interactive workbench TTY", () => {
 				await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
 
 				input.write("/resume\r");
-				await waitFor(() => screen.snapshot().includes("Resume Session"));
+				await waitFor(() => screen.snapshot().includes("Goal: 继续推进 /resume 的体验对齐"));
 				expect(screen.snapshot()).toContain("Search: Type to search recent sessions...");
-				expect(screen.snapshot()).toContain("本地所有修改，commit & push");
 				expect(screen.snapshot()).toContain("继续推进 /resume 的体验对齐");
+				expect(screen.snapshot()).toContain("Goal: 继续推进 /resume 的体验对齐");
+				expect(screen.snapshot()).toContain("User: 本地所有修改，commit & push");
 				expect(screen.snapshot()).toContain("Type to search");
 
 				input.write("commit & push");
 				await waitFor(() => screen.snapshot().includes("Search: commit & push"));
 				expect(screen.snapshot()).toContain("本地所有修改，commit & push");
-				expect(screen.snapshot()).toContain("first prompt");
-				expect(screen.snapshot()).toContain("Match: 本地所有修改，commit & push");
+				expect(screen.snapshot()).toContain("Goal: 继续推进 /resume 的体验对齐");
 
 				input.write("\r");
 				await waitFor(() => screen.snapshot().includes(`Resumed: ${recoveredSessionId}`));
@@ -1458,23 +1458,72 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes("❯"));
 
 			input.write("/resume\r");
-			await waitFor(() => screen.snapshot().includes("Resume Session"));
+			await waitFor(() => screen.snapshot().includes("Goal: README 发布说明补充"));
 			input.write("README 发布");
-			await waitFor(() => screen.snapshot().includes("Search: README 发布"));
+			await waitFor(() => screen.snapshot().includes("❯ README 发布说明补充"));
 			expect(screen.snapshot()).toContain("❯ README 发布说明补充");
 			expect(screen.snapshot()).toContain("README 发布文案调整");
-			expect(screen.snapshot()).toContain("Match: README 发布说明补充");
+			expect(screen.snapshot()).toContain("Goal: README 发布说明补充");
 
 			input.write("\u001b[B");
 			await waitFor(() => screen.snapshot().includes("❯ README 发布文案调整"));
 
 			input.write(Buffer.from([0x16]));
 			await waitFor(() => screen.snapshot().includes("Preview"));
-			expect(screen.snapshot()).toContain("First prompt: README 发布文案调整");
+			expect(screen.snapshot()).toContain("User asked: README 发布文案调整");
 
 			input.write("\r");
 			await waitFor(() => screen.snapshot().includes(`Resumed: ${firstRecoveredId}`));
 			expect(screen.snapshot()).toContain("User: README 发布文案调整");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("keeps the selected resume-browser item visible when moving beyond the terminal height", async () => {
+		const initialSession = new FakeInteractiveSession({ sessionId: "session-before-scroll" });
+		const recoveredSessions: Record<string, FakeInteractiveSession> = {};
+		const recentEntries: RecentSessionEntry[] = [];
+		for (let index = 0; index < 8; index += 1) {
+			const sessionId = `session-scroll-${index}`;
+			recoveredSessions[sessionId] = new FakeInteractiveSession({ sessionId });
+			recentEntries.push({
+				recoveryData: {
+					sessionId: { value: sessionId },
+					model: { id: "glm-5.1", provider: "zai" },
+					toolSet: ["bash"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						summary: `目标 ${index}`,
+						firstPrompt: `用户输入 ${index}`,
+						messageCount: 2,
+						fileSizeBytes: 128,
+						recentMessages: [{ role: "user", text: `用户输入 ${index}` }],
+					},
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+				updatedAt: Date.now() - index * 60_000,
+			});
+		}
+		const runtime = createSequencedRuntime([initialSession], recoveredSessions, recentEntries);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+		output.rows = 14;
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/resume\r");
+			await waitFor(() => screen.snapshot().includes("Resume Session (1 of 8)"));
+
+			for (let index = 0; index < 6; index += 1) {
+				input.write("\u001b[B");
+			}
+			await waitFor(() => screen.snapshot().includes("❯ 目标 6"));
+			expect(screen.snapshot()).not.toContain("❯ 目标 0");
 
 			input.write("/exit\r");
 			await startPromise;

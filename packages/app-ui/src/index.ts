@@ -56,6 +56,7 @@ export {
 	formatTurnNotice,
 	formatToolStep,
 	initialInteractionState,
+	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
 	parseRpcRequest,
 	RPC_ERRORS,
