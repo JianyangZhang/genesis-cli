@@ -218,9 +218,10 @@ export class SessionFacadeImpl implements SessionFacade {
 		this._state = updateSessionStatus(this._state, "closing");
 		this.notifyStateChange();
 
+		const recoveryData = await this._adapter.getRecoveryData();
 		await this._adapter.close();
 
-		const closedEvent = sessionClosed(this._state.id, this._adapter.getRecoveryData());
+		const closedEvent = sessionClosed(this._state.id, recoveryData);
 		this._events.emit(closedEvent);
 		this._globalBus.emit(closedEvent);
 

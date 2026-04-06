@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -30,50 +30,6 @@ describe("session-store", () => {
 	it("maintains a recent sessions list", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-cli-agent-"));
 		const storeDir = getSessionStoreDir(agentDir);
-		const transcriptDir = join(agentDir, "transcripts");
-		await mkdir(transcriptDir, { recursive: true });
-		await writeFile(
-			join(transcriptDir, "s_1.jsonl"),
-			[
-				JSON.stringify({ type: "session", id: "s_1", timestamp: new Date().toISOString(), cwd: agentDir }),
-				JSON.stringify({
-					type: "message",
-					id: "m_1",
-					parentId: null,
-					timestamp: new Date().toISOString(),
-					message: { role: "user", content: "first prompt" },
-				}),
-				JSON.stringify({
-					type: "message",
-					id: "m_2",
-					parentId: "m_1",
-					timestamp: new Date().toISOString(),
-					message: { role: "assistant", content: "first answer" },
-				}),
-			].join("\n") + "\n",
-			"utf8",
-		);
-		await writeFile(
-			join(transcriptDir, "s_2.jsonl"),
-			[
-				JSON.stringify({ type: "session", id: "s_2", timestamp: new Date().toISOString(), cwd: agentDir }),
-				JSON.stringify({
-					type: "message",
-					id: "m_1",
-					parentId: null,
-					timestamp: new Date().toISOString(),
-					message: { role: "user", content: "resume this coding task" },
-				}),
-				JSON.stringify({
-					type: "message",
-					id: "m_2",
-					parentId: "m_1",
-					timestamp: new Date().toISOString(),
-					message: { role: "assistant", content: "Sure, here is the plan." },
-				}),
-			].join("\n") + "\n",
-			"utf8",
-		);
 
 		await writeLastSession(
 			storeDir,
@@ -83,9 +39,18 @@ describe("session-store", () => {
 				toolSet: ["read"],
 				planSummary: null,
 				compactionSummary: null,
+				metadata: {
+					summary: "first prompt",
+					firstPrompt: "first prompt",
+					messageCount: 2,
+					fileSizeBytes: 120,
+					recentMessages: [
+						{ role: "user", text: "first prompt" },
+						{ role: "assistant", text: "first answer" },
+					],
+				},
 				taskState: { status: "idle", currentTaskId: null, startedAt: null },
 				agentDir,
-				sessionFile: join(transcriptDir, "s_1.jsonl"),
 			} as any,
 			{ title: "first" },
 		);
@@ -97,17 +62,26 @@ describe("session-store", () => {
 				toolSet: ["read"],
 				planSummary: null,
 				compactionSummary: null,
+				metadata: {
+					summary: "resume this coding task",
+					firstPrompt: "resume this coding task",
+					messageCount: 2,
+					fileSizeBytes: 180,
+					recentMessages: [
+						{ role: "user", text: "resume this coding task" },
+						{ role: "assistant", text: "Sure, here is the plan." },
+					],
+				},
 				taskState: { status: "idle", currentTaskId: null, startedAt: null },
 				agentDir,
-				sessionFile: join(transcriptDir, "s_2.jsonl"),
 			} as any,
 		);
 
 		const recent = await readRecentSessions(storeDir);
 		expect(recent.length).toBe(2);
 		expect(recent[0]?.recoveryData.sessionId.value).toBe("s_2");
-		expect(recent[0]?.summary).toBe("resume this coding task");
-		expect(recent[0]?.recentMessages).toEqual([
+		expect(recent[0]?.recoveryData.metadata?.summary).toBe("resume this coding task");
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
 			{ role: "user", text: "resume this coding task" },
 			{ role: "assistant", text: "Sure, here is the plan." },
 		]);

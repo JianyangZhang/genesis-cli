@@ -4,6 +4,7 @@ import type { AssistantMessage, Message, Model, UserMessage } from "@pickle-pee/
 import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
 import { streamWithKernelProvider } from "./provider-registry.js";
+import { loadSessionMetadataFromSessionFile, type GenesisSessionMetadata } from "./session-metadata.js";
 import { SessionManager } from "./session-manager.js";
 import { createBashTool, createEditTool, createReadTool, createWriteTool, type KernelTool } from "./tools.js";
 
@@ -26,6 +27,7 @@ export interface GenesisAgentSession {
 	prompt(input: string): Promise<void>;
 	followUp(input: string): Promise<void>;
 	compact(customInstructions?: string): Promise<void>;
+	getMetadata(): Promise<GenesisSessionMetadata | null>;
 	abort(): Promise<void>;
 	dispose(): void;
 }
@@ -116,6 +118,10 @@ class GenesisAgentSessionImpl implements GenesisAgentSession {
 			});
 			throw error;
 		}
+	}
+
+	getMetadata(): Promise<GenesisSessionMetadata | null> {
+		return loadSessionMetadataFromSessionFile(this.sessionFile);
 	}
 
 	async abort(): Promise<void> {

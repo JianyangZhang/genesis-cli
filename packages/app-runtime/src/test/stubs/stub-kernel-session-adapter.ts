@@ -194,7 +194,7 @@ export class StubKernelSessionAdapter implements KernelSessionAdapter {
 		}
 	}
 
-	getRecoveryData(): SessionRecoveryData {
+	async getRecoveryData(): Promise<SessionRecoveryData> {
 		return {
 			sessionId: { value: "stub-session-id" },
 			model: { id: "stub-model", provider: "stub" },

@@ -4,6 +4,11 @@ export {
 	createAgentSession,
 	type GenesisAgentSession,
 } from "./agent-session.js";
+export {
+	type GenesisSessionMetadata,
+	type GenesisTranscriptMessagePreview,
+	loadSessionMetadataFromSessionFile,
+} from "./session-metadata.js";
 export { AuthStorage } from "./auth-storage.js";
 export { type KernelResolvedAuth, ModelRegistry } from "./model-registry.js";
 export { type KernelStreamOptions, streamWithKernelProvider } from "./provider-registry.js";

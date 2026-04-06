@@ -280,6 +280,8 @@ describe("PiMonoSessionAdapter", () => {
 
 		const events = await collectEvents(adapter.sendCompact("keep next steps"));
 		expect(events.map((event) => event.type)).toEqual(["compaction_start", "compaction_end"]);
+		const recovery = await adapter.getRecoveryData();
+		expect(recovery.metadata?.summary).toBe("fake summary");
 	});
 });
 
@@ -336,6 +338,19 @@ class FakeAgentSession {
 				tokensBefore: 42,
 			},
 		} as never);
+	}
+
+	async getMetadata() {
+		return {
+			summary: "fake summary",
+			firstPrompt: "inspect the repo",
+			messageCount: 2,
+			fileSizeBytes: 128,
+			recentMessages: [
+				{ role: "user" as const, text: "inspect the repo" },
+				{ role: "assistant" as const, text: "working on it" },
+			],
+		};
 	}
 
 	dispose(): void {}

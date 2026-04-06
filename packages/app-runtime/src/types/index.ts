@@ -70,6 +70,19 @@ export interface CompactionSummary {
 	readonly estimatedTokensSaved: number;
 }
 
+export interface SessionTranscriptMessagePreview {
+	readonly role: "user" | "assistant";
+	readonly text: string;
+}
+
+export interface SessionRecoveryMetadata {
+	readonly summary?: string;
+	readonly firstPrompt?: string;
+	readonly messageCount: number;
+	readonly fileSizeBytes: number;
+	readonly recentMessages: readonly SessionTranscriptMessagePreview[];
+}
+
 // ---------------------------------------------------------------------------
 // Plan — canonical types live in planning/plan-types.ts. Re-exported here for
 // backward compatibility so that consumers importing from types/index.js
@@ -121,6 +134,7 @@ export interface SessionRecoveryData {
 	readonly toolSet: readonly string[];
 	readonly planSummary: _PlanSummary | null;
 	readonly compactionSummary: CompactionSummary | null;
+	readonly metadata?: SessionRecoveryMetadata | null;
 	readonly taskState: TaskState;
 	readonly workingDirectory?: string;
 	readonly sessionFile?: string;

@@ -18,6 +18,7 @@ interface AgentSession {
 	followUp(input: string): Promise<void>;
 	abort(): Promise<void>;
 	compact(customInstructions?: string): Promise<void>;
+	getMetadata(): Promise<SessionRecoveryData["metadata"]>;
 	dispose(): void;
 }
 
@@ -156,13 +157,17 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		this.activeQueue = null;
 	}
 
-	getRecoveryData(): SessionRecoveryData {
+	async getRecoveryData(): Promise<SessionRecoveryData> {
+		const metadata =
+			this.pendingRecoveryData?.metadata ??
+			(this.session ? await this.session.getMetadata().catch(() => null) : null);
 		return {
 			sessionId: { value: this.session?.sessionId ?? "unknown-session" },
 			model: this.options.model,
 			toolSet: [...this.bridgeState.toolSet],
 			planSummary: null,
 			compactionSummary: null,
+			metadata,
 			taskState: { status: "idle", currentTaskId: null, startedAt: null },
 			workingDirectory: this.pendingRecoveryData?.workingDirectory ?? this.options.workingDirectory,
 			sessionFile: this.pendingRecoveryData?.sessionFile ?? this.session?.sessionFile,

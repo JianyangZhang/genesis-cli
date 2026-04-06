@@ -25,7 +25,7 @@ import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
-import { enrichRecentSessions, getSessionStoreDir, readRecentSessions, type RecentSessionEntry, writeLastSession } from "./session-store.js";
+import { getSessionStoreDir, readRecentSessions, type RecentSessionEntry, writeLastSession } from "./session-store.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { INTERACTIVE_THEME } from "./theme.js";
 import { createTtySession } from "./tty-session.js";
@@ -710,7 +710,7 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				const dir = getSessionStoreDir(resolveAgentDir());
-				const recent = await enrichRecentSessions(await readRecentSessions(dir));
+				const recent = await readRecentSessions(dir);
 				const selector = ctx.args.trim();
 				if (selector.length === 0) {
 					renderRecentSessions(ctx.output, recent, "Recent sessions:");
@@ -2207,17 +2207,18 @@ function renderRecentSessions(
 	for (const entry of recent) {
 		i += 1;
 		const id = entry.recoveryData.sessionId.value;
-		const headline = entry.title ?? entry.summary ?? entry.firstPrompt ?? id;
+		const metadata = entry.recoveryData.metadata;
+		const headline = entry.title ?? metadata?.summary ?? metadata?.firstPrompt ?? id;
 		const meta = [
 			options?.includeAge === false ? null : formatSessionAge(entry.updatedAt),
 			entry.recoveryData.model.id,
-			entry.fileSizeBytes ? formatFileSize(entry.fileSizeBytes) : null,
+			metadata?.fileSizeBytes ? formatFileSize(metadata.fileSizeBytes) : null,
 			shortSessionId(id),
 		].filter((value): value is string => Boolean(value));
 		output.writeLine(`  #${i} ${headline}`);
 		output.writeLine(`     ${meta.join(" · ")}`);
-		if (entry.summary && entry.title && entry.summary !== entry.title) {
-			output.writeLine(`     ${entry.summary}`);
+		if (metadata?.summary && entry.title && metadata.summary !== entry.title) {
+			output.writeLine(`     ${metadata.summary}`);
 		}
 	}
 }
@@ -2241,7 +2242,9 @@ function resolveRecentSessionSelection(
 
 	const q = selector.toLowerCase();
 	const titleMatches = recent.filter((entry) =>
-		[entry.title, entry.summary, entry.firstPrompt].some((value) => (value ?? "").toLowerCase().includes(q)),
+		[entry.title, entry.recoveryData.metadata?.summary, entry.recoveryData.metadata?.firstPrompt].some((value) =>
+			(value ?? "").toLowerCase().includes(q),
+		),
 	);
 	if (titleMatches.length === 1) return titleMatches[0]!;
 
@@ -2256,7 +2259,7 @@ function resolveRecentSessionSelection(
 }
 
 function writeSessionTranscriptPreview(output: OutputSink, entry: RecentSessionEntry): void {
-	const preview = entry.recentMessages ?? [];
+	const preview = entry.recoveryData.metadata?.recentMessages ?? [];
 	if (preview.length === 0) return;
 	output.writeLine("Restored context:");
 	for (const item of preview) {

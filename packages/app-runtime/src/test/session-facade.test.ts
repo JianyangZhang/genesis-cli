@@ -156,6 +156,52 @@ describe("SessionFacade", () => {
 		expect(adapter.closed).toBe(true);
 	});
 
+	it("captures recovery data before closing the adapter", async () => {
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+		const order: string[] = [];
+
+		const adapter: KernelSessionAdapter = {
+			async *sendPrompt() {},
+			async *sendContinue() {},
+			abort() {},
+			async close() {
+				order.push("close");
+			},
+			async getRecoveryData() {
+				order.push("getRecoveryData");
+				return {
+					sessionId: stubId,
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						summary: "resume architecture cleanup",
+						firstPrompt: "resume architecture cleanup",
+						messageCount: 1,
+						fileSizeBytes: 64,
+						recentMessages: [{ role: "user", text: "resume architecture cleanup" }],
+					},
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				};
+			},
+			resume() {},
+		};
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus);
+		await facade.close();
+
+		expect(order).toEqual(["getRecoveryData", "close"]);
+	});
+
 	it("prompt throws after close", async () => {
 		const { facade } = createFacade();
 		await facade.close();
@@ -204,7 +250,7 @@ describe("SessionFacade", () => {
 				abortCalled = true;
 			},
 			async close() {},
-			getRecoveryData() {
+			async getRecoveryData() {
 				return {
 					sessionId: stubId,
 					model: stubModel,
@@ -286,7 +332,7 @@ describe("SessionFacade", () => {
 			},
 			abort() {},
 			async close() {},
-			getRecoveryData() {
+			async getRecoveryData() {
 				return {
 					sessionId: stubId,
 					model: stubModel,
@@ -346,7 +392,7 @@ describe("SessionFacade", () => {
 				aborted = true;
 			},
 			async close() {},
-			getRecoveryData() {
+			async getRecoveryData() {
 				return {
 					sessionId: stubId,
 					model: stubModel,

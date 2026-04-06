@@ -1,16 +1,16 @@
 import { readFile } from "node:fs/promises";
 
-export interface SessionTranscriptMessagePreview {
+export interface GenesisTranscriptMessagePreview {
 	readonly role: "user" | "assistant";
 	readonly text: string;
 }
 
-export interface SessionPreviewMetadata {
+export interface GenesisSessionMetadata {
 	readonly summary?: string;
 	readonly firstPrompt?: string;
 	readonly messageCount: number;
 	readonly fileSizeBytes: number;
-	readonly recentMessages: readonly SessionTranscriptMessagePreview[];
+	readonly recentMessages: readonly GenesisTranscriptMessagePreview[];
 }
 
 interface SessionJsonlEntry {
@@ -23,7 +23,9 @@ interface SessionJsonlEntry {
 	};
 }
 
-export async function loadSessionPreviewMetadata(sessionFile?: string): Promise<SessionPreviewMetadata | null> {
+export async function loadSessionMetadataFromSessionFile(
+	sessionFile?: string,
+): Promise<GenesisSessionMetadata | null> {
 	if (!sessionFile) return null;
 	try {
 		const raw = await readFile(sessionFile, "utf8");
@@ -39,7 +41,7 @@ export async function loadSessionPreviewMetadata(sessionFile?: string): Promise<
 		let latestCompactionSummary: string | undefined;
 		let firstPrompt: string | undefined;
 		let lastUserPrompt: string | undefined;
-		const recentMessages: SessionTranscriptMessagePreview[] = [];
+		const recentMessages: GenesisTranscriptMessagePreview[] = [];
 		let messageCount = 0;
 
 		for (const line of lines) {

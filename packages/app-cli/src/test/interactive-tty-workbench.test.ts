@@ -899,10 +899,21 @@ describe("interactive workbench TTY", () => {
 					toolSet: ["bash"],
 					planSummary: null,
 					compactionSummary: null,
+					metadata: {
+						summary: "继续推进 /resume 的体验对齐",
+						firstPrompt: "本地所有修改，commit & push",
+						messageCount: 3,
+						fileSizeBytes: 256,
+						recentMessages: [
+							{ role: "user", text: "本地所有修改，commit & push" },
+							{ role: "assistant", text: "我会先检查工作区并整理提交内容。" },
+							{ role: "user", text: "继续推进 /resume 的体验对齐" },
+						],
+					},
 					taskState: { status: "idle", currentTaskId: null, startedAt: null },
 					workingDirectory: "/tmp",
 					agentDir,
-				sessionFile,
+					sessionFile,
 				};
 				await writeFile(join(sessionStoreDir, "last.json"), `${JSON.stringify(recoveredData, null, 2)}\n`, "utf8");
 				await writeFile(

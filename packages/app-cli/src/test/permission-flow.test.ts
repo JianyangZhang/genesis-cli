@@ -57,7 +57,7 @@ class NoHookAdapter implements KernelSessionAdapter {
 
 	async close(): Promise<void> {}
 
-	getRecoveryData() {
+	async getRecoveryData() {
 		return {
 			sessionId: stubId,
 			model: stubModel,
