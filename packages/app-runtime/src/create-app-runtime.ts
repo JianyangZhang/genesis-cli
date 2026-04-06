@@ -9,8 +9,8 @@
 import type { ToolDefinition } from "@pickle-pee/tools";
 import type { KernelSessionAdapter } from "./adapters/kernel-session-adapter.js";
 import type { EventBus } from "./events/event-bus.js";
-import type { RuntimeEvent } from "./events/runtime-event.js";
 import { createEventBus } from "./events/event-bus.js";
+import type { RuntimeEvent } from "./events/runtime-event.js";
 import type { ToolGovernor } from "./governance/tool-governor.js";
 import { createToolGovernor } from "./governance/tool-governor.js";
 import type { PlanEngine } from "./planning/plan-engine.js";
@@ -103,13 +103,25 @@ export interface AppRuntime {
 	): Promise<void>;
 
 	/** Persist one user input turn into runtime-owned session history. */
-	recordRecentSessionInput(session: SessionFacade, input: string, options?: { readonly title?: string }): Promise<void>;
+	recordRecentSessionInput(
+		session: SessionFacade,
+		input: string,
+		options?: { readonly title?: string },
+	): Promise<void>;
 
 	/** Persist one finalized assistant text block into runtime-owned session history. */
-	recordRecentSessionAssistantText(session: SessionFacade, text: string, options?: { readonly title?: string }): Promise<void>;
+	recordRecentSessionAssistantText(
+		session: SessionFacade,
+		text: string,
+		options?: { readonly title?: string },
+	): Promise<void>;
 
 	/** Persist event-derived session history updates owned by the runtime. */
-	recordRecentSessionEvent(session: SessionFacade, event: RuntimeEvent, options?: { readonly title?: string }): Promise<void>;
+	recordRecentSessionEvent(
+		session: SessionFacade,
+		event: RuntimeEvent,
+		options?: { readonly title?: string },
+	): Promise<void>;
 
 	/** List recent recoverable sessions for resume flows. */
 	listRecentSessions(): Promise<readonly RecentSessionEntry[]>;
@@ -118,7 +130,9 @@ export interface AppRuntime {
 	searchRecentSessions(query: string): Promise<readonly RecentSessionSearchHit[]>;
 
 	/** Compact the recent-session catalog to a bounded size. */
-	pruneRecentSessions(maxEntries?: number): Promise<{ readonly before: number; readonly after: number; readonly removed: number }>;
+	pruneRecentSessions(
+		maxEntries?: number,
+	): Promise<{ readonly before: number; readonly after: number; readonly removed: number }>;
 
 	/** The current default model for newly created sessions. */
 	getDefaultModel(): ModelDescriptor;
@@ -175,7 +189,10 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 
 	function enqueueRecentSessionWrite(task: () => Promise<void>): Promise<void> {
 		const run = recentSessionWriteChain.then(task, task);
-		recentSessionWriteChain = run.then(() => undefined, () => undefined);
+		recentSessionWriteChain = run.then(
+			() => undefined,
+			() => undefined,
+		);
 		return run;
 	}
 
@@ -250,35 +267,59 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			});
 		},
 
-		recordRecentSessionInput(session: SessionFacade, input: string, options?: { readonly title?: string }): Promise<void> {
+		recordRecentSessionInput(
+			session: SessionFacade,
+			input: string,
+			options?: { readonly title?: string },
+		): Promise<void> {
 			return enqueueRecentSessionWrite(async () => {
 				const recoveryData = canonicalizeRecentSessionRecoveryData(session, await session.snapshotRecoveryData());
 				const metadata = applyRuntimeOwnedUserInput(getLiveRecentSessionMetadata(session), input);
 				setLiveRecentSessionMetadata(session, metadata);
 				if (shouldPersistLiveRecentSession(recoveryData)) {
-					await recordRecentSession(config.historyDir, mergeRecoveryDataWithLiveMetadata(recoveryData, metadata), options);
+					await recordRecentSession(
+						config.historyDir,
+						mergeRecoveryDataWithLiveMetadata(recoveryData, metadata),
+						options,
+					);
 				}
 			});
 		},
 
-		recordRecentSessionAssistantText(session: SessionFacade, text: string, options?: { readonly title?: string }): Promise<void> {
+		recordRecentSessionAssistantText(
+			session: SessionFacade,
+			text: string,
+			options?: { readonly title?: string },
+		): Promise<void> {
 			return enqueueRecentSessionWrite(async () => {
 				const recoveryData = canonicalizeRecentSessionRecoveryData(session, await session.snapshotRecoveryData());
 				const metadata = applyRuntimeOwnedAssistantText(getLiveRecentSessionMetadata(session), text);
 				setLiveRecentSessionMetadata(session, metadata);
 				if (shouldPersistLiveRecentSession(recoveryData)) {
-					await recordRecentSession(config.historyDir, mergeRecoveryDataWithLiveMetadata(recoveryData, metadata), options);
+					await recordRecentSession(
+						config.historyDir,
+						mergeRecoveryDataWithLiveMetadata(recoveryData, metadata),
+						options,
+					);
 				}
 			});
 		},
 
-		recordRecentSessionEvent(session: SessionFacade, event: RuntimeEvent, options?: { readonly title?: string }): Promise<void> {
+		recordRecentSessionEvent(
+			session: SessionFacade,
+			event: RuntimeEvent,
+			options?: { readonly title?: string },
+		): Promise<void> {
 			return enqueueRecentSessionWrite(async () => {
 				const recoveryData = canonicalizeRecentSessionRecoveryData(session, await session.snapshotRecoveryData());
 				const metadata = applyRuntimeOwnedEvent(getLiveRecentSessionMetadata(session), event);
 				setLiveRecentSessionMetadata(session, metadata);
 				if (shouldPersistLiveRecentSession(recoveryData)) {
-					await recordRecentSession(config.historyDir, mergeRecoveryDataWithLiveMetadata(recoveryData, metadata), options);
+					await recordRecentSession(
+						config.historyDir,
+						mergeRecoveryDataWithLiveMetadata(recoveryData, metadata),
+						options,
+					);
 				}
 			});
 		},
@@ -291,7 +332,9 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			return searchRecentSessions(config.historyDir, query);
 		},
 
-		pruneRecentSessions(maxEntries?: number): Promise<{ readonly before: number; readonly after: number; readonly removed: number }> {
+		pruneRecentSessions(
+			maxEntries?: number,
+		): Promise<{ readonly before: number; readonly after: number; readonly removed: number }> {
 			return pruneRecentSessions(config.historyDir, maxEntries);
 		},
 
@@ -405,7 +448,7 @@ function mergeRuntimeOwnedMetadata(
 		resumeSummary:
 			existing?.resumeSummary?.source === "model"
 				? existing.resumeSummary
-				: live.resumeSummary ?? existing?.resumeSummary ?? null,
+				: (live.resumeSummary ?? existing?.resumeSummary ?? null),
 	};
 }
 
@@ -467,7 +510,9 @@ function appendRuntimeOwnedAssistantMessage(
 	return trimRuntimeOwnedMessages([...recentMessages, { role: "assistant", text }]);
 }
 
-function trimRuntimeOwnedMessages(messages: readonly SessionTranscriptMessagePreview[]): readonly SessionTranscriptMessagePreview[] {
+function trimRuntimeOwnedMessages(
+	messages: readonly SessionTranscriptMessagePreview[],
+): readonly SessionTranscriptMessagePreview[] {
 	return messages.slice(-6);
 }
 

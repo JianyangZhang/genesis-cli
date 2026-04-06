@@ -20,7 +20,8 @@ export function formatResumeBrowserTranscriptBlocks(state: ResumeBrowserState, n
 }
 
 export function buildResumeBrowserHeaderLines(state: ResumeBrowserState, now = Date.now()): readonly string[] {
-	const countLabel = state.hits.length > 0 ? ` (${Math.min(state.selectedIndex + 1, state.hits.length)} of ${state.hits.length})` : "";
+	const countLabel =
+		state.hits.length > 0 ? ` (${Math.min(state.selectedIndex + 1, state.hits.length)} of ${state.hits.length})` : "";
 	const selectedHit = state.hits[state.selectedIndex] ?? state.hits[0] ?? null;
 	const statusLine = selectedHit
 		? [
@@ -48,7 +49,11 @@ export function buildResumeBrowserBodyBlocks(state: ResumeBrowserState, now = Da
 	}
 	const blocks: string[] = [];
 	for (const [index, hit] of state.hits.entries()) {
-		blocks.push(buildResumeBrowserHitLines(hit, { selected: index === state.selectedIndex, now, query: state.query }).join("\n"));
+		blocks.push(
+			buildResumeBrowserHitLines(hit, { selected: index === state.selectedIndex, now, query: state.query }).join(
+				"\n",
+			),
+		);
 		if (state.previewExpanded && index === state.selectedIndex) {
 			blocks.push(["Preview", ...buildResumeBrowserPreviewLines(hit, now), ""].join("\n"));
 		}
@@ -103,12 +108,13 @@ function buildResumeBrowserHitLines(
 	const summary = readResumeSummary(hit);
 	const cursor = options.selected ? "❯" : " ";
 	const title = pickResumeBrowserTitle(hit, options.query);
+	const compactTitle = compactResumeBrowserLine(title, 96);
 	const sessionLabel = formatResumeBrowserSessionLabel(hit, title);
-	const goal = summary.goal;
-	const firstPrompt = summary.userIntent;
-	const matchText = normalizeResumeText(hit.snippet);
+	const goal = compactResumeBrowserLine(summary.goal, 120);
+	const firstPrompt = compactResumeBrowserLine(summary.userIntent, 120);
+	const matchText = compactResumeBrowserLine(normalizeResumeText(hit.snippet), 120);
 	const lines = [
-		`${cursor} ${title}`,
+		`${cursor} ${compactTitle}`,
 		`  ${[
 			formatRecentSessionUpdatedAt(hit.entry.updatedAt, options.now),
 			formatResumeBrowserModelLabel(hit),
@@ -261,4 +267,15 @@ function normalizeResumeSessionId(sessionId: string | null | undefined): string 
 		return null;
 	}
 	return normalized.toLowerCase().startsWith("unknown") ? null : normalized;
+}
+
+function compactResumeBrowserLine(value: string | null | undefined, maxLength: number): string | null {
+	const normalized = normalizeResumeText(value);
+	if (!normalized) {
+		return null;
+	}
+	if (normalized.length <= maxLength) {
+		return normalized;
+	}
+	return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }

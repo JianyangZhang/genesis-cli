@@ -55,7 +55,9 @@ export function buildInteractiveFooterLeadingLines(state: {
 		}
 	}
 	if ((state.queuedInputs?.length ?? 0) > 0) {
-		leadingLines.push(...formatQueuedPromptPreviewLines(state.queuedInputs ?? [], state.terminalWidth, state.truncateText));
+		leadingLines.push(
+			...formatQueuedPromptPreviewLines(state.queuedInputs ?? [], state.terminalWidth, state.truncateText),
+		);
 	}
 	return leadingLines;
 }

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 
 interface SessionMetadata {
 	readonly cwd?: string;
@@ -14,10 +13,8 @@ export class SessionManager {
 		private readonly sessionFile?: string,
 	) {}
 
-	static create(cwd: string, sessionStorageDir?: string): SessionManager {
-		const sessionId = randomUUID();
-		const sessionFile = sessionStorageDir ? join(sessionStorageDir, `${sessionId}.jsonl`) : undefined;
-		return new SessionManager(cwd, sessionId, sessionFile);
+	static create(cwd: string): SessionManager {
+		return new SessionManager(cwd, randomUUID());
 	}
 
 	static open(sessionPath: string): SessionManager {

@@ -1,18 +1,11 @@
 import { expect } from "vitest";
-import type {
-	ToolExecutionContext,
-	ToolExecutionResult,
-	ToolGovernor,
-} from "../governance/tool-governor.js";
+import type { ToolExecutionContext, ToolExecutionResult, ToolGovernor } from "../governance/tool-governor.js";
 
 export interface GovernorProbeHandle {
 	complete(overrides?: Partial<ToolExecutionResult>): void;
 }
 
-export function expectGovernorProbeAllows(
-	governor: ToolGovernor,
-	context: ToolExecutionContext,
-): GovernorProbeHandle {
+export function expectGovernorProbeAllows(governor: ToolGovernor, context: ToolExecutionContext): GovernorProbeHandle {
 	const decision = governor.beforeExecution(context);
 	expect(decision).toMatchObject({ type: "allow" });
 

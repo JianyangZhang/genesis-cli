@@ -29,27 +29,18 @@ describe("transcript viewport", () => {
 	});
 
 	it("computes per-row selection columns across multiple rows", () => {
-		expect(
-			computeSelectionColumnsForRow(
-				{ startRow: 2, startColumn: 3, endRow: 4, endColumn: 5 },
-				2,
-				10,
-			),
-		).toEqual({ startColumn: 3, endColumn: 11 });
-		expect(
-			computeSelectionColumnsForRow(
-				{ startRow: 2, startColumn: 3, endRow: 4, endColumn: 5 },
-				3,
-				10,
-			),
-		).toEqual({ startColumn: 1, endColumn: 11 });
-		expect(
-			computeSelectionColumnsForRow(
-				{ startRow: 2, startColumn: 3, endRow: 4, endColumn: 5 },
-				4,
-				10,
-			),
-		).toEqual({ startColumn: 1, endColumn: 5 });
+		expect(computeSelectionColumnsForRow({ startRow: 2, startColumn: 3, endRow: 4, endColumn: 5 }, 2, 10)).toEqual({
+			startColumn: 3,
+			endColumn: 11,
+		});
+		expect(computeSelectionColumnsForRow({ startRow: 2, startColumn: 3, endRow: 4, endColumn: 5 }, 3, 10)).toEqual({
+			startColumn: 1,
+			endColumn: 11,
+		});
+		expect(computeSelectionColumnsForRow({ startRow: 2, startColumn: 3, endRow: 4, endColumn: 5 }, 4, 10)).toEqual({
+			startColumn: 1,
+			endColumn: 5,
+		});
 	});
 
 	it("extracts and renders plain-text selections", () => {

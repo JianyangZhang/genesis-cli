@@ -1,3 +1,6 @@
+const ANSI_CONTROL_SEQUENCE_PATTERN = "\\u001b\\[[0-9;?]*[ -/]*[@-~]";
+const ANSI_CONTROL_SEQUENCE_REGEX = new RegExp(ANSI_CONTROL_SEQUENCE_PATTERN, "g");
+
 export function countRenderedTerminalRows(lines: readonly string[], width: number): number {
 	const safeWidth = Math.max(1, width);
 	let total = 0;
@@ -57,7 +60,7 @@ export function computeEphemeralRows(
 }
 
 function stripAnsi(text: string): string {
-	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+	return text.replace(ANSI_CONTROL_SEQUENCE_REGEX, "");
 }
 
 function measureTerminalDisplayWidth(text: string): number {

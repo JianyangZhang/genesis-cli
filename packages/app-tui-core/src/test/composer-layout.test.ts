@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	composePromptBlock,
-	composeSectionBlock,
-	materializeComposerBlock,
-	materializeTextBlock,
-} from "../index.js";
+import { composePromptBlock, composeSectionBlock, materializeComposerBlock, materializeTextBlock } from "../index.js";
 
 describe("composer layout", () => {
 	it("builds a standard prompt block with leading lines, hint, and trailing separator", () => {

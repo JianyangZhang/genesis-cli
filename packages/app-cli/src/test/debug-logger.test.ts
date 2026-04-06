@@ -114,11 +114,7 @@ describe("DebugLogger", () => {
 				async appendFile() {},
 				async writeFile() {},
 				async readdir() {
-					return [
-						"20260401T115959Z-p1-deadbeef",
-						"20260403T120000Z-p2-feedcafe",
-						"not-a-trace-dir",
-					];
+					return ["20260401T115959Z-p1-deadbeef", "20260403T120000Z-p2-feedcafe", "not-a-trace-dir"];
 				},
 				async rm(path) {
 					removed.push(path);

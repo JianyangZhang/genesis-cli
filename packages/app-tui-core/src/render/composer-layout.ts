@@ -29,10 +29,7 @@ export function composeSectionBlock(options: {
 	if (leadingLines.length > 0) {
 		lines.push(...leadingLines);
 	}
-	if (
-		options.separator &&
-		(options.leadingSeparator === true || leadingLines.length > 0 || bodyLines.length > 0)
-	) {
+	if (options.separator && (options.leadingSeparator === true || leadingLines.length > 0 || bodyLines.length > 0)) {
 		lines.push(options.separator);
 	}
 	if (bodyLines.length > 0) {
@@ -74,10 +71,7 @@ export function composePromptBlock(options: {
 	};
 }
 
-export function materializeComposerBlock(
-	layout: ComposerBlockLayout,
-	renderedWidth: number,
-): RenderedComposerBlock {
+export function materializeComposerBlock(layout: ComposerBlockLayout, renderedWidth: number): RenderedComposerBlock {
 	return {
 		block: layout.lines.join("\n"),
 		lines: layout.lines,

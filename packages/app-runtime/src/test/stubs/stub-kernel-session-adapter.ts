@@ -11,8 +11,7 @@ import type {
 	RawUpstreamEvent,
 	ToolExecutionGate,
 } from "../../adapters/kernel-session-adapter.js";
-import type { SessionRecoveryData } from "../../types/index.js";
-import type { ModelDescriptor } from "../../types/index.js";
+import type { ModelDescriptor, SessionRecoveryData } from "../../types/index.js";
 
 export class StubKernelSessionAdapter implements KernelSessionAdapter {
 	private readonly eventsByPrompt = new Map<string, RawUpstreamEvent[]>();

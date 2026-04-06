@@ -20,22 +20,23 @@ import type {
 	SessionFacade,
 } from "@pickle-pee/runtime";
 import {
+	type ComposedScreen,
 	composePromptBlock,
-	composeSectionBlock,
 	composeScreenWithFooter,
+	composeSectionBlock,
 	computeEphemeralRows,
 	computeFooterCursorColumn as computeFooterCursorColumnFromTuiCore,
 	computeFooterCursorRowsFromEnd as computeFooterCursorRowsFromEndFromTuiCore,
 	computeFooterCursorRowsUp as computeFooterCursorRowsUpFromTuiCore,
-	computePromptCursorColumn as computePromptCursorColumnFromTuiCore,
-	computeSelectionColumnsForRow,
 	computeFooterStartRow as computeFooterStartRowFromTuiCore,
+	computePromptCursorColumn as computePromptCursorColumnFromTuiCore,
 	computePromptCursorRowsUp as computePromptCursorRowsUpFromTuiCore,
+	computeSelectionColumnsForRow,
 	computeTranscriptDisplayRows as computeTranscriptDisplayRowsFromTuiCore,
 	computeVisibleViewportLines,
 	countRenderedTerminalRows as countRenderedTerminalRowsFromTuiCore,
-	createScreenFrame,
 	createInteractiveModePlan,
+	createScreenFrame,
 	detectTerminalCapabilities,
 	diffScreenFrames,
 	encodeFramePatches,
@@ -45,26 +46,25 @@ import {
 	fitTerminalLine as fitTerminalLineFromTuiCore,
 	materializeComposerBlock,
 	materializeTextBlock,
-	stripAnsiControlSequences,
+	type RenderedComposerBlock,
 	renderSelectedPlainLine,
+	type ScreenFrame,
+	stripAnsiControlSequences,
 	summarizeFramePatches,
 	summarizeScreenFrame,
 	summarizeTerminalCapabilities,
 	summarizeTerminalModePlan,
-	truncatePlainText as truncatePlainTextFromTuiCore,
-	type ComposedScreen,
-	type RenderedComposerBlock,
-	type ScreenFrame,
 	type TerminalSelectionRange,
+	truncatePlainText as truncatePlainTextFromTuiCore,
 	wrapTranscriptContent as wrapTranscriptContentFromTuiCore,
 } from "@pickle-pee/tui-core";
 import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
 import {
 	ansiShowCursor,
+	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
-	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	createBuiltinCommands,
 	createSlashCommandRegistry,
 	eventToJsonEnvelope,
@@ -75,11 +75,11 @@ import {
 	moveResumeBrowserSelection,
 	reduceInteractionState,
 } from "@pickle-pee/ui";
+import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import { createModelCommandHost, type ModelCommandHostOptions } from "./model-command-host.js";
 import type { RpcServer } from "./rpc-server.js";
-import { getActiveDebugLogger } from "./debug-logger.js";
 import { createRpcServer } from "./rpc-server.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { INTERACTIVE_THEME } from "./theme.js";
@@ -97,7 +97,10 @@ export interface ModeHandler {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createModeHandler(mode: CliMode, options?: { readonly modelHost?: ModelCommandHostOptions }): ModeHandler {
+export function createModeHandler(
+	mode: CliMode,
+	options?: { readonly modelHost?: ModelCommandHostOptions },
+): ModeHandler {
 	switch (mode) {
 		case "interactive":
 			return new InteractiveModeHandler(options?.modelHost);
@@ -371,7 +374,10 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 			});
 			detachSessionStateListener = sessionRef.current.onStateChange((state) => {
-				if (state.model.id !== sessionRef.current.state.model.id || state.model.provider !== sessionRef.current.state.model.provider) {
+				if (
+					state.model.id !== sessionRef.current.state.model.id ||
+					state.model.provider !== sessionRef.current.state.model.provider
+				) {
 					return;
 				}
 				this.renderWelcome(sessionRef.current);
@@ -899,7 +905,13 @@ class InteractiveModeHandler implements ModeHandler {
 				const trimmed = line.trim();
 
 				if (this._resumeBrowser !== null) {
-					const handled = await this.handleResumeBrowserSubmit(line, runtime, sessionRef, sink, switchInteractiveSession);
+					const handled = await this.handleResumeBrowserSubmit(
+						line,
+						runtime,
+						sessionRef,
+						sink,
+						switchInteractiveSession,
+					);
 					if (handled) {
 						if (exitRequested) {
 							break;
@@ -995,7 +1007,9 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderWelcome(session: SessionFacade): void {
-		const debugTraceId = getActiveDebugLogger()?.session.debugEnabled ? getActiveDebugLogger()?.session.traceId : undefined;
+		const debugTraceId = getActiveDebugLogger()?.session.debugEnabled
+			? getActiveDebugLogger()?.session.traceId
+			: undefined;
 		this._welcomeLines = buildWelcomeLines({
 			terminalWidth: process.stdout.columns ?? 80,
 			version: readInteractiveCliPackageVersion(),
@@ -1177,7 +1191,12 @@ class InteractiveModeHandler implements ModeHandler {
 				this._detailPanelExpanded = false;
 				this._detailPanelScroll = 0;
 				this._compactionDetailText = formatCompactionDetailText(event.summary);
-				if (this._activeLocalCommand === null && this._activeTurn === null && this._sessionRef !== null && this._sink !== null) {
+				if (
+					this._activeLocalCommand === null &&
+					this._activeTurn === null &&
+					this._sessionRef !== null &&
+					this._sink !== null
+				) {
 					const queuedInputBatch = this.drainQueuedInputs();
 					if (queuedInputBatch !== null) {
 						this.startQueuedContinueTurn(this._sessionRef.current, queuedInputBatch, this._sink);
@@ -1412,7 +1431,11 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser === null) {
 			return;
 		}
-		const nextIndex = moveResumeBrowserSelection(this._resumeBrowser.selectedIndex, delta, this._resumeBrowser.hits.length);
+		const nextIndex = moveResumeBrowserSelection(
+			this._resumeBrowser.selectedIndex,
+			delta,
+			this._resumeBrowser.hits.length,
+		);
 		if (nextIndex === this._resumeBrowser.selectedIndex) {
 			return;
 		}
@@ -1553,7 +1576,11 @@ class InteractiveModeHandler implements ModeHandler {
 		return queued.join("\n\n");
 	}
 
-	private startLocalBusyCommand(command: Promise<void>, sessionRef: { current: SessionFacade }, sink: OutputSink): void {
+	private startLocalBusyCommand(
+		command: Promise<void>,
+		sessionRef: { current: SessionFacade },
+		sink: OutputSink,
+	): void {
 		this._activeLocalCommand = command
 			.catch((error: unknown) => {
 				this._lastError = error instanceof Error ? error.message : String(error);
@@ -1593,7 +1620,12 @@ class InteractiveModeHandler implements ModeHandler {
 		return this._activeTurn !== null || this._activeLocalCommand !== null || this._turnNotice === "compacting";
 	}
 
-	private scheduleRecentSessionPersist(runtime: AppRuntime, session: SessionFacade, event: RuntimeEvent, title?: string): void {
+	private scheduleRecentSessionPersist(
+		runtime: AppRuntime,
+		session: SessionFacade,
+		event: RuntimeEvent,
+		title?: string,
+	): void {
 		if (this._suppressPersistOnce) {
 			return;
 		}
@@ -1620,12 +1652,16 @@ class InteractiveModeHandler implements ModeHandler {
 				type: event.type,
 			});
 		} catch (error) {
-			getActiveDebugLogger()?.error("resume.history.persist", "Failed to persist runtime-owned session history update", {
-				error,
-				sessionId: session.id.value,
-				category: event.category,
-				type: event.type,
-			});
+			getActiveDebugLogger()?.error(
+				"resume.history.persist",
+				"Failed to persist runtime-owned session history update",
+				{
+					error,
+					sessionId: session.id.value,
+					category: event.category,
+					type: event.type,
+				},
+			);
 		}
 	}
 
@@ -1838,8 +1874,11 @@ class InteractiveModeHandler implements ModeHandler {
 		const footerUi = this.buildFooterUi();
 		const transcriptTopRow = 1;
 		const transcriptBottomRow =
-			computeFooterStartRowFromTuiCore(this.terminalHeight(), footerUi.lines.length, this.currentTranscriptDisplayRows()) -
-			1;
+			computeFooterStartRowFromTuiCore(
+				this.terminalHeight(),
+				footerUi.lines.length,
+				this.currentTranscriptDisplayRows(),
+			) - 1;
 		return Math.max(0, transcriptBottomRow - transcriptTopRow + 1);
 	}
 
@@ -1866,7 +1905,10 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private currentResumeBrowserBodyViewportRows(): number {
 		const footerHeight = this.buildResumeBrowserFooterUi().lines.length;
-		const topHeight = Math.min(this.currentResumeBrowserTopLines().length, Math.max(0, this.terminalHeight() - footerHeight));
+		const topHeight = Math.min(
+			this.currentResumeBrowserTopLines().length,
+			Math.max(0, this.terminalHeight() - footerHeight),
+		);
 		return Math.max(0, this.terminalHeight() - topHeight - footerHeight);
 	}
 
@@ -1903,11 +1945,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		let end = start + Math.max(0, countRenderedTerminalRows(selectedBlock.split("\n"), this.terminalWidth()) - 1);
 		const previewBlock = blocks[this._resumeBrowser.selectedIndex + 1];
-		if (
-			this._resumeBrowser.previewExpanded &&
-			previewBlock &&
-			previewBlock.startsWith("Preview\n")
-		) {
+		if (this._resumeBrowser.previewExpanded && previewBlock?.startsWith("Preview\n")) {
 			end += countRenderedTerminalRows(previewBlock.split("\n"), this.terminalWidth());
 		}
 		return {
@@ -2048,9 +2086,7 @@ class InteractiveModeHandler implements ModeHandler {
 		} else {
 			process.stdout.write(encodeResetScrollRegion());
 		}
-		process.stdout.write(
-			encodeFramePatches([{ type: "move-cursor", cursor: next.frame.cursor }], next.frame.width),
-		);
+		process.stdout.write(encodeFramePatches([{ type: "move-cursor", cursor: next.frame.cursor }], next.frame.width));
 		process.stdout.write(ansiShowCursor());
 		this._renderedFooterUi = next.footerUi;
 		this._renderedFooterStartRow = next.footerStartRow;
@@ -2087,7 +2123,12 @@ class InteractiveModeHandler implements ModeHandler {
 				? isTranscriptUserBlock(visibleLine)
 					? formatFullWidthTranscriptUserLine(plainLine, terminalWidth)
 					: fitTerminalLine(visibleLine, terminalWidth)
-				: renderSelectedPlainLine(plainLine, selectionColumns.startColumn, selectionColumns.endColumn, terminalWidth);
+				: renderSelectedPlainLine(
+						plainLine,
+						selectionColumns.startColumn,
+						selectionColumns.endColumn,
+						terminalWidth,
+					);
 		});
 
 		const composed = composeScreenWithFooter({
@@ -2328,7 +2369,10 @@ interface GitWorkingTreeSnapshot {
 }
 
 async function inspectGitWorkingTree(cwd: string): Promise<GitWorkingTreeSnapshot> {
-	const [status, diffStat] = await Promise.all([runGit(cwd, ["status", "--porcelain"]), runGit(cwd, ["diff", "--stat"])]);
+	const [status, diffStat] = await Promise.all([
+		runGit(cwd, ["status", "--porcelain"]),
+		runGit(cwd, ["diff", "--stat"]),
+	]);
 	if (status.type === "error" || diffStat.type === "error") {
 		return {
 			available: false,
@@ -2368,7 +2412,10 @@ function renderWorkingTreeSummary(
 	}
 }
 
-function readGitDiff(cwd: string, target: string | null): Promise<{ type: "ok"; stdout: string; stderr: string } | { type: "error" }> {
+function readGitDiff(
+	cwd: string,
+	target: string | null,
+): Promise<{ type: "ok"; stdout: string; stderr: string } | { type: "error" }> {
 	return runGit(cwd, target ? ["diff", "--", target] : ["diff"]);
 }
 
@@ -2627,10 +2674,7 @@ export function formatInteractiveFooter(state: {
 		const layout = composePromptBlock({
 			leadingLines,
 			separator,
-			bodyLines: formatInteractivePermissionBodyLines(
-				state.permission.details,
-				state.permission.selectedIndex,
-			),
+			bodyLines: formatInteractivePermissionBodyLines(state.permission.details, state.permission.selectedIndex),
 			prompt,
 			buffer: state.buffer,
 			cursor: state.cursor,
@@ -3076,7 +3120,9 @@ export function formatFullWidthTranscriptUserLine(content: string, width: number
 	const visibleWidth = measureTerminalDisplayWidth(plain);
 	const safeWidth = Math.max(1, width);
 	const padded =
-		visibleWidth >= safeWidth ? truncatePlainTerminalText(plain, safeWidth) : `${plain}${" ".repeat(safeWidth - visibleWidth)}`;
+		visibleWidth >= safeWidth
+			? truncatePlainTerminalText(plain, safeWidth)
+			: `${plain}${" ".repeat(safeWidth - visibleWidth)}`;
 	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.userTranscriptFg}${padded}${INTERACTIVE_THEME.reset}`;
 }
 

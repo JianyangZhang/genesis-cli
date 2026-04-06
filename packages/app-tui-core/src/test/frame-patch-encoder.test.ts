@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	encodeFramePatches,
-	encodeResetScrollRegion,
-	encodeSetScrollRegion,
-} from "../index.js";
+import { encodeFramePatches, encodeResetScrollRegion, encodeSetScrollRegion } from "../index.js";
 
 describe("frame patch encoder", () => {
 	it("encodes line writes, clears, and cursor moves into ANSI output", () => {

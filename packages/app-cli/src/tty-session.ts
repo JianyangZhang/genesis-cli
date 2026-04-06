@@ -1,8 +1,5 @@
 import { spawnSync } from "node:child_process";
-import {
-	createInteractiveModePlan,
-	type TerminalModePlan,
-} from "@pickle-pee/tui-core";
+import { createInteractiveModePlan, type TerminalModePlan } from "@pickle-pee/tui-core";
 
 type TtyInput = NodeJS.ReadableStream & {
 	isTTY?: boolean;

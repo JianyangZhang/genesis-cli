@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -192,9 +192,7 @@ describe("createAppRuntime", () => {
 				};
 			};
 		};
-		const storedEntry = JSON.parse(
-			await readFile(join(historyDir, "entries", "recent-session.json"), "utf8"),
-		) as {
+		const storedEntry = JSON.parse(await readFile(join(historyDir, "entries", "recent-session.json"), "utf8")) as {
 			sessionId: { value: string };
 			metadata?: {
 				resumeSummary?: {
@@ -243,10 +241,7 @@ describe("createAppRuntime", () => {
 		const session = runtime.createSession();
 
 		await runtime.recordRecentSessionInput(session, "你好 什么是桌游");
-		await runtime.recordRecentSessionAssistantText(
-			session,
-			"桌游是在桌面上进行、强调面对面互动和策略思考的游戏。",
-		);
+		await runtime.recordRecentSessionAssistantText(session, "桌游是在桌面上进行、强调面对面互动和策略思考的游戏。");
 
 		const recent = await runtime.listRecentSessions();
 		const storedSessionId = recent[0]?.recoveryData.sessionId.value;
@@ -534,11 +529,11 @@ describe("createAppRuntime", () => {
 		const sessionFile = join(agentDir, "session.jsonl");
 		await writeFile(
 			sessionFile,
-			[
+			`${[
 				JSON.stringify({ type: "session_info", name: "桌游之夜" }),
 				JSON.stringify({ type: "message", message: { role: "user", content: "帮我整理桌游清单" } }),
 				JSON.stringify({ type: "message", message: { role: "assistant", content: "我先列候选项。" } }),
-			].join("\n") + "\n",
+			].join("\n")}\n`,
 			"utf8",
 		);
 
@@ -555,9 +550,7 @@ describe("createAppRuntime", () => {
 		});
 
 		const recent = await runtime.listRecentSessions();
-		const storedEntry = JSON.parse(
-			await readFile(join(historyDir, "entries", "session-from-file.json"), "utf8"),
-		) as {
+		const storedEntry = JSON.parse(await readFile(join(historyDir, "entries", "session-from-file.json"), "utf8")) as {
 			metadata?: {
 				summary?: string;
 				firstPrompt?: string;

@@ -167,6 +167,9 @@ function countOccurrences(snapshot: string, needle: string): number {
 	return snapshot.split(needle).length - 1;
 }
 
+const QUEUED_ROW_HIGHLIGHT_PATTERN = "\\u001b\\[48;5;252m";
+const QUEUED_ROW_HIGHLIGHT_REGEX = new RegExp(QUEUED_ROW_HIGHLIGHT_PATTERN, "g");
+
 async function writeSessionTranscript(
 	filePath: string,
 	sessionId: string,
@@ -969,7 +972,9 @@ function createSequencedRuntime(
 }
 
 function upsertRecentSessionForTest(recentSessions: RecentSessionEntry[], recoveryData: SessionRecoveryData): void {
-	const index = recentSessions.findIndex((entry) => entry.recoveryData.sessionId.value === recoveryData.sessionId.value);
+	const index = recentSessions.findIndex(
+		(entry) => entry.recoveryData.sessionId.value === recoveryData.sessionId.value,
+	);
 	const existing = index >= 0 ? recentSessions[index]?.recoveryData : undefined;
 	const nextEntry = {
 		recoveryData: existing
@@ -1109,7 +1114,11 @@ function buildSearchHitForTest(entry: RecentSessionEntry, query: string): Recent
 	}
 	return {
 		entry,
-		headline: entry.title ?? entry.recoveryData.metadata?.firstPrompt ?? entry.recoveryData.metadata?.summary ?? entry.recoveryData.sessionId.value,
+		headline:
+			entry.title ??
+			entry.recoveryData.metadata?.firstPrompt ??
+			entry.recoveryData.metadata?.summary ??
+			entry.recoveryData.sessionId.value,
 		snippet: matched.value ?? "",
 		matchSource: matched.source,
 	};
@@ -1217,33 +1226,29 @@ describe("interactive workbench TTY", () => {
 		const initialSession = new FakeInteractiveSession({ sessionId: "session-debug-resume" });
 		const recoveredId = "session-debug-recovered";
 		const recoveredSession = new FakeInteractiveSession({ sessionId: recoveredId });
-		const runtime = createSequencedRuntime(
-			[initialSession],
-			{ [recoveredId]: recoveredSession },
-			[
-				{
-					recoveryData: {
-						sessionId: { value: recoveredId },
-						model: { id: "glm-5.1", provider: "zai" },
-						toolSet: ["bash"],
-						planSummary: null,
-						compactionSummary: null,
-						metadata: {
-							summary: "继续推进 resume 摘要",
-							firstPrompt: "把 resume 的标题做得更像 Claude",
-							messageCount: 2,
-							fileSizeBytes: 128,
-							recentMessages: [
-								{ role: "user", text: "把 resume 的标题做得更像 Claude" },
-								{ role: "assistant", text: "我先整理 resume metadata。" },
-							],
-						},
-						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		const runtime = createSequencedRuntime([initialSession], { [recoveredId]: recoveredSession }, [
+			{
+				recoveryData: {
+					sessionId: { value: recoveredId },
+					model: { id: "glm-5.1", provider: "zai" },
+					toolSet: ["bash"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						summary: "继续推进 resume 摘要",
+						firstPrompt: "把 resume 的标题做得更像 Claude",
+						messageCount: 2,
+						fileSizeBytes: 128,
+						recentMessages: [
+							{ role: "user", text: "把 resume 的标题做得更像 Claude" },
+							{ role: "assistant", text: "我先整理 resume metadata。" },
+						],
 					},
-					updatedAt: Date.now(),
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
 				},
-			],
-		);
+				updatedAt: Date.now(),
+			},
+		]);
 		const input = new FakeTtyInput();
 		const output = new FakeTtyOutput();
 
@@ -1272,10 +1277,10 @@ describe("interactive workbench TTY", () => {
 			.filter((write) => write.path.includes("runtime-") && write.path.endsWith(".jsonl"))
 			.map((write) => write.data)
 			.join("");
-		expect(runtimeLog).toContain("\"scope\":\"resume.browser.open\"");
-		expect(runtimeLog).toContain("\"scope\":\"resume.browser.search\"");
-		expect(runtimeLog).toContain("\"scope\":\"resume.browser.preview\"");
-		expect(runtimeLog).toContain("\"scope\":\"resume.browser.resume\"");
+		expect(runtimeLog).toContain('"scope":"resume.browser.open"');
+		expect(runtimeLog).toContain('"scope":"resume.browser.search"');
+		expect(runtimeLog).toContain('"scope":"resume.browser.preview"');
+		expect(runtimeLog).toContain('"scope":"resume.browser.resume"');
 	}, 10000);
 
 	it("renders a completed assistant reply and keeps the composer visible", async () => {
@@ -1677,9 +1682,13 @@ describe("interactive workbench TTY", () => {
 				sessionId: recoveredSessionId,
 				agentDir,
 			});
-			const runtime = createSequencedRuntime([initialSession], {
-				[recoveredSessionId]: recoveredSession,
-			}, [{ recoveryData: recoveredData, updatedAt: Date.now() }]);
+			const runtime = createSequencedRuntime(
+				[initialSession],
+				{
+					[recoveredSessionId]: recoveredSession,
+				},
+				[{ recoveryData: recoveredData, updatedAt: Date.now() }],
+			);
 			const input = new FakeTtyInput();
 			const output = new FakeTtyOutput();
 
@@ -2103,7 +2112,7 @@ describe("interactive workbench TTY", () => {
 			const snapshot = screen.snapshot();
 			expect(snapshot).toContain("queued part one");
 			expect(snapshot).toContain("queued part two");
-			expect(output.getRawOutput().match(/\x1b\[48;5;252m/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+			expect(output.getRawOutput().match(QUEUED_ROW_HIGHLIGHT_REGEX)?.length ?? 0).toBeGreaterThanOrEqual(2);
 
 			input.write("/exit\r");
 			await startPromise;
@@ -2258,7 +2267,7 @@ describe("interactive workbench TTY", () => {
 				process.env.TERMINAL_EMULATOR = originalTerminalEmulator;
 			}
 		}
-		});
+	});
 
 	it("disables mouse and focus tracking inside VS Code terminals", async () => {
 		const originalTerm = process.env.TERM;

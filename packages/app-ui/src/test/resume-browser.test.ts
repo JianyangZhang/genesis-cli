@@ -9,39 +9,39 @@ describe("resume browser formatter", () => {
 	it("formats recent-session browsing and preview hints", () => {
 		const blocks = formatResumeBrowserTranscriptBlocks(
 			{
-			query: "",
-			selectedIndex: 0,
-			previewExpanded: false,
-			loading: false,
-			hits: [
-				{
-					entry: {
-						title: "README 发布说明补充",
-						updatedAt: 1,
-						recoveryData: {
-							sessionId: { value: "session-a" },
-							model: { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" },
-							toolSet: ["read"],
-							planSummary: null,
-							compactionSummary: null,
-							metadata: {
-								summary: "README 发布说明",
-								firstPrompt: "README 发布说明补充",
-								messageCount: 2,
-								fileSizeBytes: 128,
-								recentMessages: [
-									{ role: "user", text: "README 发布说明补充" },
-									{ role: "assistant", text: "我先补充安装段落。" },
-								],
+				query: "",
+				selectedIndex: 0,
+				previewExpanded: false,
+				loading: false,
+				hits: [
+					{
+						entry: {
+							title: "README 发布说明补充",
+							updatedAt: 1,
+							recoveryData: {
+								sessionId: { value: "session-a" },
+								model: { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" },
+								toolSet: ["read"],
+								planSummary: null,
+								compactionSummary: null,
+								metadata: {
+									summary: "README 发布说明",
+									firstPrompt: "README 发布说明补充",
+									messageCount: 2,
+									fileSizeBytes: 128,
+									recentMessages: [
+										{ role: "user", text: "README 发布说明补充" },
+										{ role: "assistant", text: "我先补充安装段落。" },
+									],
+								},
+								taskState: { status: "idle", currentTaskId: null, startedAt: null },
 							},
-							taskState: { status: "idle", currentTaskId: null, startedAt: null },
 						},
+						headline: "README 发布说明补充",
+						snippet: "README 发布说明",
+						matchSource: "recent",
 					},
-					headline: "README 发布说明补充",
-					snippet: "README 发布说明",
-					matchSource: "recent",
-				},
-			],
+				],
 			},
 			61_000,
 		);
@@ -57,39 +57,39 @@ describe("resume browser formatter", () => {
 	it("formats a preview section for the selected hit", () => {
 		const blocks = formatResumeBrowserTranscriptBlocks(
 			{
-			query: "README",
-			selectedIndex: 0,
-			previewExpanded: true,
-			loading: false,
-			hits: [
-				{
-					entry: {
-						title: "README 发布说明补充",
-						updatedAt: 1,
-						recoveryData: {
-							sessionId: { value: "session-a" },
-							model: { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" },
-							toolSet: ["read"],
-							planSummary: null,
-							compactionSummary: null,
-							metadata: {
-								summary: "README 发布说明",
-								firstPrompt: "README 发布说明补充",
-								messageCount: 2,
-								fileSizeBytes: 128,
-								recentMessages: [
-									{ role: "user", text: "README 发布说明补充" },
-									{ role: "assistant", text: "我先补充安装段落。" },
-								],
+				query: "README",
+				selectedIndex: 0,
+				previewExpanded: true,
+				loading: false,
+				hits: [
+					{
+						entry: {
+							title: "README 发布说明补充",
+							updatedAt: 1,
+							recoveryData: {
+								sessionId: { value: "session-a" },
+								model: { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" },
+								toolSet: ["read"],
+								planSummary: null,
+								compactionSummary: null,
+								metadata: {
+									summary: "README 发布说明",
+									firstPrompt: "README 发布说明补充",
+									messageCount: 2,
+									fileSizeBytes: 128,
+									recentMessages: [
+										{ role: "user", text: "README 发布说明补充" },
+										{ role: "assistant", text: "我先补充安装段落。" },
+									],
+								},
+								taskState: { status: "idle", currentTaskId: null, startedAt: null },
 							},
-							taskState: { status: "idle", currentTaskId: null, startedAt: null },
 						},
+						headline: "README 发布说明补充",
+						snippet: "README 发布说明补充",
+						matchSource: "title",
 					},
-					headline: "README 发布说明补充",
-					snippet: "README 发布说明补充",
-					matchSource: "title",
-				},
-			],
+				],
 			},
 			61_000,
 		);
@@ -198,6 +198,59 @@ describe("resume browser formatter", () => {
 		expect(blocks[0]).not.toContain("unknown via unknown");
 	});
 
+	it("keeps preview-off list entries compact even for very long summaries", () => {
+		const longText =
+			"**VS Code（Visual Studio Code）** 是由微软开发的一款免费、开源的代码编辑器。它于 2015 年首次发布，现已成为全球最受欢迎的代码编辑器之一。".repeat(
+				4,
+			);
+		const blocks = formatResumeBrowserTranscriptBlocks(
+			{
+				query: "",
+				selectedIndex: 0,
+				previewExpanded: false,
+				loading: false,
+				hits: [
+					{
+						entry: {
+							title: longText,
+							updatedAt: 1,
+							recoveryData: {
+								sessionId: { value: "session-long" },
+								model: { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" },
+								toolSet: ["read"],
+								planSummary: null,
+								compactionSummary: null,
+								metadata: {
+									summary: longText,
+									firstPrompt: "什么是 VS Code",
+									messageCount: 2,
+									fileSizeBytes: 128,
+									recentMessages: [
+										{ role: "user", text: "什么是 VS Code" },
+										{ role: "assistant", text: longText },
+									],
+								},
+								taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							},
+						},
+						headline: longText,
+						snippet: longText,
+						matchSource: "recent",
+					},
+				],
+			},
+			61_000,
+		);
+
+		expect(blocks[0]).toContain("preview off");
+		expect(blocks[0]).toContain("❯ ");
+		expect(blocks[0]).toContain("Goal: ");
+		expect(blocks[0]).toContain("User: 什么是 VS Code");
+		expect(blocks[0]).toContain("…");
+		expect(blocks[0]).not.toContain("Preview\n");
+		expect(blocks[0]).not.toContain(longText.repeat(2));
+	});
+
 	it("measures the selected line offset for viewport follow scrolling", () => {
 		const offset = measureResumeBrowserSelectedLineOffset(
 			{
@@ -216,7 +269,13 @@ describe("resume browser formatter", () => {
 								toolSet: [],
 								planSummary: null,
 								compactionSummary: null,
-								metadata: { summary: "first goal", firstPrompt: "first prompt", messageCount: 1, fileSizeBytes: 1, recentMessages: [] },
+								metadata: {
+									summary: "first goal",
+									firstPrompt: "first prompt",
+									messageCount: 1,
+									fileSizeBytes: 1,
+									recentMessages: [],
+								},
 								taskState: { status: "idle", currentTaskId: null, startedAt: null },
 							},
 						},
@@ -234,7 +293,13 @@ describe("resume browser formatter", () => {
 								toolSet: [],
 								planSummary: null,
 								compactionSummary: null,
-								metadata: { summary: "second goal", firstPrompt: "second prompt", messageCount: 1, fileSizeBytes: 1, recentMessages: [] },
+								metadata: {
+									summary: "second goal",
+									firstPrompt: "second prompt",
+									messageCount: 1,
+									fileSizeBytes: 1,
+									recentMessages: [],
+								},
 								taskState: { status: "idle", currentTaskId: null, startedAt: null },
 							},
 						},

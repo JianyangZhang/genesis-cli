@@ -1,5 +1,5 @@
-import { createScreenFrame } from "./frame-buffer.js";
 import type { ComposedScreen, FooterBlock } from "../types/index.js";
+import { createScreenFrame } from "./frame-buffer.js";
 
 export function composeScreenWithFooter(options: {
 	readonly width: number;

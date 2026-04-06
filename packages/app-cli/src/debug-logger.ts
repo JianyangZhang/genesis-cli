@@ -1,5 +1,5 @@
-import { appendFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { appendFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -103,7 +103,7 @@ export class DebugLogger {
 	private fatalWriteErrorReported = false;
 	private readonly processListeners: Array<() => void> = [];
 
-	constructor(private readonly options: DebugLoggerOptions) {
+	constructor(options: DebugLoggerOptions) {
 		this.io = options.io ?? defaultIo;
 		this.stderrWrite = options.stderrWrite ?? ((text) => process.stderr.write(text));
 		const startedAt = (options.now ?? (() => new Date()))().toISOString();
@@ -387,9 +387,7 @@ function sanitizeForJson(value: unknown): unknown {
 		return value.map((entry) => sanitizeForJson(entry));
 	}
 	if (value && typeof value === "object") {
-		return Object.fromEntries(
-			Object.entries(value).map(([key, entry]) => [key, sanitizeForJson(entry)]),
-		);
+		return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, sanitizeForJson(entry)]));
 	}
 	return value;
 }

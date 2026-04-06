@@ -62,9 +62,6 @@ function supportsExtendedKeys(env: TerminalEnvironment, hostFamily: TerminalHost
 	const termProgram = env.termProgram ?? "";
 	const term = env.term ?? "";
 	return (
-		termProgram === "iTerm.app" ||
-		termProgram === "WezTerm" ||
-		termProgram === "ghostty" ||
-		term.includes("kitty")
+		termProgram === "iTerm.app" || termProgram === "WezTerm" || termProgram === "ghostty" || term.includes("kitty")
 	);
 }

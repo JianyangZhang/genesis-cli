@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
@@ -61,7 +60,7 @@ interface PiMonoSdk {
 		};
 	};
 	SessionManager: {
-		create(cwd: string, sessionStorageDir?: string): unknown;
+		create(cwd: string): unknown;
 		open(sessionPath: string): unknown;
 	};
 	createAgentSession(options: CreateAgentSessionOptions): Promise<{ session: AgentSession }>;
@@ -448,14 +447,10 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		}
 
 		const tools = this.wrapTools(createToolsForSet(workingDirectory, toolSet, sdk));
-		const sessionStorageDir = this.options.historyDir ? join(this.options.historyDir, "session-files") : undefined;
-		if (sessionStorageDir) {
-			await mkdir(sessionStorageDir, { recursive: true });
-		}
 		const sessionManager =
 			recovery?.sessionFile && recovery.sessionFile.length > 0
 				? sdk.SessionManager.open(recovery.sessionFile)
-				: sdk.SessionManager.create(workingDirectory, sessionStorageDir);
+				: sdk.SessionManager.create(workingDirectory);
 
 		const session = await defaultCreateSession({
 			cwd: workingDirectory,

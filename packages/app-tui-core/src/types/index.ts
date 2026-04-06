@@ -1,9 +1,4 @@
-export type TerminalHostFamily =
-	| "native"
-	| "vscode-xtermjs"
-	| "jetbrains-jediterm"
-	| "tmux"
-	| "unknown";
+export type TerminalHostFamily = "native" | "vscode-xtermjs" | "jetbrains-jediterm" | "tmux" | "unknown";
 
 export interface TerminalEnvironment {
 	readonly term?: string;

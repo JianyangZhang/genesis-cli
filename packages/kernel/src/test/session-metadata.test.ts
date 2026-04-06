@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,7 +19,7 @@ describe("loadSessionMetadataFromSessionFile", () => {
 		const file = join(dir, "session.jsonl");
 		await writeFile(
 			file,
-			[
+			`${[
 				JSON.stringify({ type: "session", id: "s_1", timestamp: new Date().toISOString(), cwd: dir }),
 				JSON.stringify({
 					type: "message",
@@ -33,7 +33,7 @@ describe("loadSessionMetadataFromSessionFile", () => {
 					type: "message",
 					message: { role: "user", content: "continue with architecture cleanup" },
 				}),
-			].join("\n") + "\n",
+			].join("\n")}\n`,
 			"utf8",
 		);
 

@@ -11,6 +11,7 @@ const PACKAGE_PATHS = [
   "packages/app-config/package.json",
   "packages/kernel/package.json",
   "packages/app-runtime/package.json",
+  "packages/app-tui-core/package.json",
   "packages/app-ui/package.json",
   "packages/app-extensions/package.json",
   "packages/app-evaluation/package.json",

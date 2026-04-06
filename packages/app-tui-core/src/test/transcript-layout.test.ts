@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	computeTranscriptDisplayRows,
-	flattenTranscriptLines,
-	wrapTranscriptContent,
-} from "../index.js";
+import { computeTranscriptDisplayRows, flattenTranscriptLines, wrapTranscriptContent } from "../index.js";
 
 describe("transcript layout", () => {
 	it("wraps transcript content by terminal display width", () => {
@@ -12,12 +8,7 @@ describe("transcript layout", () => {
 	});
 
 	it("flattens blocks while preserving unwrapped leading blocks", () => {
-		expect(flattenTranscriptLines(["hello\nworld", "abcdef"], 3, 1)).toEqual([
-			"hello",
-			"world",
-			"abc",
-			"def",
-		]);
+		expect(flattenTranscriptLines(["hello\nworld", "abcdef"], 3, 1)).toEqual(["hello", "world", "abc", "def"]);
 	});
 
 	it("counts rendered transcript rows after wrapping", () => {

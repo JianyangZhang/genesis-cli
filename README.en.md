@@ -69,6 +69,7 @@ genesis
 - `genesis --version` prints the installed CLI version
 - `genesis` starts the interactive workbench
 - on first launch, start with `/help`; exit with `/exit` or `/quit`
+- `/resume` opens the recent-session browser: type to filter, press `Enter` to open the selected session, and use `Ctrl+V` to toggle preview
 - interaction rules:
   - `↑` / `↓` cycles local input history, and `Tab` accepts the first slash-command suggestion
   - mouse wheel / touchpad uses native terminal scrollback for transcript history
@@ -157,6 +158,10 @@ genesis -d
 - Visibility: startup shows the `trace-id` for the current session
   - stderr prints the `trace-id` and log directory
   - interactive mode shows `Debug trace: ...` in the history buffer
+- User-level recent history:
+  - `~/.genesis-cli/sessions/recent.json`
+  - `~/.genesis-cli/sessions/last.json`
+  - `~/.genesis-cli/sessions/entries/<sessionId>.json`
 - Extra logs from the new rendering core:
   - `tui.capabilities`: terminal host detection, downgraded capability decisions, and mode-plan summary
   - `tui.render`: frame size, footer rows, viewport rows, and patch counts
@@ -179,9 +184,9 @@ npm run test:live:pi-mono
 ### Release
 
 ```bash
-npm run version:bump:patch
+npm run version:bump:major
 git add package-lock.json packages/*/package.json
-git commit -m "release 0.0.2"
+git commit -m "release 1.0.0"
 npm run publish:all
 ```
 

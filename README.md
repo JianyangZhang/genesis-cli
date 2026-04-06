@@ -69,6 +69,7 @@ genesis
 - `genesis --version` 输出当前安装的 CLI 版本
 - `genesis` 启动交互式工作台
 - 首次进入可先执行 `/help`，退出用 `/exit` 或 `/quit`
+- `/resume` 会打开最近会话浏览器：输入关键字过滤，`Enter` 打开选中会话，`Ctrl+V` 切换 preview
 - 交互规则：
   - `↑` / `↓` 切换本地输入历史，`Tab` 接受第一个 slash 命令提示
   - 鼠标滚轮 / 触摸板使用终端原生 scrollback 浏览历史 transcript
@@ -156,6 +157,10 @@ genesis -d
 - 可见性：启动后会显示本次会话的 `trace-id`
   - 标准错误输出会打印 `trace-id` 与日志目录
   - Interactive 模式会在历史缓冲区显示 `Debug trace: ...`
+- 用户级 recent history：
+  - `~/.genesis-cli/sessions/recent.json`
+  - `~/.genesis-cli/sessions/last.json`
+  - `~/.genesis-cli/sessions/entries/<sessionId>.json`
 - 新渲染内核额外日志：
   - `tui.capabilities`：终端宿主识别、能力降级结果、mode plan 摘要
   - `tui.render`：frame 尺寸、footer 行数、viewport 行数、patch 统计
@@ -178,9 +183,9 @@ npm run test:live:pi-mono
 ### 发布
 
 ```bash
-npm run version:bump:patch
+npm run version:bump:major
 git add package-lock.json packages/*/package.json
-git commit -m "release 0.0.2"
+git commit -m "release 1.0.0"
 npm run publish:all
 ```
 

@@ -80,8 +80,7 @@ export type {
 } from "./planning/plan-types.js";
 // Context
 export type { RuntimeContextParams } from "./runtime-context.js";
-export { createRuntimeContext, updateTaskState } from "./runtime-context.js";
-export { updateModel as updateRuntimeContextModel } from "./runtime-context.js";
+export { createRuntimeContext, updateModel as updateRuntimeContextModel, updateTaskState } from "./runtime-context.js";
 // Services
 export { EventNormalizer } from "./services/event-normalizer.js";
 // Session events
@@ -94,8 +93,8 @@ export {
 	recoverSessionState,
 	serializeForRecovery,
 	updateCompactionSummary,
-	updateSessionModel,
 	updatePlanSummary,
+	updateSessionModel,
 	updateSessionStatus,
 	updateTaskState as updateSessionTaskState,
 } from "./session/session-state.js";

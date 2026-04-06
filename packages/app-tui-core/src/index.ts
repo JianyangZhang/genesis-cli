@@ -3,15 +3,25 @@ export {
 	detectTerminalHostFamily,
 } from "./capabilities/terminal-capabilities.js";
 export {
-	createInteractiveModePlan,
-	createRestoredModeState,
-} from "./lifecycle/terminal-modes.js";
-export {
 	summarizeFramePatches,
 	summarizeScreenFrame,
 	summarizeTerminalCapabilities,
 	summarizeTerminalModePlan,
 } from "./debug/render-summary.js";
+export {
+	createInteractiveModePlan,
+	createRestoredModeState,
+} from "./lifecycle/terminal-modes.js";
+export {
+	type ComposerBlockLayout,
+	composePromptBlock,
+	composeSectionBlock,
+	materializeComposerBlock,
+	materializeTextBlock,
+	type RenderedComposerBlock,
+	type RenderedTextBlock,
+} from "./render/composer-layout.js";
+export { computePromptCursorColumn } from "./render/composer-metrics.js";
 export { diffScreenFrames } from "./render/frame-diff.js";
 export {
 	encodeFramePatches,
@@ -19,28 +29,18 @@ export {
 	encodeSetScrollRegion,
 } from "./render/frame-patch-encoder.js";
 export {
-	composePromptBlock,
-	composeSectionBlock,
-	materializeComposerBlock,
-	materializeTextBlock,
-	type ComposerBlockLayout,
-	type RenderedComposerBlock,
-	type RenderedTextBlock,
-} from "./render/composer-layout.js";
-export { computePromptCursorColumn } from "./render/composer-metrics.js";
-export {
-	fitTerminalLine,
-	measureTerminalDisplayWidth,
-	stripAnsiControlSequences,
-	truncatePlainText,
-} from "./render/text-primitives.js";
-export {
 	computeEphemeralRows,
 	computeFooterCursorRowsFromEnd,
 	computeFooterCursorRowsUp,
 	computePromptCursorRowsUp,
 	countRenderedTerminalRows,
 } from "./render/terminal-metrics.js";
+export {
+	fitTerminalLine,
+	measureTerminalDisplayWidth,
+	stripAnsiControlSequences,
+	truncatePlainText,
+} from "./render/text-primitives.js";
 export {
 	computeTranscriptDisplayRows,
 	flattenTranscriptLines,
@@ -65,11 +65,11 @@ export type {
 	ScreenCursor,
 	ScreenFrame,
 	ScrollRegion,
-	TerminalSelectionColumns,
-	TerminalSelectionRange,
 	TerminalCapabilities,
 	TerminalEnvironment,
 	TerminalHostFamily,
 	TerminalModePlan,
 	TerminalModeState,
+	TerminalSelectionColumns,
+	TerminalSelectionRange,
 } from "./types/index.js";

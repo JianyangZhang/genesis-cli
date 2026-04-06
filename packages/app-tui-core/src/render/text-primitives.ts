@@ -1,3 +1,6 @@
+const ANSI_CONTROL_SEQUENCE_PATTERN = "\\u001b\\[[0-9;?]*[ -/]*[@-~]";
+const ANSI_CONTROL_SEQUENCE_REGEX = new RegExp(ANSI_CONTROL_SEQUENCE_PATTERN, "g");
+
 export function measureTerminalDisplayWidth(text: string): number {
 	let width = 0;
 	for (const ch of text) {
@@ -7,7 +10,7 @@ export function measureTerminalDisplayWidth(text: string): number {
 }
 
 export function stripAnsiControlSequences(text: string): string {
-	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+	return text.replace(ANSI_CONTROL_SEQUENCE_REGEX, "");
 }
 
 export function truncatePlainText(text: string, width: number): string {

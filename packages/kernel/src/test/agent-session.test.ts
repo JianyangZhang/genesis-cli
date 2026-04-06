@@ -1,5 +1,5 @@
+import { type AssistantMessage, createAssistantMessageEventStream, type Model } from "@pickle-pee/pi-ai";
 import { describe, expect, it, vi } from "vitest";
-import { createAssistantMessageEventStream, type AssistantMessage, type Model } from "@pickle-pee/pi-ai";
 import { createAgentSession } from "../agent-session.js";
 
 vi.mock("../provider-registry.js", () => {

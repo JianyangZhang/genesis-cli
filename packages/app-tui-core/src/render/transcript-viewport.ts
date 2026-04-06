@@ -1,5 +1,8 @@
 import type { TerminalSelectionColumns, TerminalSelectionRange } from "../types/index.js";
 
+const ANSI_CONTROL_SEQUENCE_PATTERN = "\\u001b\\[[0-9;?]*[ -/]*[@-~]";
+const ANSI_CONTROL_SEQUENCE_REGEX = new RegExp(ANSI_CONTROL_SEQUENCE_PATTERN, "g");
+
 export function computeVisibleViewportLines(options: {
 	readonly blocks: readonly string[];
 	readonly width: number;
@@ -71,10 +74,7 @@ export function computeSelectionColumnsForRow(
 	};
 }
 
-export function extractPlainTextSelection(
-	lines: readonly string[],
-	selection: TerminalSelectionRange,
-): string {
+export function extractPlainTextSelection(lines: readonly string[], selection: TerminalSelectionRange): string {
 	if (lines.length === 0) {
 		return "";
 	}
@@ -100,12 +100,7 @@ export function extractPlainTextSelection(
 		.replace(/\n[ \t]+$/gm, "");
 }
 
-export function renderSelectedPlainLine(
-	line: string,
-	startColumn: number,
-	endColumn: number,
-	width: number,
-): string {
+export function renderSelectedPlainLine(line: string, startColumn: number, endColumn: number, width: number): string {
 	const safeStart = Math.max(1, Math.min(startColumn, endColumn));
 	const safeEnd = Math.max(safeStart, Math.max(startColumn, endColumn));
 	const before = slicePlainTextByDisplayColumns(line, 0, safeStart - 1);
@@ -160,7 +155,7 @@ function truncatePlainText(text: string, width: number): string {
 }
 
 function stripAnsi(text: string): string {
-	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+	return text.replace(ANSI_CONTROL_SEQUENCE_REGEX, "");
 }
 
 function slicePlainTextByDisplayColumns(text: string, startColumn: number, endColumnExclusive: number): string {

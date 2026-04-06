@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	composeScreenWithFooter,
-	computeFooterCursorColumn,
-	computeFooterStartRow,
-} from "../index.js";
+import { composeScreenWithFooter, computeFooterCursorColumn, computeFooterStartRow } from "../index.js";
 
 describe("screen composition", () => {
 	it("pins the footer to the bottom when body content exceeds the viewport", () => {

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { AppRuntime, ModelDescriptor, SessionFacade } from "@pickle-pee/runtime";
+import type { ModelDescriptor } from "@pickle-pee/runtime";
 import type { ModelOption, SlashCommandHost } from "@pickle-pee/ui";
 import { ensureAgentDirBootstrapped } from "./bootstrap.js";
 
@@ -22,7 +22,10 @@ export interface ModelCommandHostOptions {
 }
 
 interface ModelsFile {
-	readonly providers?: Record<string, { readonly models?: ReadonlyArray<Record<string, unknown>> } & Record<string, unknown>>;
+	readonly providers?: Record<
+		string,
+		{ readonly models?: ReadonlyArray<Record<string, unknown>> } & Record<string, unknown>
+	>;
 }
 
 export function createModelCommandHost(options: ModelCommandHostOptions): SlashCommandHost {
@@ -33,10 +36,7 @@ export function createModelCommandHost(options: ModelCommandHostOptions): SlashC
 			if (currentEntry) {
 				return catalog;
 			}
-			return [
-				{ id: current.id, provider: current.provider, displayName: current.displayName },
-				...catalog,
-			];
+			return [{ id: current.id, provider: current.provider, displayName: current.displayName }, ...catalog];
 		},
 
 		async switchModel(params): Promise<{ readonly model: ModelDescriptor; readonly persistedTo?: string }> {

@@ -10,6 +10,7 @@ PACKAGES=(
   "@pickle-pee/config"
   "@pickle-pee/kernel"
   "@pickle-pee/runtime"
+  "@pickle-pee/tui-core"
   "@pickle-pee/ui"
   "@pickle-pee/extensions"
   "@pickle-pee/evaluation"

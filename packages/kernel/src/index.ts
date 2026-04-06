@@ -5,17 +5,17 @@ export {
 	type GenesisAgentSession,
 	type GenesisSessionSnapshot,
 } from "./agent-session.js";
-export {
-	type GenesisSessionMetadata,
-	type GenesisTranscriptMessagePreview,
-	loadSessionMetadataFromSessionFile,
-} from "./session-metadata.js";
 export { AuthStorage } from "./auth-storage.js";
 export { type KernelResolvedAuth, ModelRegistry } from "./model-registry.js";
 export { type KernelStreamOptions, streamWithKernelProvider } from "./provider-registry.js";
 export { streamAnthropicMessages } from "./providers/anthropic.js";
 export { streamOpenAiCompletions } from "./providers/openai.js";
 export { SessionManager } from "./session-manager.js";
+export {
+	type GenesisSessionMetadata,
+	type GenesisTranscriptMessagePreview,
+	loadSessionMetadataFromSessionFile,
+} from "./session-metadata.js";
 export {
 	createBashTool,
 	createEditTool,

@@ -23,9 +23,7 @@ interface SessionJsonlEntry {
 	};
 }
 
-export async function loadSessionMetadataFromSessionFile(
-	sessionFile?: string,
-): Promise<GenesisSessionMetadata | null> {
+export async function loadSessionMetadataFromSessionFile(sessionFile?: string): Promise<GenesisSessionMetadata | null> {
 	if (!sessionFile) return null;
 	try {
 		const raw = await readFile(sessionFile, "utf8");

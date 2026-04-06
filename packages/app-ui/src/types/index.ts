@@ -6,8 +6,7 @@
  * are the building blocks for the four CLI modes.
  */
 
-import type { AppRuntime, RecentSessionSearchHit, SessionFacade } from "@pickle-pee/runtime";
-import type { ModelDescriptor } from "@pickle-pee/runtime";
+import type { AppRuntime, ModelDescriptor, RecentSessionSearchHit, SessionFacade } from "@pickle-pee/runtime";
 
 // ---------------------------------------------------------------------------
 // Output mode — canonical definition shared by all formatters
@@ -118,7 +117,11 @@ export interface ModelOption {
 
 export interface SlashCommandHost {
 	listAvailableModels?(current: ModelDescriptor): Promise<readonly ModelOption[]>;
-	switchModel?(params: { readonly session: SessionFacade; readonly runtime: AppRuntime; readonly modelId: string }): Promise<{
+	switchModel?(params: {
+		readonly session: SessionFacade;
+		readonly runtime: AppRuntime;
+		readonly modelId: string;
+	}): Promise<{
 		readonly model: ModelDescriptor;
 		readonly persistedTo?: string;
 	}>;

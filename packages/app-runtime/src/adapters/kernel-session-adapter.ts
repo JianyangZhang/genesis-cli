@@ -6,8 +6,7 @@
  * For P2, StubKernelSessionAdapter (in test/) provides a test double.
  */
 
-import type { SessionRecoveryData } from "../types/index.js";
-import type { ModelDescriptor } from "../types/index.js";
+import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Raw upstream event — a generic envelope from pi-mono

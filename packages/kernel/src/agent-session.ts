@@ -4,8 +4,8 @@ import type { AssistantMessage, Message, Model, UserMessage } from "@pickle-pee/
 import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
 import { streamWithKernelProvider } from "./provider-registry.js";
-import { loadSessionMetadataFromSessionFile, type GenesisSessionMetadata } from "./session-metadata.js";
 import { SessionManager } from "./session-manager.js";
+import { type GenesisSessionMetadata, loadSessionMetadataFromSessionFile } from "./session-metadata.js";
 import { createBashTool, createEditTool, createReadTool, createWriteTool, type KernelTool } from "./tools.js";
 
 export interface CreateAgentSessionOptions {

@@ -136,11 +136,7 @@ function buildRecentSessionBrowseHit(entry: RecentSessionEntry): RecentSessionSe
 	};
 }
 
-async function upsertRecentSession(
-	storeDir: string,
-	recoveryData: SessionRecoveryData,
-	title?: string,
-): Promise<void> {
+async function upsertRecentSession(storeDir: string, recoveryData: SessionRecoveryData, title?: string): Promise<void> {
 	const existing = await readRecentSessionsByDir(storeDir);
 	const next: RecentSessionEntry = {
 		recoveryData,
@@ -174,7 +170,9 @@ async function readLastRecentSessionByDir(storeDir: string): Promise<SessionReco
 
 async function readRecentSessionEntryById(storeDir: string, sessionId: string): Promise<SessionRecoveryData | null> {
 	try {
-		return JSON.parse(await readFile(getRecentSessionEntryFilePath(storeDir, sessionId), "utf8")) as SessionRecoveryData;
+		return JSON.parse(
+			await readFile(getRecentSessionEntryFilePath(storeDir, sessionId), "utf8"),
+		) as SessionRecoveryData;
 	} catch {
 		return null;
 	}
@@ -312,7 +310,10 @@ function buildRecentSessionBrowseSnippet(entry: RecentSessionEntry): string {
 }
 
 function normalizeRecentSessionEntry(entry: RecentSessionEntry): RecentSessionEntry {
-	const recoveryData = enrichRecoveryDataForRecentCatalog(normalizeRecentSessionRecoveryData(entry.recoveryData), entry.updatedAt);
+	const recoveryData = enrichRecoveryDataForRecentCatalog(
+		normalizeRecentSessionRecoveryData(entry.recoveryData),
+		entry.updatedAt,
+	);
 	return {
 		...entry,
 		recoveryData,
@@ -388,8 +389,12 @@ function mergeRecentSessionMetadata(
 	}
 	const mergedRecentMessages = mergeRecentSessionMessages(existing?.recentMessages, incoming?.recentMessages);
 	return {
-		firstPrompt: normalizeRecentSessionText(existing?.firstPrompt) ?? normalizeRecentSessionText(incoming?.firstPrompt) ?? undefined,
-		summary: normalizeRecentSessionText(incoming?.summary) ?? normalizeRecentSessionText(existing?.summary) ?? undefined,
+		firstPrompt:
+			normalizeRecentSessionText(existing?.firstPrompt) ??
+			normalizeRecentSessionText(incoming?.firstPrompt) ??
+			undefined,
+		summary:
+			normalizeRecentSessionText(incoming?.summary) ?? normalizeRecentSessionText(existing?.summary) ?? undefined,
 		messageCount: Math.max(incoming?.messageCount ?? 0, existing?.messageCount ?? 0, mergedRecentMessages.length),
 		fileSizeBytes: Math.max(incoming?.fileSizeBytes ?? 0, existing?.fileSizeBytes ?? 0),
 		recentMessages: mergedRecentMessages,
@@ -398,7 +403,7 @@ function mergeRecentSessionMetadata(
 				? incoming.resumeSummary
 				: existing?.resumeSummary?.source === "model"
 					? existing.resumeSummary
-					: incoming?.resumeSummary ?? existing?.resumeSummary ?? null,
+					: (incoming?.resumeSummary ?? existing?.resumeSummary ?? null),
 	};
 }
 
@@ -549,7 +554,9 @@ function appendRecentSessionMessage(
 	return trimRecentSessionMessages([...tail, { role: next.role, text: normalized }]);
 }
 
-function trimRecentSessionMessages(messages: readonly SessionTranscriptMessagePreview[]): readonly SessionTranscriptMessagePreview[] {
+function trimRecentSessionMessages(
+	messages: readonly SessionTranscriptMessagePreview[],
+): readonly SessionTranscriptMessagePreview[] {
 	return messages.slice(-6);
 }
 
@@ -626,7 +633,7 @@ function normalizeRecentSessionMetadata(
 					lastUserTurn: normalizeRecentSessionText(metadata.resumeSummary.lastUserTurn) ?? undefined,
 					lastAssistantTurn: normalizeRecentSessionText(metadata.resumeSummary.lastAssistantTurn) ?? undefined,
 				}
-			: metadata.resumeSummary ?? undefined,
+			: (metadata.resumeSummary ?? undefined),
 	};
 }
 

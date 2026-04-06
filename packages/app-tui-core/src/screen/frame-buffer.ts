@@ -1,4 +1,8 @@
-import { measureTerminalDisplayWidth, stripAnsiControlSequences, truncatePlainText } from "../render/text-primitives.js";
+import {
+	measureTerminalDisplayWidth,
+	stripAnsiControlSequences,
+	truncatePlainText,
+} from "../render/text-primitives.js";
 import type { ScreenCursor, ScreenFrame } from "../types/index.js";
 
 export function createScreenFrame(options: {
