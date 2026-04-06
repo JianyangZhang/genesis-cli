@@ -128,6 +128,35 @@ npm run chat:live
 - a valid `GENESIS_API_KEY` in `.env.local`
 - successful startup shows the `Genesis CLI` welcome card and the `❯ ` prompt
 
+### Debugging And Logs
+
+```bash
+genesis --debug
+genesis -d
+```
+
+- both the published `genesis` package and local source builds support `--debug / -d`
+- on startup, Genesis prints the `trace-id` and log directory to stderr; interactive mode also shows `Debug trace: ...` in the transcript history buffer
+- logs are written under `~/.genesis-cli/debug-logs/<trace-id>/`
+- when reporting a problem, include:
+  - repro steps
+  - the `trace-id`
+  - the corresponding `runtime.jsonl`, `error.jsonl`, and `crash.jsonl`
+- logs use JSONL, one structured entry per line, with core fields including:
+  - `timestamp`
+  - `level`
+  - `traceId`
+  - `pid`
+  - `scope`
+  - `message`
+  - `data`
+- level policy:
+  - default mode: `runtime.jsonl` only records `ERROR` and above
+  - `--debug`: `runtime.jsonl` records `DEBUG` and above
+  - `error.jsonl` always records errors and crashes
+  - `crash.jsonl` only records unhandled exceptions, unhandled rejections, and fatal failures
+- persistence is asynchronous; if the log directory is not writable, Genesis degrades to stderr diagnostics instead of crashing the main process just because logging failed
+
 ### Common Checks
 
 ```bash

@@ -128,6 +128,35 @@ npm run chat:live
 - `.env.local` 中已经配置可用的 `GENESIS_API_KEY`
 - 启动成功后会看到 `Genesis CLI` 欢迎卡片与 `❯ ` 提示符
 
+### 调试与日志
+
+```bash
+genesis --debug
+genesis -d
+```
+
+- 正式包与本地源码都支持 `--debug / -d`
+- 启动后会在标准错误输出 `trace-id` 与日志目录；Interactive 模式也会在历史缓冲区显示 `Debug trace: ...`
+- 日志目录固定为 `~/.genesis-cli/debug-logs/<trace-id>/`
+- 反馈问题时请尽量附上：
+  - 复现步骤
+  - `trace-id`
+  - 对应目录下的 `runtime.jsonl`、`error.jsonl`、`crash.jsonl`
+- 日志格式为 JSONL，每行一条结构化记录，核心字段包括：
+  - `timestamp`
+  - `level`
+  - `traceId`
+  - `pid`
+  - `scope`
+  - `message`
+  - `data`
+- 日志级别策略：
+  - 默认模式：`runtime.jsonl` 仅记录 `ERROR` 及以上
+  - `--debug`：`runtime.jsonl` 记录 `DEBUG` 及以上
+  - `error.jsonl` 始终记录错误与崩溃
+  - `crash.jsonl` 仅记录未处理异常、未处理拒绝与致命故障
+- 落盘采用异步写入；若日志目录无权限或写盘失败，会降级到标准错误输出，但不会额外打崩主程序
+
 ### 常用检查
 
 ```bash

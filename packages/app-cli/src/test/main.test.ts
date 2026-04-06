@@ -2,13 +2,22 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureUserSettingsFile, main, parseArgs, readCliPackageVersion, resolveCliOptions } from "../main.js";
+import {
+	ensureUserSettingsFile,
+	formatDebugSessionBanner,
+	main,
+	parseArgs,
+	readCliPackageVersion,
+	resolveCliOptions,
+} from "../main.js";
 
 const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 const currentCliVersion = readCliPackageVersion();
 const originalHome = process.env.HOME;
 const originalGenesisEnv = {
 	GENESIS_API_KEY: process.env.GENESIS_API_KEY,
+	GENESIS_DEBUG: process.env.GENESIS_DEBUG,
 	GENESIS_MODEL_PROVIDER: process.env.GENESIS_MODEL_PROVIDER,
 	GENESIS_MODEL_ID: process.env.GENESIS_MODEL_ID,
 	GENESIS_BOOTSTRAP_BASE_URL: process.env.GENESIS_BOOTSTRAP_BASE_URL,
@@ -16,6 +25,7 @@ const originalGenesisEnv = {
 
 afterEach(() => {
 	stdoutWrite.mockClear();
+	stderrWrite.mockClear();
 	process.env.HOME = originalHome;
 	for (const [key, value] of Object.entries(originalGenesisEnv)) {
 		if (value === undefined) {
@@ -33,6 +43,14 @@ describe("parseArgs", () => {
 
 	it("parses -h as help", () => {
 		expect(parseArgs(["-h"]).flags.help).toBe(true);
+	});
+
+	it("parses -d as debug", () => {
+		expect(parseArgs(["-d"]).flags.debug).toBe(true);
+	});
+
+	it("parses --debug as debug", () => {
+		expect(parseArgs(["--debug"]).flags.debug).toBe(true);
 	});
 });
 
@@ -63,6 +81,29 @@ describe("main", () => {
 		await main(["-h"]);
 
 		expect(stdoutWrite).toHaveBeenCalledWith("Genesis CLI\n");
+	});
+
+	it("prints debug flag in help output", async () => {
+		await main(["-h"]);
+		expect(stdoutWrite).toHaveBeenCalledWith(expect.stringContaining("--debug, -d"));
+	});
+});
+
+describe("formatDebugSessionBanner", () => {
+	it("renders trace-id and log directory for user feedback", () => {
+		expect(
+			formatDebugSessionBanner({
+				traceId: "20260406T120000Z-p123-deadbeef",
+				startedAt: "2026-04-06T12:00:00.000Z",
+				pid: 123,
+				debugEnabled: true,
+				logRootDir: "/tmp/log-root",
+				sessionDir: "/tmp/log-root/20260406T120000Z-p123-deadbeef",
+			}),
+		).toBe(
+			"[genesis-debug] trace-id: 20260406T120000Z-p123-deadbeef\n" +
+				"[genesis-debug] logs: /tmp/log-root/20260406T120000Z-p123-deadbeef\n",
+		);
 	});
 });
 
@@ -150,6 +191,23 @@ describe("resolveCliOptions", () => {
 		const options = await resolveCliOptions({});
 		expect(options.model.provider).toBe("shell-provider");
 		expect(options.model.id).toBe("shell-model");
+	});
+
+	it("enables debug mode from GENESIS_DEBUG", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		process.env.HOME = homeDir;
+		process.env.GENESIS_DEBUG = "true";
+
+		const options = await resolveCliOptions({});
+		expect(options.debug).toBe(true);
+	});
+
+	it("enables debug mode from --debug", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		process.env.HOME = homeDir;
+
+		const options = await resolveCliOptions({ debug: true });
+		expect(options.debug).toBe(true);
 	});
 
 	it("prefers project settings over user settings", async () => {

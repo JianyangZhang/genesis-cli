@@ -148,6 +148,18 @@ describe("interactive transcript formatting", () => {
 		expect(lines[8]).toContain("GLM 5.1");
 	});
 
+	it("shows debug trace information in the welcome buffer when provided", () => {
+		const lines = buildWelcomeLines({
+			terminalWidth: 80,
+			version: "0.0.0",
+			model: "GLM 5.1",
+			provider: "zai",
+			greeting: "Let there be light.",
+			debugTraceId: "20260406T120000Z-p123-abcdef12",
+		});
+		expect(lines.some((line) => line.includes("Debug trace: 20260406T120000Z-p123-abcdef12"))).toBe(true);
+	});
+
 	it("keeps welcome lines within narrow terminal widths after fitting", () => {
 		const lines = buildWelcomeLines({
 			terminalWidth: 40,

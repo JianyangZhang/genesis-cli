@@ -24,6 +24,7 @@ import {
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
+import { getActiveDebugLogger } from "./debug-logger.js";
 import { createRpcServer } from "./rpc-server.js";
 import { getSessionStoreDir, readRecentSessions, type RecentSessionEntry, writeLastSession } from "./session-store.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
@@ -842,6 +843,11 @@ class InteractiveModeHandler implements ModeHandler {
 						});
 					} catch (error) {
 						this._lastError = error instanceof Error ? error.message : String(error);
+						getActiveDebugLogger()?.error("interactive.slash_command", "Slash command failed", {
+							command: resolution.command.name,
+							args: resolution.args,
+							error,
+						});
 						sink.writeError(this._lastError);
 					}
 					if (exitRequested) {
@@ -880,12 +886,14 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderWelcome(session: SessionFacade): void {
+		const debugTraceId = getActiveDebugLogger()?.session.debugEnabled ? getActiveDebugLogger()?.session.traceId : undefined;
 		this._welcomeLines = buildWelcomeLines({
 			terminalWidth: process.stdout.columns ?? 80,
 			version: process.env.npm_package_version ?? "dev",
 			model: session.state.model.displayName ?? session.state.model.id,
 			provider: session.state.model.provider,
 			greeting: pickWelcomeGreeting(),
+			debugTraceId,
 		});
 	}
 
@@ -1802,6 +1810,7 @@ export function buildWelcomeLines(input: {
 	model: string;
 	provider: string;
 	greeting: string;
+	debugTraceId?: string;
 }): readonly string[] {
 	const width = WELCOME_CARD_WIDTH;
 	const DIM = INTERACTIVE_THEME.muted;
@@ -1824,6 +1833,7 @@ export function buildWelcomeLines(input: {
 		center(`${CYAN}${input.model}${RESET} ${DIM}via${RESET} ${input.provider}`),
 		formatWelcomeBottomBorder(width),
 		buildWelcomeHintLine(input.terminalWidth),
+		...(input.debugTraceId ? [`${INTERACTIVE_THEME.muted}Debug trace: ${input.debugTraceId}${RESET}`] : []),
 		"",
 	];
 }

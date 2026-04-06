@@ -6,12 +6,14 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@pickle-pee/runtime";
 import { ensureAgentDirBootstrapped, resolveDefaultBootstrapBaseUrl } from "./bootstrap.js";
+import { type DebugLoggerSession, getLastDebugSession, initializeDebugLogger } from "./debug-logger.js";
 import { createModeHandler } from "./mode-dispatch.js";
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface CliOptions {
 	readonly mode: CliMode;
+	readonly debug: boolean;
 	readonly workingDirectory: string;
 	readonly agentDir: string;
 	readonly model: ModelDescriptor;
@@ -52,6 +54,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
 			flags.version = true;
 			continue;
 		}
+		if (value === "-d") {
+			flags.debug = true;
+			continue;
+		}
 		if (!value.startsWith("--")) {
 			positional.push(value);
 			continue;
@@ -82,44 +88,74 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 		return;
 	}
 
-	const options = await resolveCliOptions(parsed.flags);
-	await ensureAgentDirBootstrapped({
-		agentDir: options.agentDir,
-		provider: options.model.provider,
-		modelId: options.model.id,
-		displayName: options.model.displayName,
-		thinkingLevel: options.thinkingLevel,
-		bootstrapBaseUrl: options.bootstrapOverrides?.baseUrl,
-		bootstrapApi: options.bootstrapOverrides?.api,
-		bootstrapApiKeyEnv: options.bootstrapOverrides?.apiKeyEnv,
-		bootstrapAuthHeader: options.bootstrapOverrides?.authHeader,
-		bootstrapReasoning: options.bootstrapOverrides?.reasoning,
-		supportsDeveloperRole: options.bootstrapOverrides?.compat?.supportsDeveloperRole,
-		supportsReasoningEffort: options.bootstrapOverrides?.compat?.supportsReasoningEffort,
+	const logger = await initializeDebugLogger({
+		debugEnabled: readDebugFlag(parsed.flags),
+		argv,
 	});
-
-	const runtime = createAppRuntime({
-		workingDirectory: options.workingDirectory,
-		agentDir: options.agentDir,
-		configSources: options.configSources,
-		mode: options.mode,
-		model: options.model,
-		toolSet: options.toolSet,
-		createAdapter: () =>
-			new PiMonoSessionAdapter({
-				workingDirectory: options.workingDirectory,
-				agentDir: options.agentDir,
-				model: options.model,
-				toolSet: options.toolSet,
-				thinkingLevel: options.thinkingLevel,
-			}),
-	});
-
 	try {
+		const options = await resolveCliOptions(parsed.flags);
+		logger.updateContext({
+			workingDirectory: options.workingDirectory,
+			agentDir: options.agentDir,
+			mode: options.mode,
+			model: options.model,
+		});
+		if (options.debug) {
+			process.stderr.write(formatDebugSessionBanner(logger.session));
+		}
+		logger.info("cli.options", "CLI options resolved", {
+			mode: options.mode,
+			toolSet: options.toolSet,
+			debug: options.debug,
+		});
+
+		await ensureAgentDirBootstrapped({
+			agentDir: options.agentDir,
+			provider: options.model.provider,
+			modelId: options.model.id,
+			displayName: options.model.displayName,
+			thinkingLevel: options.thinkingLevel,
+			bootstrapBaseUrl: options.bootstrapOverrides?.baseUrl,
+			bootstrapApi: options.bootstrapOverrides?.api,
+			bootstrapApiKeyEnv: options.bootstrapOverrides?.apiKeyEnv,
+			bootstrapAuthHeader: options.bootstrapOverrides?.authHeader,
+			bootstrapReasoning: options.bootstrapOverrides?.reasoning,
+			supportsDeveloperRole: options.bootstrapOverrides?.compat?.supportsDeveloperRole,
+			supportsReasoningEffort: options.bootstrapOverrides?.compat?.supportsReasoningEffort,
+		});
+		logger.debug("cli.bootstrap", "Agent directory bootstrapped");
+
+		const runtime = createAppRuntime({
+			workingDirectory: options.workingDirectory,
+			agentDir: options.agentDir,
+			configSources: options.configSources,
+			mode: options.mode,
+			model: options.model,
+			toolSet: options.toolSet,
+			createAdapter: () =>
+				new PiMonoSessionAdapter({
+					workingDirectory: options.workingDirectory,
+					agentDir: options.agentDir,
+					model: options.model,
+					toolSet: options.toolSet,
+					thinkingLevel: options.thinkingLevel,
+				}),
+		});
+
 		const handler = createModeHandler(options.mode);
-		await handler.start(runtime);
+		logger.info("cli.mode", "Starting mode handler", { mode: options.mode });
+		try {
+			await handler.start(runtime);
+		} finally {
+			await runtime.shutdown();
+			logger.info("cli.runtime", "Runtime shut down");
+		}
+	} catch (error) {
+		logger.crash("cli.main", "CLI main failed", { error });
+		await logger.flush();
+		throw error;
 	} finally {
-		await runtime.shutdown();
+		await logger.shutdown();
 	}
 }
 
@@ -348,6 +384,7 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 		},
 	);
 	const toolSet = splitCsv(toolSetRaw);
+	const debug = readDebugFlag(flags);
 
 	const thinkingLevel = pickOptionalString(
 		[
@@ -476,6 +513,7 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 
 	return {
 		mode,
+		debug,
 		workingDirectory,
 		agentDir,
 		model: {
@@ -773,6 +811,7 @@ function printHelp(): void {
 	process.stdout.write(`  --provider <provider>\n`);
 	process.stdout.write(`  --model <id>\n`);
 	process.stdout.write(`  --display-name <name>\n`);
+	process.stdout.write(`  --debug, -d\n`);
 	process.stdout.write(`  --tools read,bash,edit,write\n`);
 	process.stdout.write(`  --thinking off|minimal|low|medium|high|xhigh\n`);
 	process.stdout.write(`  --bootstrap-base-url <url>\n`);
@@ -781,9 +820,19 @@ function printHelp(): void {
 	process.stdout.write(`\n`);
 }
 
+export function formatDebugSessionBanner(session: DebugLoggerSession): string {
+	return `[genesis-debug] trace-id: ${session.traceId}\n[genesis-debug] logs: ${session.sessionDir}\n`;
+}
+
+function readDebugFlag(flags: Readonly<Record<string, string | boolean>>): boolean {
+	return _readBooleanFlag(flags, "debug", process.env.GENESIS_DEBUG, false);
+}
+
 if (typeof require !== "undefined" && require.main === module) {
 	void main().catch((error) => {
-		process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+		const traceId = getLastDebugSession()?.traceId;
+		const suffix = traceId ? ` [trace-id: ${traceId}]` : "";
+		process.stderr.write(`${error instanceof Error ? error.message : String(error)}${suffix}\n`);
 		process.exitCode = 1;
 	});
 }

@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import type { AppRuntime, RuntimeEvent, SessionFacade } from "@pickle-pee/runtime";
 import { createEventBus, createPlanEngine, createToolGovernor } from "@pickle-pee/runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { initializeDebugLogger } from "../debug-logger.js";
 import { createModeHandler } from "../mode-dispatch.js";
 import { getSessionStoreDir } from "../session-store.js";
 
@@ -837,6 +838,37 @@ afterEach(() => {
 });
 
 describe("interactive workbench TTY", () => {
+	it("shows the debug trace in the welcome history buffer when debug logging is enabled", async () => {
+		const logger = await initializeDebugLogger({
+			debugEnabled: true,
+			argv: ["--debug"],
+			now: () => new Date("2026-04-06T12:00:00.000Z"),
+			pid: 4321,
+			randomHex: () => "deadbeef",
+			io: {
+				async mkdir() {},
+				async appendFile() {},
+				async writeFile() {},
+			},
+		});
+		const session = new FakeInteractiveSession({ sessionId: "session-debug-trace" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("Debug trace: 20260406T120000Z-p4321-deadbeef"));
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await logger.shutdown();
+		}
+	}, 10000);
+
 	it("renders a completed assistant reply and keeps the composer visible", async () => {
 		const session = new FakeInteractiveSession();
 		const runtime = createFakeRuntime(session);
