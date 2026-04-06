@@ -234,7 +234,7 @@ describe("createAppRuntime", () => {
 		expect(runtime.governor.catalog.has("write")).toBe(true);
 	});
 
-	it("routes registered bash tools through permission flow instead of catalog denial", async () => {
+	it("auto-allows registered read-only bash tools instead of denying them at the catalog layer", async () => {
 		const adapter = new StubKernelSessionAdapter();
 		adapter.enqueueDefaultEvents([
 			{
@@ -271,15 +271,11 @@ describe("createAppRuntime", () => {
 		const events: RuntimeEvent[] = [];
 		session.events.onAny((event) => events.push(event));
 
-		const pending = session.prompt("run pwd");
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(events.map((event) => event.type)).toContain("permission_requested");
-
-		await session.resolvePermission("bash_1", "allow_once");
-		await pending;
+		await session.prompt("run pwd");
 
 		expect(events.map((event) => event.type)).toContain("tool_started");
 		expect(events.map((event) => event.type)).toContain("tool_completed");
+		expect(events.map((event) => event.type)).not.toContain("permission_requested");
 	});
 
 	it("exposes planEngine that can create plans", () => {

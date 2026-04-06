@@ -599,13 +599,13 @@ describe("interactive transcript formatting", () => {
 describe("slash command hints", () => {
 	const commands = [
 		{ name: "help", description: "", type: "local" as const },
+		{ name: "review", description: "", type: "local" as const },
 		{ name: "status", description: "", type: "local" as const },
-		{ name: "sessions", description: "", type: "local" as const },
 		{ name: "resume", description: "", type: "local" as const },
 	];
 
 	it("suggests commands when the user types a slash prefix", () => {
-		expect(computeSlashSuggestions("/", commands)).toEqual(["help", "resume", "sessions", "status"]);
+		expect(computeSlashSuggestions("/", commands)).toEqual(["help", "resume", "review", "status"]);
 		expect(computeSlashSuggestions("/st", commands)).toEqual(["status"]);
 	});
 
@@ -620,7 +620,7 @@ describe("slash command hints", () => {
 	});
 
 	it("accepts the first slash suggestion on tab", () => {
-		expect(acceptFirstSlashSuggestion({ buffer: "/st", cursor: 3 }, ["status", "sessions"])).toEqual({
+		expect(acceptFirstSlashSuggestion({ buffer: "/st", cursor: 3 }, ["status", "review"])).toEqual({
 			buffer: "/status ",
 			cursor: 8,
 		});

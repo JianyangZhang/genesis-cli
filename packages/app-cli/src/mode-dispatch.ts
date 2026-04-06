@@ -25,7 +25,7 @@ import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
-import { getSessionStoreDir, readLastSession, readRecentSessions, writeLastSession } from "./session-store.js";
+import { getSessionStoreDir, readRecentSessions, type RecentSessionEntry, writeLastSession } from "./session-store.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { INTERACTIVE_THEME } from "./theme.js";
 import { createTtySession } from "./tty-session.js";
@@ -385,44 +385,6 @@ class InteractiveModeHandler implements ModeHandler {
 		});
 
 		register({
-			name: "sessions",
-			description: "List recent sessions",
-			type: "local",
-			async execute(ctx) {
-				const dir = getSessionStoreDir(resolveAgentDir());
-				const recent = await readRecentSessions(dir);
-				if (recent.length === 0) {
-					ctx.output.writeLine("No recent sessions.");
-					return undefined;
-				}
-				const formatAge = (ts: number): string => {
-					const delta = Math.max(0, Date.now() - ts);
-					const seconds = Math.floor(delta / 1000);
-					if (seconds < 60) return `${seconds}s ago`;
-					const minutes = Math.floor(seconds / 60);
-					if (minutes < 60) return `${minutes}m ago`;
-					const hours = Math.floor(minutes / 60);
-					if (hours < 24) return `${hours}h ago`;
-					const days = Math.floor(hours / 24);
-					return `${days}d ago`;
-				};
-
-				ctx.output.writeLine("Recent sessions:");
-				let i = 0;
-				for (const entry of recent) {
-					i++;
-					const id = entry.recoveryData.sessionId.value;
-					const model = entry.recoveryData.model.id;
-					const title = entry.title ? ` — ${entry.title}` : "";
-					const age = formatAge(entry.updatedAt);
-					ctx.output.writeLine(`  #${i} ${id} (${model})${title} — ${age}`);
-				}
-				ctx.output.writeLine("Next: /resume <sessionId|#N|title> or /resume (last)");
-				return undefined;
-			},
-		});
-
-		register({
 			name: "changes",
 			description: "Show changed files and diff summary",
 			type: "local",
@@ -739,7 +701,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 		register({
 			name: "resume",
-			description: "Resume the last session",
+			description: "Show recent sessions or resume one",
 			type: "local",
 			async execute(ctx) {
 				if (handler._activeTurn || handler._pendingPermissionCallId) {
@@ -748,55 +710,19 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				const dir = getSessionStoreDir(resolveAgentDir());
+				const recent = await readRecentSessions(dir);
 				const selector = ctx.args.trim();
-				const recent = selector.length === 0 ? null : await readRecentSessions(dir);
-				const data =
-					selector.length === 0
-						? await readLastSession(dir)
-						: (() => {
-								if (!recent) return null;
-								const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
-								const idx = Number.parseInt(idxText, 10);
-								if (Number.isFinite(idx) && idx >= 1 && idx <= recent.length) {
-									return recent[idx - 1]?.recoveryData ?? null;
-								}
+				if (selector.length === 0) {
+					renderRecentSessions(ctx.output, recent, "Recent sessions:");
+					if (recent.length > 0) {
+						ctx.output.writeLine("Next: /resume #N | /resume <sessionId|title>");
+					}
+					return undefined;
+				}
 
-								const exact =
-									recent.find((entry) => entry.recoveryData.sessionId.value === selector)?.recoveryData ??
-									null;
-								if (exact) return exact;
-
-								const prefixMatches = recent.filter((entry) =>
-									entry.recoveryData.sessionId.value.startsWith(selector),
-								);
-								if (prefixMatches.length === 1) return prefixMatches[0]!.recoveryData;
-
-								const q = selector.toLowerCase();
-								const titleMatches = recent.filter((entry) => (entry.title ?? "").toLowerCase().includes(q));
-								if (titleMatches.length === 1) return titleMatches[0]!.recoveryData;
-
-								const candidates = [...prefixMatches, ...titleMatches].slice(0, 10);
-								if (candidates.length > 1) {
-									ctx.output.writeLine("Multiple matches:");
-									let i = 0;
-									for (const entry of candidates) {
-										i++;
-										const id = entry.recoveryData.sessionId.value;
-										const model = entry.recoveryData.model.id;
-										const title = entry.title ? ` — ${entry.title}` : "";
-										ctx.output.writeLine(`  #${i} ${id} (${model})${title}`);
-									}
-									ctx.output.writeLine("Tip: use an exact sessionId, or /sessions then /resume #N.");
-									return null;
-								}
-
-								return null;
-							})();
-
+				const data = resolveRecentSessionSelection(selector, recent, ctx.output);
 				if (!data) {
-					ctx.output.writeError(
-						selector.length === 0 ? "No previous session found." : `Session not found: ${selector}`,
-					);
+					ctx.output.writeError(`Session not found: ${selector}`);
 					return undefined;
 				}
 
@@ -806,7 +732,7 @@ class InteractiveModeHandler implements ModeHandler {
 				const recovered = runtime.recoverSession(data);
 				switchInteractiveSession(recovered);
 				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
-				ctx.output.writeLine("Next: continue this session, or /sessions to switch again.");
+				ctx.output.writeLine("Next: continue this session, or /resume to view history again.");
 				return undefined;
 			},
 		});
@@ -2250,6 +2176,71 @@ function compareTerminalSelectionPoints(
 		return leftRow - rightRow;
 	}
 	return leftColumn - rightColumn;
+}
+
+function formatSessionAge(ts: number): string {
+	const delta = Math.max(0, Date.now() - ts);
+	const seconds = Math.floor(delta / 1000);
+	if (seconds < 60) return `${seconds}s ago`;
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes}m ago`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours}h ago`;
+	const days = Math.floor(hours / 24);
+	return `${days}d ago`;
+}
+
+function renderRecentSessions(
+	output: OutputSink,
+	recent: readonly RecentSessionEntry[],
+	header: string,
+	options?: { readonly includeAge?: boolean },
+): void {
+	if (recent.length === 0) {
+		output.writeLine("No recent sessions.");
+		return;
+	}
+	output.writeLine(header);
+	let i = 0;
+	for (const entry of recent) {
+		i += 1;
+		const id = entry.recoveryData.sessionId.value;
+		const model = entry.recoveryData.model.id;
+		const title = entry.title ? ` — ${entry.title}` : "";
+		const age = options?.includeAge === false ? "" : ` — ${formatSessionAge(entry.updatedAt)}`;
+		output.writeLine(`  #${i} ${id} (${model})${title}${age}`);
+	}
+}
+
+function resolveRecentSessionSelection(
+	selector: string,
+	recent: readonly RecentSessionEntry[],
+	output: OutputSink,
+): RecentSessionEntry["recoveryData"] | null {
+	const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
+	const idx = Number.parseInt(idxText, 10);
+	if (Number.isFinite(idx) && idx >= 1 && idx <= recent.length) {
+		return recent[idx - 1]?.recoveryData ?? null;
+	}
+
+	const exact = recent.find((entry) => entry.recoveryData.sessionId.value === selector)?.recoveryData ?? null;
+	if (exact) return exact;
+
+	const prefixMatches = recent.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
+	if (prefixMatches.length === 1) return prefixMatches[0]!.recoveryData;
+
+	const q = selector.toLowerCase();
+	const titleMatches = recent.filter((entry) => (entry.title ?? "").toLowerCase().includes(q));
+	if (titleMatches.length === 1) return titleMatches[0]!.recoveryData;
+
+	const candidates = [...prefixMatches, ...titleMatches].slice(0, 10);
+	if (candidates.length > 1) {
+		renderRecentSessions(output, candidates, "Multiple matches:", { includeAge: false });
+		output.writeLine("Tip: use an exact sessionId, or /resume #N from the recent history list.");
+		return null;
+	}
+
+	return null;
 }
 
 export function createDebouncedCallback(

@@ -568,7 +568,7 @@ describe("SessionFacade", () => {
 		]);
 	});
 
-	it("reuses allow_for_session approval for the same bash command within the session", async () => {
+	it("auto-allows the same read-only bash command within the session", async () => {
 		const adapter = new StubKernelSessionAdapter();
 		const globalBus = createEventBus();
 		const state = createInitialSessionState(stubId, stubModel, new Set(["bash"]));
@@ -635,10 +635,7 @@ describe("SessionFacade", () => {
 		globalBus.onCategory("permission", (event) => received.push(event));
 		globalBus.onCategory("tool", (event) => received.push(event));
 
-		const firstPrompt = facade.prompt("run bash once");
-		await new Promise((r) => setTimeout(r, 0));
-		await facade.resolvePermission("bash_pwd_1", "allow_for_session");
-		await firstPrompt;
+		await facade.prompt("run bash once");
 
 		const eventsAfterFirstPrompt = received.length;
 		await facade.prompt("run bash twice");
@@ -647,6 +644,7 @@ describe("SessionFacade", () => {
 			"tool_started",
 			"tool_completed",
 		]);
+		expect(received.map((event) => event.type)).not.toContain("permission_requested");
 	});
 
 	it("reuses allow_for_session approval for write on the same file within the session", async () => {
@@ -743,6 +741,13 @@ describe("SessionFacade", () => {
 			parameters: { file_path: "/tmp/.tmp-tests/one.txt", content: "world" },
 		});
 		expect(writeDecision).toMatchObject({ type: "allow" });
+		governor.afterExecution({
+			toolName: "write",
+			toolCallId: "write_probe",
+			status: "success",
+			targetPath: "/tmp/.tmp-tests/one.txt",
+			durationMs: 0,
+		});
 
 		const eventsAfterFirstPrompt = received.length;
 		await facade.prompt("write twice");
@@ -833,22 +838,28 @@ describe("SessionFacade", () => {
 		await facade.resolvePermission("edit_1", "allow_for_session");
 		await firstPrompt;
 
-		expect(
-			governor.beforeExecution({
-				sessionId: stubId.value,
-				toolName: "edit",
-				toolCallId: "edit_probe",
-				workingDirectory: "/tmp",
-				sessionMode: "print",
-				isSubAgent: false,
-				targetPath: "/tmp/.tmp-tests/two.txt",
-				parameters: {
-					file_path: "/tmp/.tmp-tests/two.txt",
-					old_string: "after",
-					new_string: "final",
-				},
-			}).type,
-		).toBe("allow");
+		const editDecision = governor.beforeExecution({
+			sessionId: stubId.value,
+			toolName: "edit",
+			toolCallId: "edit_probe",
+			workingDirectory: "/tmp",
+			sessionMode: "print",
+			isSubAgent: false,
+			targetPath: "/tmp/.tmp-tests/two.txt",
+			parameters: {
+				file_path: "/tmp/.tmp-tests/two.txt",
+				old_string: "after",
+				new_string: "final",
+			},
+		});
+		expect(editDecision.type).toBe("allow");
+		governor.afterExecution({
+			toolName: "edit",
+			toolCallId: "edit_probe",
+			status: "success",
+			targetPath: "/tmp/.tmp-tests/two.txt",
+			durationMs: 0,
+		});
 
 		const eventsAfterFirstPrompt = received.length;
 		await facade.prompt("edit twice");
@@ -931,18 +942,24 @@ describe("SessionFacade", () => {
 		await facade.resolvePermission("write_a", "allow_for_session");
 		await firstPrompt;
 
-		expect(
-			governor.beforeExecution({
-				sessionId: stubId.value,
-				toolName: "write",
-				toolCallId: "write_probe_b",
-				workingDirectory: "/tmp",
-				sessionMode: "print",
-				isSubAgent: false,
-				targetPath: "/tmp/.tmp-tests/b.txt",
-				parameters: { file_path: "/tmp/.tmp-tests/b.txt", content: "world" },
-			}).type,
-		).toBe("allow");
+		const writeSecondDecision = governor.beforeExecution({
+			sessionId: stubId.value,
+			toolName: "write",
+			toolCallId: "write_probe_b",
+			workingDirectory: "/tmp",
+			sessionMode: "print",
+			isSubAgent: false,
+			targetPath: "/tmp/.tmp-tests/b.txt",
+			parameters: { file_path: "/tmp/.tmp-tests/b.txt", content: "world" },
+		});
+		expect(writeSecondDecision.type).toBe("allow");
+		governor.afterExecution({
+			toolName: "write",
+			toolCallId: "write_probe_b",
+			status: "success",
+			targetPath: "/tmp/.tmp-tests/b.txt",
+			durationMs: 0,
+		});
 
 		const eventsAfterFirstPrompt = received.length;
 		await facade.prompt("write second file");

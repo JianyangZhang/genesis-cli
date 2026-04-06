@@ -844,24 +844,22 @@ describe("interactive workbench TTY", () => {
 		const recoveredSessionId = "session-recovered";
 		try {
 			await mkdir(sessionStoreDir, { recursive: true });
-			await writeFile(
-				join(sessionStoreDir, "last.json"),
-				`${JSON.stringify(
-					{
-						sessionId: { value: recoveredSessionId },
-						model: { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" },
-						toolSet: ["bash"],
-						planSummary: null,
-						compactionSummary: null,
-						taskState: { status: "idle", currentTaskId: null, startedAt: null },
-						workingDirectory: "/tmp",
-						agentDir,
-					},
-					null,
-					2,
-				)}\n`,
-				"utf8",
-			);
+				const recoveredData = {
+					sessionId: { value: recoveredSessionId },
+					model: { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" },
+					toolSet: ["bash"],
+					planSummary: null,
+					compactionSummary: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					workingDirectory: "/tmp",
+					agentDir,
+				};
+				await writeFile(join(sessionStoreDir, "last.json"), `${JSON.stringify(recoveredData, null, 2)}\n`, "utf8");
+				await writeFile(
+					join(sessionStoreDir, "recent.json"),
+					`${JSON.stringify([{ recoveryData: recoveredData, updatedAt: Date.now(), title: "Recovered chat" }], null, 2)}\n`,
+					"utf8",
+				);
 
 			const initialSession = new FakeInteractiveSession({
 				sessionId: "session-before-resume",
@@ -885,6 +883,12 @@ describe("interactive workbench TTY", () => {
 				await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
 
 				input.write("/resume\r");
+				await waitFor(() => screen.snapshot().includes("Recent sessions:"));
+				expect(screen.snapshot()).toContain("Recovered chat");
+				expect(screen.snapshot()).toContain(`#1 ${recoveredSessionId}`);
+				expect(screen.snapshot()).toContain("Next: /resume #N | /resume <sessionId|title>");
+
+				input.write("/resume #1\r");
 				await waitFor(() => screen.snapshot().includes(`Resumed: ${recoveredSessionId}`));
 
 				const snapshot = screen.snapshot();
