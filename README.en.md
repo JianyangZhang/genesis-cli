@@ -16,11 +16,13 @@ Minimal path: configure, install, then run.
 
 ### 1. Configure
 
-- User settings file:
+- **User settings file**
   - macOS / Linux: `~/.genesis-cli/settings.json`
   - Windows: `%USERPROFILE%/.genesis-cli/settings.json`
-- If the file does not exist yet, `genesis` creates the directory and a starter template automatically; if it already exists, it is left untouched
-- Minimal example:
+- **Automatic initialization**
+  - If the file does not exist yet, `genesis` creates the directory and a starter template automatically
+  - If it already exists, the CLI leaves your current file untouched
+- **Minimal example**
 
 ```json
 {
@@ -34,23 +36,22 @@ Minimal path: configure, install, then run.
 }
 ```
 
-- `GENESIS_API_KEY`: model API key
-- `GENESIS_BOOTSTRAP_BASE_URL`: provider bootstrap base URL
-- `GENESIS_BOOTSTRAP_API`: bootstrap transport, typically `openai-completions`
-- `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`: default provider and model
-
-- Optional project-level overrides:
-- `.genesis/settings.json`
-- `.genesis/settings.local.json`
-- `.genesis-local/pi-agent/models.json`
-
-- Current precedence:
-- CLI flags
-- shell environment variables
-- `env` from `~/.genesis-cli/settings.json`
-- project `.genesis/settings.local.json`
-- project `.genesis/settings.json`
-- local agent config under `--agent-dir`
+- **Key fields**
+  - `GENESIS_API_KEY`: model API key
+  - `GENESIS_BOOTSTRAP_BASE_URL`: provider bootstrap base URL
+  - `GENESIS_BOOTSTRAP_API`: bootstrap transport, typically `openai-completions`
+  - `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`: default provider and model
+- **Optional project-level overrides**
+  - `.genesis/settings.json`
+  - `.genesis/settings.local.json`
+  - `.genesis-local/pi-agent/models.json`
+- **Current precedence (highest -> lowest)**
+  1. CLI flags
+  2. shell environment variables
+  3. project `.genesis/settings.local.json`
+  4. project `.genesis/settings.json`
+  5. `env` from `~/.genesis-cli/settings.json`
+  6. local agent config under `--agent-dir`
 
 ### 2. Install
 

@@ -16,11 +16,13 @@
 
 ### 1. 配置
 
-- 用户级配置文件：
+- **用户级配置文件**
   - macOS / Linux：`~/.genesis-cli/settings.json`
   - Windows：`%USERPROFILE%/.genesis-cli/settings.json`
-- 若文件不存在，`genesis` 会自动创建目录与模板；若已存在，则完全不改
-- 最小示例：
+- **自动初始化**
+  - 若文件不存在，`genesis` 会自动创建目录与模板
+  - 若文件已存在，CLI 不会改写你的现有内容
+- **最小示例**
 
 ```json
 {
@@ -34,23 +36,22 @@
 }
 ```
 
-- `GENESIS_API_KEY`：模型 API key
-- `GENESIS_BOOTSTRAP_BASE_URL`：provider 初始化基地址
-- `GENESIS_BOOTSTRAP_API`：初始化协议，通常为 `openai-completions`
-- `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`：默认 provider 与模型
-
-- 可选项目级覆盖：
-- `.genesis/settings.json`
-- `.genesis/settings.local.json`
-- `.genesis-local/pi-agent/models.json`
-
-- 当前优先级：
-- CLI flags
-- shell 环境变量
-- `~/.genesis-cli/settings.json` 的 `env`
-- 项目级 `.genesis/settings.local.json`
-- 项目级 `.genesis/settings.json`
-- `--agent-dir` 下的本地 agent 配置
+- **关键字段**
+  - `GENESIS_API_KEY`：模型 API key
+  - `GENESIS_BOOTSTRAP_BASE_URL`：provider 初始化基地址
+  - `GENESIS_BOOTSTRAP_API`：初始化协议，通常为 `openai-completions`
+  - `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`：默认 provider 与模型
+- **可选项目级覆盖**
+  - `.genesis/settings.json`
+  - `.genesis/settings.local.json`
+  - `.genesis-local/pi-agent/models.json`
+- **当前优先级（高 -> 低）**
+  1. CLI flags
+  2. shell 环境变量
+  3. 项目级 `.genesis/settings.local.json`
+  4. 项目级 `.genesis/settings.json`
+  5. `~/.genesis-cli/settings.json` 的 `env`
+  6. `--agent-dir` 下的本地 agent 配置
 
 ### 2. 安装
 
