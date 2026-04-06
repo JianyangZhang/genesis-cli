@@ -263,6 +263,24 @@ describe("PiMonoSessionAdapter", () => {
 
 		expect(events.map((event) => event.type)).toEqual(["permission_request", "tool_execution_denied", "agent_end"]);
 	});
+
+	it("streams compaction events from a compact operation", async () => {
+		const agentDir = await createAgentDir();
+		const session = new FakeAgentSession(async () => {
+			session.emit({ type: "agent_end", messages: [] } as never);
+		});
+
+		const adapter = new PiMonoSessionAdapter({
+			workingDirectory: process.cwd(),
+			agentDir,
+			model: { provider: "test-provider", id: "test-model" },
+			createTools: () => [],
+			createSession: async () => session.asAgentSession(),
+		});
+
+		const events = await collectEvents(adapter.sendCompact("keep next steps"));
+		expect(events.map((event) => event.type)).toEqual(["compaction_start", "compaction_end"]);
+	});
 });
 
 class FakeAgentSession {
@@ -304,6 +322,20 @@ class FakeAgentSession {
 
 	async abort(): Promise<void> {
 		this.isStreaming = false;
+	}
+
+	async compact(customInstructions?: string): Promise<void> {
+		this.emit({ type: "compaction_start", reason: "manual" } as never);
+		this.emit({
+			type: "compaction_end",
+			reason: "manual",
+			aborted: false,
+			willRetry: false,
+			result: {
+				summary: customInstructions ?? "fake summary",
+				tokensBefore: 42,
+			},
+		} as never);
 	}
 
 	dispose(): void {}

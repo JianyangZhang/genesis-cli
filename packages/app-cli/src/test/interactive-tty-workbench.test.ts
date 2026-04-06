@@ -632,7 +632,25 @@ class FakeInteractiveSession implements SessionFacade {
 		return () => {};
 	}
 
-	async compact(): Promise<void> {}
+	async compact(): Promise<void> {
+		this.emit({
+			type: "compaction_started",
+			timestamp: Date.now(),
+			category: "compaction",
+			summary: undefined,
+		} as never);
+		this.emit({
+			type: "compaction_completed",
+			timestamp: Date.now(),
+			category: "compaction",
+			summary: {
+				compressedAt: Date.now(),
+				originalMessageCount: 3,
+				retainedMessageCount: 1,
+				estimatedTokensSaved: 128,
+			},
+		} as never);
+	}
 
 	private emit(event: RuntimeEvent): void {
 		this.events.emit(event);
@@ -940,6 +958,31 @@ describe("interactive workbench TTY", () => {
 		} finally {
 			await rm(agentDir, { recursive: true, force: true });
 		}
+	}, 10000);
+
+	it("runs /compact without crashing and keeps the prompt visible", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-compact" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("hello\r");
+			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
+
+			input.write("/compact\r");
+			await waitFor(() => screen.snapshot().includes("Compaction completed."));
+
+			const snapshot = screen.snapshot();
+			expect(snapshot).toContain("Compaction completed.");
+			expect(snapshot).toContain("❯");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
 	}, 10000);
 
 	it("does not leave duplicate assistant lines behind across streaming updates", async () => {
