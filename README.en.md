@@ -4,7 +4,7 @@
 
 # Genesis CLI
 
-**An open-source coding CLI inspired by pi-mono and Claude Code, built around a vendored micro-kernel centered on `pi-agent-core`.**
+**An open-source coding CLI for real repositories: built with a `TTY / app-runtime / vendored kernel` layered structure, with repository-owned kernel boundaries and an ongoing focus on tightening the `session core`.**
 
 [查看中文 README](README.md)
 
@@ -12,7 +12,7 @@
 
 ## Quick Start
 
-Genesis is building toward an open-source coding CLI that feels like a real software teammate: ambitious in product vision, disciplined in execution, and practical enough for day-to-day repository work.
+Genesis is an open-source coding CLI for real repositories, aiming to balance product experience, engineering discipline, and long-term maintainability.
 
 ### 1. Configure First
 
@@ -64,8 +64,6 @@ Current precedence:
 npm install -g @pickle-pee/genesis-cli@latest
 genesis --version
 ```
-
-If you are upgrading an existing global install, prefer explicitly using `@latest` so npm refreshes the published CLI you expect.
 
 ### 3. Run
 

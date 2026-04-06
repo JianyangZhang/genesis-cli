@@ -4,7 +4,7 @@
 
 # Genesis CLI
 
-**一个同时借鉴 `pi-mono` 与 Claude Code、并以 `pi-agent-core` 为中心收敛微内核边界的开源代码 CLI。**
+**一个面向真实仓库工作的开源代码 CLI：采用 `TTY / app-runtime / vendored kernel` 分层结构，在仓库内自持内核边界，并持续围绕 `session core` 收敛。**
 
 [View English README](README.en.md)
 
@@ -12,7 +12,7 @@
 
 ## 快速开始
 
-Genesis 的目标，是成为一个真正像软件搭档一样工作的开源代码 CLI：既有产品野心，也有工程纪律，同时足够务实，能直接进入你每天面对的真实仓库工作流。
+Genesis 是一款面向真实仓库工作的开源代码 CLI，目标是在产品体验、工程纪律和可持续演进之间保持平衡。
 
 ### 1. 先配置
 
@@ -64,8 +64,6 @@ Genesis 的目标，是成为一个真正像软件搭档一样工作的开源代
 npm install -g @pickle-pee/genesis-cli@latest
 genesis --version
 ```
-
-如果你是在升级已全局安装过的版本，建议显式带上 `@latest`，避免 npm 继续沿用旧的已安装结果。
 
 ### 3. 启动
 
