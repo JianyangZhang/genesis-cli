@@ -155,7 +155,6 @@ genesis -d
   - `--debug`: `runtime.jsonl` records `DEBUG` and above
   - `error.jsonl` always records errors and crashes
   - `crash.jsonl` only records unhandled exceptions, unhandled rejections, and fatal failures
-- persistence is asynchronous; if the log directory is not writable, Genesis degrades to stderr diagnostics instead of crashing the main process just because logging failed
 
 ### Common Checks
 
