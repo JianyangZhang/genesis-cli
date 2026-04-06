@@ -222,9 +222,12 @@ describe("createAppRuntime", () => {
 
 		const results = await runtime.searchRecentSessions("README 发布");
 		expect(results).toHaveLength(2);
-		expect(results[0]?.recoveryData.sessionId.value).toBe("session-b");
-		expect(results[0]?.title).toBe("README 发布说明补充");
-		expect(results[1]?.recoveryData.sessionId.value).toBe("session-a");
+		expect(results[0]?.entry.recoveryData.sessionId.value).toBe("session-b");
+		expect(results[0]?.headline).toBe("README 发布说明补充");
+		expect(results[0]?.matchSource).toBe("title");
+		expect(results[0]?.snippet).toContain("README 发布说明补充");
+		expect(results[1]?.entry.recoveryData.sessionId.value).toBe("session-a");
+		expect(results[1]?.matchSource).toBe("title");
 	});
 
 	it("createAdapter provisions a fresh adapter per session", async () => {

@@ -142,6 +142,8 @@ export type {
 	CompactionSummary,
 	ModelDescriptor,
 	RecentSessionEntry,
+	RecentSessionMatchSource,
+	RecentSessionSearchHit,
 	RuntimeContext,
 	SessionId,
 	SessionRecoveryData,

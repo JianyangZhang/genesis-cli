@@ -20,7 +20,13 @@ import { sessionCreated, sessionResumed } from "./session/session-events.js";
 import type { SessionFacade } from "./session/session-facade.js";
 import { SessionFacadeImpl } from "./session/session-facade.js";
 import { createInitialSessionState, recoverSessionState } from "./session/session-state.js";
-import type { CliMode, ModelDescriptor, RecentSessionEntry, SessionRecoveryData } from "./types/index.js";
+import type {
+	CliMode,
+	ModelDescriptor,
+	RecentSessionEntry,
+	RecentSessionSearchHit,
+	SessionRecoveryData,
+} from "./types/index.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -82,7 +88,7 @@ export interface AppRuntime {
 	listRecentSessions(): Promise<readonly RecentSessionEntry[]>;
 
 	/** Search recent sessions by human-readable text, ordered by relevance. */
-	searchRecentSessions(query: string): Promise<readonly RecentSessionEntry[]>;
+	searchRecentSessions(query: string): Promise<readonly RecentSessionSearchHit[]>;
 
 	/** Shut down the runtime and release resources. */
 	shutdown(): Promise<void>;
@@ -149,7 +155,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			return listRecentSessions(config.agentDir);
 		},
 
-		searchRecentSessions(query: string): Promise<readonly RecentSessionEntry[]> {
+		searchRecentSessions(query: string): Promise<readonly RecentSessionSearchHit[]> {
 			return searchRecentSessions(config.agentDir, query);
 		},
 

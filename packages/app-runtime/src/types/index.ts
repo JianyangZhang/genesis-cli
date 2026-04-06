@@ -90,6 +90,21 @@ export interface RecentSessionEntry {
 	readonly updatedAt: number;
 }
 
+export type RecentSessionMatchSource =
+	| "title"
+	| "first_prompt"
+	| "summary"
+	| "recent_user_message"
+	| "recent_assistant_message"
+	| "session_id";
+
+export interface RecentSessionSearchHit {
+	readonly entry: RecentSessionEntry;
+	readonly headline: string;
+	readonly snippet: string;
+	readonly matchSource: RecentSessionMatchSource;
+}
+
 // ---------------------------------------------------------------------------
 // Plan — canonical types live in planning/plan-types.ts. Re-exported here for
 // backward compatibility so that consumers importing from types/index.js

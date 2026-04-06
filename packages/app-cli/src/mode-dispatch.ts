@@ -13,6 +13,8 @@ import type {
 	CliMode,
 	CompactionSummary,
 	RecentSessionEntry,
+	RecentSessionMatchSource,
+	RecentSessionSearchHit,
 	RuntimeEvent,
 	SessionClosedEvent,
 	SessionFacade,
@@ -739,8 +741,8 @@ class InteractiveModeHandler implements ModeHandler {
 						ctx.output.writeError(`Session not found: ${selector}`);
 						return undefined;
 					}
-					renderRecentSessions(ctx.output, matches, `Search results for "${selector}":`, { includeAge: false });
-					handler._resumeSelectionEntries = matches;
+					renderRecentSessionSearchHits(ctx.output, matches, `Search results for "${selector}":`);
+					handler._resumeSelectionEntries = matches.map((hit) => hit.entry);
 					ctx.output.writeLine("Next: /resume #N to open one of the matches.");
 					return undefined;
 				}
@@ -2292,6 +2294,34 @@ function renderRecentSessions(
 	}
 }
 
+function renderRecentSessionSearchHits(
+	output: OutputSink,
+	hits: readonly RecentSessionSearchHit[],
+	header: string,
+): void {
+	if (hits.length === 0) {
+		output.writeLine("No recent sessions.");
+		return;
+	}
+	output.writeLine(header);
+	let i = 0;
+	for (const hit of hits) {
+		i += 1;
+		const entry = hit.entry;
+		const id = entry.recoveryData.sessionId.value;
+		const metadata = entry.recoveryData.metadata;
+		const meta = [
+			formatRecentSessionMatchSource(hit.matchSource),
+			formatRecentSessionModel(entry.recoveryData.model),
+			metadata?.fileSizeBytes ? formatFileSize(metadata.fileSizeBytes) : null,
+			shortSessionId(id),
+		].filter((value): value is string => Boolean(value));
+		output.writeLine(`  #${i} ${hit.headline}`);
+		output.writeLine(`     ${meta.join(" · ")}`);
+		output.writeLine(`     Match: ${hit.snippet}`);
+	}
+}
+
 function resolveRecentSessionDirectSelection(
 	selector: string,
 	displayedEntries: readonly RecentSessionEntry[],
@@ -2323,6 +2353,23 @@ function writeSessionTranscriptPreview(output: OutputSink, entry: RecentSessionE
 
 function shortSessionId(sessionId: string): string {
 	return sessionId.length <= 8 ? sessionId : sessionId.slice(0, 8);
+}
+
+function formatRecentSessionMatchSource(source: RecentSessionMatchSource): string {
+	switch (source) {
+		case "title":
+			return "title match";
+		case "first_prompt":
+			return "first prompt";
+		case "summary":
+			return "summary match";
+		case "recent_user_message":
+			return "user message";
+		case "recent_assistant_message":
+			return "assistant message";
+		case "session_id":
+			return "session id";
+	}
 }
 
 function pickRecentSessionHeadline(entry: RecentSessionEntry): string {

@@ -2,7 +2,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import type { AppRuntime, RecentSessionEntry, RuntimeEvent, SessionFacade, SessionRecoveryData } from "@pickle-pee/runtime";
+import type {
+	AppRuntime,
+	RecentSessionEntry,
+	RecentSessionSearchHit,
+	RuntimeEvent,
+	SessionFacade,
+	SessionRecoveryData,
+} from "@pickle-pee/runtime";
 import { createEventBus, createPlanEngine, createToolGovernor } from "@pickle-pee/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { initializeDebugLogger } from "../debug-logger.js";
@@ -810,18 +817,34 @@ function createSequencedRuntime(
 function searchRecentSessionsForTest(
 	recentSessions: readonly RecentSessionEntry[],
 	query: string,
-): readonly RecentSessionEntry[] {
+): readonly RecentSessionSearchHit[] {
 	const normalizedQuery = query.toLowerCase();
 	return recentSessions
-		.filter((entry) =>
-			[
-				entry.title,
-				entry.recoveryData.metadata?.summary,
-				entry.recoveryData.metadata?.firstPrompt,
-				...(entry.recoveryData.metadata?.recentMessages.map((message) => message.text) ?? []),
-			].some((value) => (value ?? "").toLowerCase().includes(normalizedQuery)),
-		)
-		.sort((a, b) => b.updatedAt - a.updatedAt);
+		.map((entry) => buildSearchHitForTest(entry, normalizedQuery))
+		.filter((hit): hit is RecentSessionSearchHit => hit !== null)
+		.sort((a, b) => b.entry.updatedAt - a.entry.updatedAt);
+}
+
+function buildSearchHitForTest(entry: RecentSessionEntry, query: string): RecentSessionSearchHit | null {
+	const fields = [
+		{ source: "title" as const, value: entry.title },
+		{ source: "first_prompt" as const, value: entry.recoveryData.metadata?.firstPrompt },
+		{ source: "summary" as const, value: entry.recoveryData.metadata?.summary },
+		...(entry.recoveryData.metadata?.recentMessages.map((message) => ({
+			source: message.role === "user" ? ("recent_user_message" as const) : ("recent_assistant_message" as const),
+			value: message.text,
+		})) ?? []),
+	];
+	const matched = fields.find((field) => (field.value ?? "").toLowerCase().includes(query));
+	if (!matched) {
+		return null;
+	}
+	return {
+		entry,
+		headline: entry.title ?? entry.recoveryData.metadata?.firstPrompt ?? entry.recoveryData.metadata?.summary ?? entry.recoveryData.sessionId.value,
+		snippet: matched.value ?? "",
+		matchSource: matched.source,
+	};
 }
 
 async function waitFor(check: () => boolean, timeoutMs = 1000): Promise<void> {
@@ -1024,6 +1047,8 @@ describe("interactive workbench TTY", () => {
 				input.write("/resume commit & push\r");
 				await waitFor(() => screen.snapshot().includes('Search results for "commit & push":'));
 				expect(screen.snapshot()).toContain("本地所有修改，commit & push");
+				expect(screen.snapshot()).toContain("first prompt");
+				expect(screen.snapshot()).toContain("Match: 本地所有修改，commit & push");
 				expect(screen.snapshot()).toContain("Next: /resume #N to open one of the matches.");
 
 				input.write("/resume #1\r");
@@ -1116,6 +1141,7 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes('Search results for "README 发布":'));
 			expect(screen.snapshot()).toContain("#1 README 发布说明补充");
 			expect(screen.snapshot()).toContain("#2 README 发布文案调整");
+			expect(screen.snapshot()).toContain("Match: README 发布说明补充");
 
 			input.write("/resume #2\r");
 			await waitFor(() => screen.snapshot().includes(`Resumed: ${firstRecoveredId}`));
