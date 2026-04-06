@@ -330,6 +330,22 @@ describe("interactive transcript formatting", () => {
 		expect(footer.block).toContain("↓ 32 tokens");
 	});
 
+	it("shows compacting status in the footer", () => {
+		const footer = formatInteractiveFooter({
+			terminalWidth: 80,
+			prompt: "❯ ",
+			buffer: "",
+			cursor: 0,
+			suggestions: [],
+			turnNotice: "compacting",
+			turnNoticeAnimationFrame: 1,
+			elapsedMs: 2500,
+			permission: null,
+		});
+		expect(footer.block).toContain("Compacting..");
+		expect(footer.block).toContain("2s");
+	});
+
 	it("shows thinking detail panel hints and expanded content", () => {
 		const collapsed = formatInteractiveFooter({
 			terminalWidth: 80,

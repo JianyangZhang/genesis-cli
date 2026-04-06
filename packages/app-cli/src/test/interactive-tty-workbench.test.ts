@@ -201,6 +201,8 @@ class FakeInteractiveSession implements SessionFacade {
 		readonly sessionId?: string;
 		readonly workingDirectory?: string;
 		readonly agentDir?: string;
+		readonly compactDelayMs?: number;
+		readonly compactFailureMessage?: string;
 	}) {
 		this.id = { value: options?.sessionId ?? "tty-test-session" };
 		const model = { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" };
@@ -218,7 +220,12 @@ class FakeInteractiveSession implements SessionFacade {
 			toolSet: new Set(["bash"]),
 			taskState: { status: "idle", currentTaskId: null, startedAt: null },
 		} as unknown as SessionFacade["context"];
+		this._compactDelayMs = options?.compactDelayMs ?? 0;
+		this._compactFailureMessage = options?.compactFailureMessage ?? null;
 	}
+
+	private readonly _compactDelayMs: number;
+	private readonly _compactFailureMessage: string | null;
 
 	isWaitingForPermission(): boolean {
 		return this.pendingPermission !== null;
@@ -639,6 +646,12 @@ class FakeInteractiveSession implements SessionFacade {
 			category: "compaction",
 			summary: undefined,
 		} as never);
+		if (this._compactDelayMs > 0) {
+			await sleep(this._compactDelayMs);
+		}
+		if (this._compactFailureMessage) {
+			throw new Error(this._compactFailureMessage);
+		}
 		this.emit({
 			type: "compaction_completed",
 			timestamp: Date.now(),
@@ -895,7 +908,7 @@ describe("interactive workbench TTY", () => {
 			]);
 				const recoveredData = {
 					sessionId: { value: recoveredSessionId },
-					model: { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" },
+					model: { id: "unknown", provider: "zai" },
 					toolSet: ["bash"],
 					planSummary: null,
 					compactionSummary: null,
@@ -946,7 +959,7 @@ describe("interactive workbench TTY", () => {
 				input.write("/resume\r");
 				await waitFor(() => screen.snapshot().includes("Recent sessions:"));
 				expect(screen.snapshot()).toContain("继续推进 /resume 的体验对齐");
-				expect(screen.snapshot()).toContain("glm-5.1");
+				expect(screen.snapshot()).not.toContain(" · unknown · ");
 				expect(screen.snapshot()).toContain("Next: /resume #N | /resume <sessionId|title>");
 
 				input.write("/resume #1\r");
@@ -972,7 +985,7 @@ describe("interactive workbench TTY", () => {
 	}, 10000);
 
 	it("runs /compact without crashing and keeps the prompt visible", async () => {
-		const session = new FakeInteractiveSession({ sessionId: "session-compact" });
+		const session = new FakeInteractiveSession({ sessionId: "session-compact", compactDelayMs: 150 });
 		const runtime = createFakeRuntime(session);
 		const input = new FakeTtyInput();
 		const output = new FakeTtyOutput();
@@ -985,11 +998,42 @@ describe("interactive workbench TTY", () => {
 			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
 
 			input.write("/compact\r");
+			await waitFor(() => screen.snapshot().includes("Compacting."));
 			await waitFor(() => screen.snapshot().includes("Compaction completed."));
 
 			const snapshot = screen.snapshot();
 			expect(snapshot).toContain("Compaction completed.");
 			expect(snapshot).toContain("❯");
+
+			input.write("hello\r");
+			await waitFor(() => countOccurrences(screen.snapshot(), "Hi from Genesis") >= 2);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("keeps the TTY alive when /compact fails", async () => {
+		const session = new FakeInteractiveSession({
+			sessionId: "session-compact-failure",
+			compactDelayMs: 50,
+			compactFailureMessage: "compact exploded",
+		});
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/compact\r");
+			await waitFor(() => screen.snapshot().includes("Compacting."));
+			await waitFor(() => screen.snapshot().includes("Error: compact exploded"));
+			expect(screen.snapshot()).toContain("❯");
+
+			input.write("hello\r");
+			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
 
 			input.write("/exit\r");
 			await startPromise;

@@ -89,7 +89,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _changedPaths = new Set<string>();
 	private readonly _transcriptBlocks: string[] = [];
 	private _assistantBuffer = "";
-	private _turnNotice: "thinking" | "responding" | null = null;
+	private _turnNotice: "thinking" | "responding" | "compacting" | null = null;
 	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
 	private _turnStartedAt: number | null = null;
@@ -833,12 +833,17 @@ class InteractiveModeHandler implements ModeHandler {
 				// Check for slash commands
 				const resolution = registry.resolve(trimmed);
 				if (resolution && resolution.type === "command") {
-					await resolution.command.execute?.({
-						args: resolution.args,
-						runtime,
-						session: sessionRef.current,
-						output: sink,
-					});
+					try {
+						await resolution.command.execute?.({
+							args: resolution.args,
+							runtime,
+							session: sessionRef.current,
+							output: sink,
+						});
+					} catch (error) {
+						this._lastError = error instanceof Error ? error.message : String(error);
+						sink.writeError(this._lastError);
+					}
 					if (exitRequested) {
 						break;
 					}
@@ -990,6 +995,21 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		if (event.category === "usage" && event.type === "usage_updated") {
 			this.updateTurnUsage(event.usage, event.isFinal);
+			this.renderPromptLine();
+			return;
+		}
+		if (event.category === "compaction") {
+			if (event.type === "compaction_started") {
+				this._turnNotice = "compacting";
+				this._turnNoticeAnimationFrame = 0;
+				this._turnStartedAt = Date.now();
+				this.startTurnNoticeAnimation();
+			} else {
+				this.stopTurnNoticeAnimation();
+				this._turnNotice = null;
+				this._turnNoticeAnimationFrame = 0;
+				this._turnStartedAt = null;
+			}
 			this.renderPromptLine();
 			return;
 		}
@@ -1901,7 +1921,7 @@ export function formatInteractiveFooter(state: {
 	readonly buffer: string;
 	readonly cursor: number;
 	readonly suggestions: readonly string[];
-	readonly turnNotice: "thinking" | "responding" | "tool" | null;
+	readonly turnNotice: "thinking" | "responding" | "tool" | "compacting" | null;
 	readonly turnNoticeAnimationFrame?: number;
 	readonly elapsedMs?: number | null;
 	readonly currentTurnUsage?: UsageSnapshot | null;
@@ -2211,7 +2231,7 @@ function renderRecentSessions(
 		const headline = entry.title ?? metadata?.summary ?? metadata?.firstPrompt ?? id;
 		const meta = [
 			options?.includeAge === false ? null : formatSessionAge(entry.updatedAt),
-			entry.recoveryData.model.id,
+			formatRecentSessionModel(entry.recoveryData.model),
 			metadata?.fileSizeBytes ? formatFileSize(metadata.fileSizeBytes) : null,
 			shortSessionId(id),
 		].filter((value): value is string => Boolean(value));
@@ -2276,6 +2296,14 @@ function formatFileSize(bytes: number): string {
 	if (bytes < 1024) return `${bytes}B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function formatRecentSessionModel(model: { readonly id?: string; readonly displayName?: string } | null | undefined): string | null {
+	const value = model?.displayName ?? model?.id ?? null;
+	if (!value) return null;
+	const normalized = value.trim();
+	if (normalized.length === 0) return null;
+	return normalized.toLowerCase() === "unknown" ? null : normalized;
 }
 
 export function createDebouncedCallback(
@@ -2557,7 +2585,7 @@ function formatQueuedPromptPreviewLines(queuedInputs: readonly string[], termina
 }
 
 export function formatTurnNotice(
-	kind: "thinking" | "responding" | "tool",
+	kind: "thinking" | "responding" | "tool" | "compacting",
 	options: {
 		readonly animationFrame?: number;
 		readonly queuedCount?: number;
@@ -2576,7 +2604,9 @@ export function formatTurnNotice(
 			? `Thinking${suffix}`
 			: kind === "responding"
 				? `Responding${suffix}`
-				: `${options.toolLabel ?? "Running tools"}${suffix}`;
+				: kind === "compacting"
+					? `Compacting${suffix}`
+					: `${options.toolLabel ?? "Running tools"}${suffix}`;
 	const meta: string[] = [];
 	if ((options.elapsedMs ?? 0) >= TURN_NOTICE_ELAPSED_THRESHOLD_MS) {
 		meta.push(formatElapsedLabel(options.elapsedMs ?? 0));
