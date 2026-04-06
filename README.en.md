@@ -83,30 +83,34 @@ Genesis is built for real repository workflows, with one runtime for `Interactiv
 
 ## Top-Level Blueprint
 
-Genesis follows a "thin UI, rich contracts, repository-owned kernel" structure. This section keeps only the four things contributors need most: layers, boundaries, entry points, and the current direction.
+Genesis follows a layered "terminal host / content semantics / runtime contracts / repository-owned kernel" structure. This section keeps only the four things contributors need most: layers, boundaries, entry points, and the current direction.
 
 - Layers:
-  - `packages/app-cli` owns process entrypoints, the TTY lifecycle, and the interactive mode host
-  - `packages/app-ui` owns slash commands, pickers, formatters, and interaction presentation
-  - `packages/app-runtime` owns the session facade, event normalization, governance, and planning
-  - `packages/kernel` owns the vendored kernel and continues to separate `session core` from `provider/tools`
-  - `pi-agent-core` owns the minimal agent loop and tool-call primitives
+  - `packages/app-cli` owns process entrypoints, the TTY lifecycle, debug wiring, and the interactive mode host
+  - `packages/app-tui-core` owns terminal capability detection, mode lifecycle, screen frames, patch diffs, and composer/layout rendering primitives
+  - `packages/app-ui` owns slash commands, the resume browser, formatters, footer content preparation, and interaction semantics
+  - `packages/app-runtime` owns the session facade, event normalization, recent sessions, governance, and planning
+  - `packages/app-tools` owns the tool catalog, risk classification, permission policy, command classification, and audit support
+  - `packages/kernel` owns the vendored kernel, provider integration, and upstream session plumbing
+  - `packages/app-config`, `packages/app-extensions`, and `packages/app-evaluation` fill in configuration, extension, and evaluation support
 - Boundaries:
-  - `app-cli` hosts the terminal, but does not own product semantics
-  - `app-ui` consumes stable contracts, but does not handle transcript persistence details
-  - `app-runtime` maps kernel semantics into product semantics
-  - `kernel session core` owns transcript persistence, resume, compact, context rebuild, and session metadata
-  - `kernel provider/tools` owns model auth, provider integration, and low-level tool wiring
+  - `app-cli` hosts and wires the terminal, but does not own product copy or layout semantics
+  - `app-tui-core` owns terminal materialization and rendering rules, but not slash-command or product semantics
+  - `app-ui` decides what to show, but not TTY lifecycle or transcript persistence
+  - `app-runtime` maps kernel/upstream semantics into stable product contracts
+  - `app-tools` owns tool governance and permission decisions, but not UI rendering
+  - `kernel` owns providers, models, and the low-level session pipeline, but not the CLI experience layer
 - Where to start:
-  - TTY behavior and interactive lifecycle: `app-cli`
-  - slash commands, pickers, formatters: `app-ui`
-  - session facade, event normalization, governance: `app-runtime`
-  - transcript, resume, compact, recovery snapshot: `kernel session core`
-  - provider, auth, tool wiring: `kernel provider/tools`
+  - TTY host behavior, interactive lifecycle, debug banners: `app-cli`
+  - frame/patch/cursor/footer/composer rendering: `app-tui-core`
+  - slash commands, resume browser, formatters, footer content: `app-ui`
+  - session facade, event normalization, recent sessions, planning: `app-runtime`
+  - permissions, risk, command classification, audit: `app-tools`
+  - provider, auth, low-level session plumbing: `kernel`
 - Current direction:
-  - stop adding commands first; keep tightening the `session core` boundary
-  - already landed: `/resume` preview, a minimally working `/compact`, and `SessionRecoveryData.metadata`
-  - still in progress: `session-manager`, recovery contracts, and removing cross-layer fallback logic
+  - keep moving interactive rendering rules into `app-tui-core`
+  - keep moving content semantics out of `app-cli` and back into `app-ui`
+  - keep `app-runtime` and `app-tools` contracts stable while reducing cross-layer fallbacks and implicit coupling
 
 ---
 
@@ -128,6 +132,17 @@ npm run chat:live
 - Prerequisites: Node.js 20.0.0+ and a valid `GENESIS_API_KEY` in `.env.local`
 - Default entry: `npm run chat:live` starts the interactive workbench
 - Expected result: successful startup shows the `Genesis CLI` welcome card and the `❯ ` prompt
+- If you add or change workspace package dependencies, run `npm install` once so local `node_modules` links stay in sync
+
+### Local Debug Startup
+
+```bash
+npm run chat:live -- --debug
+# or
+GENESIS_DEBUG=1 npm run chat:live
+```
+
+- Both forms keep `.env.local` in effect and enable debug logging for local source runs
 
 ### Debugging And Logs
 
@@ -140,6 +155,9 @@ genesis -d
 - Visibility: startup shows the `trace-id` for the current session
   - stderr prints the `trace-id` and log directory
   - interactive mode shows `Debug trace: ...` in the history buffer
+- Extra logs from the new rendering core:
+  - `tui.capabilities`: terminal host detection, downgraded capability decisions, and mode-plan summary
+  - `tui.render`: frame size, footer rows, viewport rows, and patch counts
 - Problem reports: include repro steps, the `trace-id`, and the relevant log files under `~/.genesis-cli/debug-logs/<trace-id>/`
 
 ### Common Checks
@@ -183,5 +201,5 @@ npm run publish:verify
 ## More
 
 - package-level docs: `packages/*/README.md`
-- source entry points: `packages/app-cli`, `packages/app-ui`, `packages/app-runtime`, `packages/kernel`
+- source entry points: `packages/app-cli`, `packages/app-tui-core`, `packages/app-ui`, `packages/app-runtime`, `packages/app-tools`, `packages/kernel`
 - verification entry points: `npm test`, `npm run test:tui`, `npm run build`

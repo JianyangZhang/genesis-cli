@@ -83,30 +83,34 @@ Genesis 面向真实仓库工作流，统一支撑 `Interactive / Print / JSON /
 
 ## 顶层蓝图
 
-Genesis 采用“薄 UI、厚 contract、仓库自持内核”的结构，首页只保留贡献者最需要的四类信息：分层、边界、入口与当前主线。
+Genesis 采用“终端宿主 / 内容语义 / 运行时契约 / 仓库自持内核”分层，首页只保留贡献者最需要的四类信息：分层、边界、入口与当前主线。
 
 - 分层：
-  - `packages/app-cli` 负责进程入口、TTY 生命周期与 interactive mode 宿主
-  - `packages/app-ui` 负责 slash commands、picker、formatter 与交互展示
-  - `packages/app-runtime` 负责 session facade、事件归一化、governance 与 planning
-  - `packages/kernel` 负责 vendored kernel，并继续收敛 `session core` 与 `provider/tools`
-  - `pi-agent-core` 负责最小 agent loop 与工具执行原语
+  - `packages/app-cli` 负责进程入口、TTY 生命周期、debug 接线与 interactive mode 宿主
+  - `packages/app-tui-core` 负责终端能力探测、mode lifecycle、screen frame、patch diff、composer/layout 等渲染内核
+  - `packages/app-ui` 负责 slash commands、resume browser、formatter、footer 内容准备与交互展示语义
+  - `packages/app-runtime` 负责 session facade、事件归一化、recent sessions、governance 与 planning
+  - `packages/app-tools` 负责工具 catalog、风险分级、权限策略、命令分类与审计
+  - `packages/kernel` 负责 vendored kernel、provider 接线与上游 session plumbing
+  - `packages/app-config`、`packages/app-extensions`、`packages/app-evaluation` 作为配套包补齐配置、扩展与评估能力
 - 边界：
-  - `app-cli` 只承载终端宿主语义，不承载产品语义
-  - `app-ui` 只消费稳定 contract，不处理 transcript 持久化细节
-  - `app-runtime` 负责把 kernel 语义映射成产品语义
-  - `kernel session core` 负责 transcript persistence、resume、compact、context rebuild、session metadata
-  - `kernel provider/tools` 负责模型、鉴权与底层工具接线
+  - `app-cli` 只承载宿主与接线，不承载产品文案与布局语义
+  - `app-tui-core` 只负责终端物化与渲染规则，不负责 slash command 或业务语义
+  - `app-ui` 负责“显示什么”，不负责 TTY 生命周期或 transcript 持久化
+  - `app-runtime` 负责把 kernel/upstream 语义映射成稳定产品契约
+  - `app-tools` 负责工具治理与权限决策，不负责 UI 渲染
+  - `kernel` 负责 provider、模型、底层会话主链，不直接承担 CLI 体验层
 - 贡献入口：
-  - 改 TTY / 主缓冲区 / interactive 生命周期：看 `app-cli`
-  - 改 slash commands / picker / formatter：看 `app-ui`
-  - 改 session facade / event normalization / governance：看 `app-runtime`
-  - 改 transcript / resume / compact / recovery snapshot：看 `kernel session core`
-  - 改 provider / auth / tool wiring：看 `kernel provider/tools`
+  - 改 TTY 宿主、interactive 生命周期、debug banner：看 `app-cli`
+  - 改终端 frame、patch、cursor、footer/composer 布局：看 `app-tui-core`
+  - 改 slash commands、resume browser、formatter、footer 内容：看 `app-ui`
+  - 改 session facade、event normalization、recent sessions、planning：看 `app-runtime`
+  - 改权限、风险、命令分类、审计：看 `app-tools`
+  - 改 provider、auth、底层 session plumbing：看 `kernel`
 - 当前主线：
-  - 不继续堆命令，先拉直 `session core` 边界
-  - 已完成 `/resume` 预览、`/compact` 最小主链、`SessionRecoveryData.metadata`
-  - 后续继续收敛 `session-manager`、恢复协议与跨层兜底逻辑
+  - 继续把 interactive 渲染规则沉到 `app-tui-core`
+  - 继续把内容语义从 `app-cli` 回收到 `app-ui`
+  - 保持 `app-runtime` 与 `app-tools` 的稳定契约，减少跨层兜底与隐式耦合
 
 ---
 
@@ -128,6 +132,7 @@ npm run chat:live
 - 前提：Node.js 20.0.0+，且 `.env.local` 中已配置可用的 `GENESIS_API_KEY`
 - 默认入口：`npm run chat:live` 会启动 interactive 工作台
 - 启动成功：会看到 `Genesis CLI` 欢迎卡片与 `❯ ` 提示符
+- 若新增或调整 workspace 包依赖，先执行一次 `npm install`，确保本地 `node_modules` 链接同步
 - Debug 启动：
 
 ```bash
@@ -195,5 +200,5 @@ npm run publish:verify
 ## 更多说明
 
 - 包级文档：`packages/*/README.md`
-- 源码入口：`packages/app-cli`、`packages/app-ui`、`packages/app-runtime`、`packages/kernel`
+- 源码入口：`packages/app-cli`、`packages/app-tui-core`、`packages/app-ui`、`packages/app-runtime`、`packages/app-tools`、`packages/kernel`
 - 验证入口：`npm test`、`npm run test:tui`、`npm run build`
