@@ -12,14 +12,15 @@
 
 ## 快速开始
 
-### 1. 先配置
+先配置，再安装，最后启动。
+
+### 1. 配置
 
 - 用户级配置文件：
   - macOS / Linux：`~/.genesis-cli/settings.json`
   - Windows：`%USERPROFILE%/.genesis-cli/settings.json`
-- `genesis` 启动时若发现文件不存在，会自动创建目录与模板文件；若已存在，则完全不改
-
-最小示例：
+- 若文件不存在，`genesis` 会自动创建目录与模板；若已存在，则完全不改
+- 最小示例：
 
 ```json
 {
@@ -34,21 +35,17 @@
 }
 ```
 
-常用字段：
-
 - `GENESIS_API_KEY`：模型 API key
 - `GENESIS_BOOTSTRAP_BASE_URL`：provider 初始化基地址
 - `GENESIS_BOOTSTRAP_API`：初始化协议，通常为 `openai-completions`
 - `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`：默认 provider 与模型
 
-可选的项目级覆盖：
-
+- 可选项目级覆盖：
 - `.genesis/settings.json`
 - `.genesis/settings.local.json`
 - `.genesis-local/pi-agent/models.json`
 
-当前优先级：
-
+- 当前优先级：
 - CLI flags
 - shell 环境变量
 - `~/.genesis-cli/settings.json` 的 `env`
@@ -56,7 +53,7 @@
 - 项目级 `.genesis/settings.json`
 - `--agent-dir` 下的本地 agent 配置
 
-### 2. 全局安装
+### 2. 安装
 
 ```bash
 npm install -g @pickle-pee/genesis-cli@latest
@@ -69,36 +66,19 @@ genesis --version
 genesis
 ```
 
-预期结果：
-
 - `genesis --version` 输出当前安装的 CLI 版本
 - `genesis` 启动交互式工作台
-- 全局升级时，`npm install -g @pickle-pee/genesis-cli@latest` 与 `genesis --version` 应该对得上最新发布版本
-
-首次进入后：
-
-- 输入 `/help`，确认 slash 命令列表出现
-- 输入 `/exit` 或 `/quit` 退出
-
-交互要点：
-
-- `↑` / `↓`：切换本地输入历史
-- `Tab`：在有候选时接受第一个 slash 命令提示
-- 鼠标滚轮 / 触摸板：使用终端原生 scrollback 浏览历史对话
-- Interactive 模式始终运行在 terminal 主缓冲区中，执行 `/exit` 后仍可翻看历史 transcript
-- `/exit`、`/quit` 或空闲时按 `Ctrl+C` 会关闭 TUI 并恢复终端状态
-- 助手流式回复期间按 `Ctrl+C` 会先中断当前回合
-- 权限确认菜单打开时按 `Ctrl+C` 会拒绝当前请求
+- 首次进入可先执行 `/help`，退出用 `/exit` 或 `/quit`
+- 交互规则：
+  - `↑` / `↓` 切换本地输入历史，`Tab` 接受第一个 slash 命令提示
+  - 鼠标滚轮 / 触摸板使用终端原生 scrollback 浏览历史 transcript
+  - `Ctrl+C` 在空闲时退出、流式回复时中断当前回合、权限确认时拒绝当前请求
 
 ---
 
 ## 项目定位
 
-- 一套 runtime 同时支撑 `Interactive`、`Print`、`JSON`、`RPC`
-- 对齐 Claude 风格的交互式 TUI 主缓冲区体验
-- 明确的权限确认流程与结构化工具步骤展示
-- 可用于真实联调的 OpenAI-compatible provider 主链
-- 由仓库自己掌控、可持续演进的 vendored kernel 与产品层 runtime
+一个面向真实仓库工作流的代码 CLI：统一支撑 `Interactive / Print / JSON / RPC`，提供 Claude 风格 TUI、结构化工具步骤与可真实联调的 provider 主链。
 
 ---
 

@@ -12,14 +12,15 @@
 
 ## Quick Start
 
-### 1. Configure First
+Configure first, then install, then run.
+
+### 1. Configure
 
 - User settings file:
   - macOS / Linux: `~/.genesis-cli/settings.json`
   - Windows: `%USERPROFILE%/.genesis-cli/settings.json`
-- When `genesis` starts and this file does not exist yet, it creates the directory and a starter template automatically; if the file already exists, it is left untouched
-
-Minimal example:
+- If the file does not exist yet, `genesis` creates the directory and a starter template automatically; if it already exists, it is left untouched
+- Minimal example:
 
 ```json
 {
@@ -34,21 +35,17 @@ Minimal example:
 }
 ```
 
-Common fields:
-
 - `GENESIS_API_KEY`: model API key
 - `GENESIS_BOOTSTRAP_BASE_URL`: provider bootstrap base URL
 - `GENESIS_BOOTSTRAP_API`: bootstrap transport, typically `openai-completions`
 - `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`: default provider and model
 
-Optional project-level overrides:
-
+- Optional project-level overrides:
 - `.genesis/settings.json`
 - `.genesis/settings.local.json`
 - `.genesis-local/pi-agent/models.json`
 
-Current precedence:
-
+- Current precedence:
 - CLI flags
 - shell environment variables
 - `env` from `~/.genesis-cli/settings.json`
@@ -56,7 +53,7 @@ Current precedence:
 - project `.genesis/settings.json`
 - local agent config under `--agent-dir`
 
-### 2. Global Install
+### 2. Install
 
 ```bash
 npm install -g @pickle-pee/genesis-cli@latest
@@ -69,36 +66,19 @@ genesis --version
 genesis
 ```
 
-Expected result:
-
 - `genesis --version` prints the installed CLI version
 - `genesis` starts the interactive workbench
-- when upgrading globally, `npm install -g @pickle-pee/genesis-cli@latest` and `genesis --version` should agree on the latest published version
-
-On first launch:
-
-- run `/help` and confirm slash commands are listed
-- exit with `/exit` or `/quit`
-
-Interaction basics:
-
-- `↑` / `↓`: cycle local input history
-- `Tab`: accept the first slash-command suggestion when available
-- mouse wheel / touchpad: use native terminal scrollback for transcript history
-- interactive mode stays on the primary terminal buffer, so the transcript remains visible after `/exit`
-- `/exit`, `/quit`, or idle `Ctrl+C` closes the TUI and restores terminal state
-- `Ctrl+C` aborts the active turn when a response is streaming
-- `Ctrl+C` denies the current permission request when an approval menu is open
+- on first launch, start with `/help`; exit with `/exit` or `/quit`
+- interaction rules:
+  - `↑` / `↓` cycles local input history, and `Tab` accepts the first slash-command suggestion
+  - mouse wheel / touchpad uses native terminal scrollback for transcript history
+  - `Ctrl+C` exits when idle, aborts the active turn while streaming, and denies the current permission request when an approval menu is open
 
 ---
 
 ## Positioning
 
-- one runtime powering `Interactive`, `Print`, `JSON`, and `RPC`
-- Claude-like interactive TUI behavior on the primary terminal buffer
-- explicit permission prompts and structured tool-step rendering
-- OpenAI-compatible provider flow for live model integration
-- a repository-owned vendored kernel and product runtime that can evolve together
+One coding CLI for real repository workflows: a unified runtime for `Interactive / Print / JSON / RPC`, Claude-like TUI behavior, structured tool steps, and a provider flow that can be exercised in live integration.
 
 ---
 
