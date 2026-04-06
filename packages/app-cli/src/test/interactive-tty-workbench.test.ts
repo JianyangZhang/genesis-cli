@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -1000,7 +1000,12 @@ describe("interactive workbench TTY", () => {
 				expect(screen.snapshot()).toContain("继续推进 /resume 的体验对齐");
 				expect(screen.snapshot()).toContain("Assistant: 我会先检查工作区并整理提交内容。");
 				expect(screen.snapshot()).not.toContain(" · unknown · ");
-				expect(screen.snapshot()).toContain("Next: /resume #N | /resume <sessionId|title>");
+				expect(screen.snapshot()).toContain("Next: /resume <query> to search, /resume #N to open, or /resume <sessionId>.");
+
+				input.write("/resume commit & push\r");
+				await waitFor(() => screen.snapshot().includes('Search results for "commit & push":'));
+				expect(screen.snapshot()).toContain("本地所有修改，commit & push");
+				expect(screen.snapshot()).toContain("Next: /resume #N to open one of the matches.");
 
 				input.write("/resume #1\r");
 				await waitFor(() => screen.snapshot().includes(`Resumed: ${recoveredSessionId}`));
