@@ -262,6 +262,12 @@ class InteractiveModeHandler implements ModeHandler {
 			});
 		};
 
+		const switchInteractiveSession = (next: SessionFacade): void => {
+			attachSession(next);
+			this.renderWelcome(next);
+			this.fullRedrawInteractiveScreen();
+		};
+
 		const register = (command: SlashCommand): void => {
 			registry.register(command);
 		};
@@ -360,9 +366,20 @@ class InteractiveModeHandler implements ModeHandler {
 			description: "Clear the transcript",
 			type: "local",
 			async execute(ctx) {
-				ctx.output.writeLine(
-					"Transcript stays in terminal scrollback. Use your terminal clear command if you want a clean screen.",
-				);
+				if (handler._activeTurn || handler._pendingPermissionCallId) {
+					ctx.output.writeError("Session is busy.");
+					return undefined;
+				}
+
+				const previousSessionId = sessionRef.current.state.id.value;
+				const previousTitleSuffix = sessionTitle ? ` — ${sessionTitle}` : "";
+				await sessionRef.current.close();
+
+				const next = runtime.createSession();
+				switchInteractiveSession(next);
+				ctx.output.writeLine(`Started a new session: ${next.state.id.value}`);
+				ctx.output.writeLine(`Previous session saved: ${previousSessionId}${previousTitleSuffix}`);
+				ctx.output.writeLine("Next: type a prompt, or /resume <sessionId|#N|title> to return.");
 				return undefined;
 			},
 		});
@@ -787,9 +804,9 @@ class InteractiveModeHandler implements ModeHandler {
 				await sessionRef.current.close();
 
 				const recovered = runtime.recoverSession(data);
-				attachSession(recovered);
+				switchInteractiveSession(recovered);
 				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
-				handler.renderPromptLine();
+				ctx.output.writeLine("Next: continue this session, or /sessions to switch again.");
 				return undefined;
 			},
 		});

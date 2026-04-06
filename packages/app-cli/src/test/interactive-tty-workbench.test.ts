@@ -1,8 +1,12 @@
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { AppRuntime, RuntimeEvent, SessionFacade } from "@pickle-pee/runtime";
 import { createEventBus, createPlanEngine, createToolGovernor } from "@pickle-pee/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { createModeHandler } from "../mode-dispatch.js";
+import { getSessionStoreDir } from "../session-store.js";
 
 class FakeTtyInput extends PassThrough {
 	isTTY = true;
@@ -153,20 +157,9 @@ function countOccurrences(snapshot: string, needle: string): number {
 }
 
 class FakeInteractiveSession implements SessionFacade {
-	readonly id = { value: "tty-test-session" };
-	readonly state = {
-		id: this.id,
-		model: { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" },
-		toolSet: [],
-	} as unknown as SessionFacade["state"];
-	readonly context = {
-		sessionId: this.id,
-		workingDirectory: "/tmp",
-		mode: "interactive",
-		model: this.state.model,
-		toolSet: new Set(["bash"]),
-		taskState: { status: "idle", currentTaskId: null, startedAt: null },
-	} as unknown as SessionFacade["context"];
+	readonly id: SessionFacade["id"];
+	readonly state: SessionFacade["state"];
+	readonly context: SessionFacade["context"];
 	readonly events = createEventBus();
 	readonly plan = null;
 	private readonly sessionApprovedCommands = new Set<string>();
@@ -178,6 +171,29 @@ class FakeInteractiveSession implements SessionFacade {
 		command?: string;
 		resolve: () => void;
 	} | null = null;
+
+	constructor(options?: {
+		readonly sessionId?: string;
+		readonly workingDirectory?: string;
+		readonly agentDir?: string;
+	}) {
+		this.id = { value: options?.sessionId ?? "tty-test-session" };
+		const model = { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" };
+		this.state = {
+			id: this.id,
+			model,
+			toolSet: new Set(["bash"]),
+		} as unknown as SessionFacade["state"];
+		this.context = {
+			sessionId: this.id,
+			workingDirectory: options?.workingDirectory ?? "/tmp",
+			agentDir: options?.agentDir,
+			mode: "interactive",
+			model,
+			toolSet: new Set(["bash"]),
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		} as unknown as SessionFacade["context"];
+	}
 
 	isWaitingForPermission(): boolean {
 		return this.pendingPermission !== null;
@@ -692,6 +708,35 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 	};
 }
 
+function createSequencedRuntime(
+	sessions: readonly FakeInteractiveSession[],
+	recoveredSessions: Readonly<Record<string, FakeInteractiveSession>> = {},
+): AppRuntime {
+	const events = createEventBus();
+	let createIndex = 0;
+	return {
+		createSession: () => {
+			const next = sessions[createIndex];
+			createIndex += 1;
+			if (!next) {
+				throw new Error("No fake session available for createSession()");
+			}
+			return next;
+		},
+		recoverSession: (data) => {
+			const recovered = recoveredSessions[data.sessionId.value];
+			if (!recovered) {
+				throw new Error(`No fake session available for recoverSession(${data.sessionId.value})`);
+			}
+			return recovered;
+		},
+		events,
+		governor: createToolGovernor(),
+		planEngine: createPlanEngine(),
+		shutdown: async () => {},
+	};
+}
+
 async function waitFor(check: () => boolean, timeoutMs = 1000): Promise<void> {
 	const start = Date.now();
 	while (!check()) {
@@ -762,6 +807,99 @@ describe("interactive workbench TTY", () => {
 			input.write("/exit\r");
 			await startPromise;
 		});
+	}, 10000);
+
+	it("starts a fresh session on /clear and drops the previous transcript", async () => {
+		const firstSession = new FakeInteractiveSession({ sessionId: "session-before-clear" });
+		const secondSession = new FakeInteractiveSession({ sessionId: "session-after-clear" });
+		const runtime = createSequencedRuntime([firstSession, secondSession]);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("hello\r");
+			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
+
+			input.write("/clear\r");
+			await waitFor(() => screen.snapshot().includes("Started a new session: session-after-clear"));
+
+			const snapshot = screen.snapshot();
+			expect(snapshot).toContain("Previous session saved: session-before-clear");
+			expect(snapshot).not.toContain("Hi from Genesis");
+			expect(snapshot).not.toContain("hello");
+			expect(snapshot).toContain("Genesis CLI");
+			expect(snapshot).toContain("❯");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("fully redraws the transcript after /resume switches to another session", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-clear-resume-"));
+		const sessionStoreDir = getSessionStoreDir(agentDir);
+		const recoveredSessionId = "session-recovered";
+		try {
+			await mkdir(sessionStoreDir, { recursive: true });
+			await writeFile(
+				join(sessionStoreDir, "last.json"),
+				`${JSON.stringify(
+					{
+						sessionId: { value: recoveredSessionId },
+						model: { id: "glm-5.1", displayName: "GLM 5.1", provider: "zai" },
+						toolSet: ["bash"],
+						planSummary: null,
+						compactionSummary: null,
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+						workingDirectory: "/tmp",
+						agentDir,
+					},
+					null,
+					2,
+				)}\n`,
+				"utf8",
+			);
+
+			const initialSession = new FakeInteractiveSession({
+				sessionId: "session-before-resume",
+				agentDir,
+			});
+			const recoveredSession = new FakeInteractiveSession({
+				sessionId: recoveredSessionId,
+				agentDir,
+			});
+			const runtime = createSequencedRuntime([initialSession], {
+				[recoveredSessionId]: recoveredSession,
+			});
+			const input = new FakeTtyInput();
+			const output = new FakeTtyOutput();
+
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("hello\r");
+				await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
+
+				input.write("/resume\r");
+				await waitFor(() => screen.snapshot().includes(`Resumed: ${recoveredSessionId}`));
+
+				const snapshot = screen.snapshot();
+				expect(snapshot).toContain("continue this session");
+				expect(snapshot).not.toContain("Hi from Genesis");
+				expect(snapshot).not.toContain("session-before-resume");
+				expect(snapshot).toContain("Genesis CLI");
+				expect(snapshot).toContain("❯");
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await rm(agentDir, { recursive: true, force: true });
+		}
 	}, 10000);
 
 	it("does not leave duplicate assistant lines behind across streaming updates", async () => {
