@@ -766,6 +766,7 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 			recentSessions.unshift({ recoveryData, title: options?.title, updatedAt: Date.now() });
 		},
 		listRecentSessions: async () => recentSessions,
+		searchRecentSessions: async (query) => searchRecentSessionsForTest(recentSessions, query),
 		shutdown: async () => {},
 	};
 }
@@ -801,8 +802,26 @@ function createSequencedRuntime(
 			recentSessions.unshift({ recoveryData, title: options?.title, updatedAt: Date.now() });
 		},
 		listRecentSessions: async () => recentSessions,
+		searchRecentSessions: async (query) => searchRecentSessionsForTest(recentSessions, query),
 		shutdown: async () => {},
 	};
+}
+
+function searchRecentSessionsForTest(
+	recentSessions: readonly RecentSessionEntry[],
+	query: string,
+): readonly RecentSessionEntry[] {
+	const normalizedQuery = query.toLowerCase();
+	return recentSessions
+		.filter((entry) =>
+			[
+				entry.title,
+				entry.recoveryData.metadata?.summary,
+				entry.recoveryData.metadata?.firstPrompt,
+				...(entry.recoveryData.metadata?.recentMessages.map((message) => message.text) ?? []),
+			].some((value) => (value ?? "").toLowerCase().includes(normalizedQuery)),
+		)
+		.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 async function waitFor(check: () => boolean, timeoutMs = 1000): Promise<void> {
@@ -1027,6 +1046,84 @@ describe("interactive workbench TTY", () => {
 		} finally {
 			await rm(agentDir, { recursive: true, force: true });
 		}
+	}, 10000);
+
+	it("opens the selected search result when /resume #N follows a search", async () => {
+		const firstRecoveredId = "session-search-first";
+		const secondRecoveredId = "session-search-second";
+		const initialSession = new FakeInteractiveSession({ sessionId: "session-before-search" });
+		const firstRecovered = new FakeInteractiveSession({ sessionId: firstRecoveredId });
+		const secondRecovered = new FakeInteractiveSession({ sessionId: secondRecoveredId });
+		const runtime = createSequencedRuntime(
+			[initialSession],
+			{
+				[firstRecoveredId]: firstRecovered,
+				[secondRecoveredId]: secondRecovered,
+			},
+			[
+				{
+					recoveryData: {
+						sessionId: { value: firstRecoveredId },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: ["bash"],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: {
+							summary: "修 README 发布文案",
+							firstPrompt: "README 发布文案调整",
+							messageCount: 2,
+							fileSizeBytes: 256,
+							recentMessages: [
+								{ role: "user", text: "README 发布文案调整" },
+								{ role: "assistant", text: "我先看首页文案。" },
+							],
+						},
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+					updatedAt: Date.now() - 10_000,
+				},
+				{
+					recoveryData: {
+						sessionId: { value: secondRecoveredId },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: ["bash"],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: {
+							summary: "README 发布说明补充",
+							firstPrompt: "README 发布说明补充",
+							messageCount: 2,
+							fileSizeBytes: 256,
+							recentMessages: [
+								{ role: "user", text: "README 发布说明补充" },
+								{ role: "assistant", text: "我先补充安装段落。" },
+							],
+						},
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+					updatedAt: Date.now(),
+				},
+			],
+		);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/resume README 发布\r");
+			await waitFor(() => screen.snapshot().includes('Search results for "README 发布":'));
+			expect(screen.snapshot()).toContain("#1 README 发布说明补充");
+			expect(screen.snapshot()).toContain("#2 README 发布文案调整");
+
+			input.write("/resume #2\r");
+			await waitFor(() => screen.snapshot().includes(`Resumed: ${firstRecoveredId}`));
+			expect(screen.snapshot()).toContain("User: README 发布文案调整");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
 	}, 10000);
 
 	it("runs /compact without crashing and keeps the prompt visible", async () => {

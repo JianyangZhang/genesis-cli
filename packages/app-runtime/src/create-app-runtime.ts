@@ -15,7 +15,7 @@ import { createToolGovernor } from "./governance/tool-governor.js";
 import type { PlanEngine } from "./planning/plan-engine.js";
 import { createPlanEngine } from "./planning/plan-engine.js";
 import { createRuntimeContext } from "./runtime-context.js";
-import { listRecentSessions, recordRecentSession } from "./services/recent-session-catalog.js";
+import { listRecentSessions, recordRecentSession, searchRecentSessions } from "./services/recent-session-catalog.js";
 import { sessionCreated, sessionResumed } from "./session/session-events.js";
 import type { SessionFacade } from "./session/session-facade.js";
 import { SessionFacadeImpl } from "./session/session-facade.js";
@@ -81,6 +81,9 @@ export interface AppRuntime {
 	/** List recent recoverable sessions for resume flows. */
 	listRecentSessions(): Promise<readonly RecentSessionEntry[]>;
 
+	/** Search recent sessions by human-readable text, ordered by relevance. */
+	searchRecentSessions(query: string): Promise<readonly RecentSessionEntry[]>;
+
 	/** Shut down the runtime and release resources. */
 	shutdown(): Promise<void>;
 }
@@ -144,6 +147,10 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 
 		listRecentSessions(): Promise<readonly RecentSessionEntry[]> {
 			return listRecentSessions(config.agentDir);
+		},
+
+		searchRecentSessions(query: string): Promise<readonly RecentSessionEntry[]> {
+			return searchRecentSessions(config.agentDir, query);
 		},
 
 		createSession(): SessionFacade {

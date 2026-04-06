@@ -171,6 +171,62 @@ describe("createAppRuntime", () => {
 		expect(last.sessionId.value).toBe("recent-session");
 	});
 
+	it("searches recent sessions by relevance and persists a fallback title", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-search-"));
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+
+		await runtime.recordRecentSession({
+			sessionId: { value: "session-a" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "整理发布流程",
+				firstPrompt: "发布前检查 README",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user" as const, text: "发布前检查 README" },
+					{ role: "assistant" as const, text: "我先检查变更。" },
+				],
+			},
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+		});
+		await runtime.recordRecentSession({
+			sessionId: { value: "session-b" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "README 发布说明",
+				firstPrompt: "README 发布说明补充",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user" as const, text: "README 发布说明补充" },
+					{ role: "assistant" as const, text: "收到。" },
+				],
+			},
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+		});
+
+		const results = await runtime.searchRecentSessions("README 发布");
+		expect(results).toHaveLength(2);
+		expect(results[0]?.recoveryData.sessionId.value).toBe("session-b");
+		expect(results[0]?.title).toBe("README 发布说明补充");
+		expect(results[1]?.recoveryData.sessionId.value).toBe("session-a");
+	});
+
 	it("createAdapter provisions a fresh adapter per session", async () => {
 		const adapters: StubKernelSessionAdapter[] = [];
 		const runtime = createAppRuntime({

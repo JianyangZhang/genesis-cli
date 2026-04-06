@@ -124,6 +124,7 @@ class InteractiveModeHandler implements ModeHandler {
 		focusRow: number;
 		focusColumn: number;
 	} | null = null;
+	private _resumeSelectionEntries: readonly RecentSessionEntry[] | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -722,20 +723,24 @@ class InteractiveModeHandler implements ModeHandler {
 				const selector = ctx.args.trim();
 				if (selector.length === 0) {
 					renderRecentSessions(ctx.output, recent, "Recent sessions:");
+					handler._resumeSelectionEntries = recent;
 					if (recent.length > 0) {
 						ctx.output.writeLine("Next: /resume <query> to search, /resume #N to open, or /resume <sessionId>.");
 					}
 					return undefined;
 				}
 
-				const directMatch = resolveRecentSessionDirectSelection(selector, recent);
+				const selectionSource =
+					selector.startsWith("#") && handler._resumeSelectionEntries !== null ? handler._resumeSelectionEntries : recent;
+				const directMatch = resolveRecentSessionDirectSelection(selector, selectionSource, recent);
 				if (!directMatch) {
-					const matches = searchRecentSessions(selector, recent);
+					const matches = await runtime.searchRecentSessions(selector);
 					if (matches.length === 0) {
 						ctx.output.writeError(`Session not found: ${selector}`);
 						return undefined;
 					}
 					renderRecentSessions(ctx.output, matches, `Search results for "${selector}":`, { includeAge: false });
+					handler._resumeSelectionEntries = matches;
 					ctx.output.writeLine("Next: /resume #N to open one of the matches.");
 					return undefined;
 				}
@@ -746,6 +751,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 				const recovered = runtime.recoverSession(data);
 				switchInteractiveSession(recovered);
+				handler._resumeSelectionEntries = null;
 				writeSessionTranscriptPreview(ctx.output, directMatch);
 				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
 				ctx.output.writeLine("Next: continue this session, or /resume to view history again.");
@@ -2286,31 +2292,23 @@ function renderRecentSessions(
 	}
 }
 
-function resolveRecentSessionDirectSelection(selector: string, recent: readonly RecentSessionEntry[]): RecentSessionEntry | null {
+function resolveRecentSessionDirectSelection(
+	selector: string,
+	displayedEntries: readonly RecentSessionEntry[],
+	allRecentEntries: readonly RecentSessionEntry[],
+): RecentSessionEntry | null {
 	const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
 	const idx = Number.parseInt(idxText, 10);
-	if (Number.isFinite(idx) && idx >= 1 && idx <= recent.length) {
-		return recent[idx - 1] ?? null;
+	if (Number.isFinite(idx) && idx >= 1 && idx <= displayedEntries.length) {
+		return displayedEntries[idx - 1] ?? null;
 	}
 
-	const exact = recent.find((entry) => entry.recoveryData.sessionId.value === selector) ?? null;
+	const exact = allRecentEntries.find((entry) => entry.recoveryData.sessionId.value === selector) ?? null;
 	if (exact) return exact;
 
-	const prefixMatches = recent.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
+	const prefixMatches = allRecentEntries.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
 	if (prefixMatches.length === 1) return prefixMatches[0]!;
 	return null;
-}
-
-function searchRecentSessions(selector: string, recent: readonly RecentSessionEntry[]): readonly RecentSessionEntry[] {
-	const q = selector.toLowerCase();
-	return recent.filter((entry) =>
-		[
-			entry.title,
-			entry.recoveryData.metadata?.summary,
-			entry.recoveryData.metadata?.firstPrompt,
-			...(entry.recoveryData.metadata?.recentMessages.map((message) => message.text) ?? []),
-		].some((value) => (value ?? "").toLowerCase().includes(q)),
-	);
 }
 
 function writeSessionTranscriptPreview(output: OutputSink, entry: RecentSessionEntry): void {
