@@ -23,6 +23,7 @@
 		"composite": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
+		"types": ["node"],
 		"resolveJsonModule": true,
 		"isolatedModules": true,
 		"esModuleInterop": true
