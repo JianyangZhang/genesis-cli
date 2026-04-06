@@ -1001,6 +1001,25 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
+	it("treats soft-deleted slash commands as unavailable in /help", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-help" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/help revert\r");
+			await waitFor(() => screen.snapshot().includes("Unknown command: /revert"));
+			expect(screen.snapshot()).toContain("Type /help to see all commands.");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
 	it("opens a resume browser, filters as you type, and resumes the selected session", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-clear-resume-"));
 		const recoveredSessionId = "session-recovered";

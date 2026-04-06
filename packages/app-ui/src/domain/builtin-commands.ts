@@ -13,7 +13,7 @@ import type { SlashCommand, SlashCommandContext } from "../types/index.js";
 
 const modelCommand: SlashCommand = {
 	name: "model",
-	description: "Show or switch the active model",
+	description: "Show the active model",
 	type: "local",
 	async execute(ctx: SlashCommandContext): Promise<undefined> {
 		const model = ctx.session.state.model;
@@ -22,8 +22,8 @@ const modelCommand: SlashCommand = {
 			ctx.output.writeLine(`  Provider: ${model.provider}`);
 			ctx.output.writeLine(`  ID: ${model.id}`);
 		} else {
-			ctx.output.writeLine(`Model switch requested: ${ctx.args}`);
-			ctx.output.writeLine("(Model switching requires runtime adapter support)");
+			ctx.output.writeError("Model switching is not available in this release.");
+			ctx.output.writeLine(`Current model: ${model.displayName ?? model.id}`);
 		}
 		return undefined;
 	},

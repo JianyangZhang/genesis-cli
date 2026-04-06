@@ -76,6 +76,9 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 			},
 		} as unknown as AppRuntime["governor"],
 		planEngine: {} as AppRuntime["planEngine"],
+		recordRecentSession: async () => {},
+		listRecentSessions: async () => [],
+		searchRecentSessions: async () => [],
 		shutdown: async () => {},
 	};
 }
@@ -114,14 +117,15 @@ describe("/model command", () => {
 		expect(output.lines.some((l) => l.includes("anthropic"))).toBe(true);
 	});
 
-	it("handles model switch request with args", async () => {
+	it("reports model switching as unavailable", async () => {
 		const cmds = createBuiltinCommands();
 		const model = cmds.find((c) => c.name === "model")!;
 		const output = createMockOutputSink();
 		const session = createMockSession();
 		const runtime = createMockRuntime(session);
 		await model.execute!(createContext(session, runtime, output, "gpt-4"));
-		expect(output.lines.some((l) => l.includes("gpt-4"))).toBe(true);
+		expect(output.errors).toContain("Model switching is not available in this release.");
+		expect(output.lines.some((l) => l.includes("Current model: Claude 3 Sonnet"))).toBe(true);
 	});
 });
 

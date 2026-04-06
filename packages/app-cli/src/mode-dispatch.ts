@@ -431,7 +431,7 @@ class InteractiveModeHandler implements ModeHandler {
 					ctx.output.writeLine("Next: use /review to inspect tool-observed changes.");
 					return undefined;
 				}
-				ctx.output.writeLine("Next: /review to inspect, /diff [file] to see patches, /revert <file> to undo.");
+				ctx.output.writeLine("Next: /review to inspect, or /diff [file] to see patches.");
 				return undefined;
 			},
 		});
@@ -455,48 +455,14 @@ class InteractiveModeHandler implements ModeHandler {
 					return undefined;
 				}
 				ctx.output.writeLine(diff.stdout.trimEnd().length > 0 ? diff.stdout.trimEnd() : "(no diff)");
-				ctx.output.writeLine("Next: /revert <file> to undo, or /review to see a summary.");
-				return undefined;
-			},
-		});
-
-		register({
-			name: "revert",
-			description: "Revert a file using git checkout -- <file> (or --all)",
-			type: "local",
-			async execute(ctx) {
-				const cwd = ctx.session.context.workingDirectory;
-				const arg = ctx.args.trim();
-				if (arg.length === 0) {
-					ctx.output.writeError("Usage: /revert <file> | /revert --all");
-					return undefined;
-				}
-				if (arg === "--all") {
-					const result = await runGit(cwd, ["checkout", "--", "."]);
-					if (result.type === "error") {
-						ctx.output.writeError("git not available in this working directory.");
-						return undefined;
-					}
-					handler._changedPaths.clear();
-					ctx.output.writeLine("Reverted all changes.");
-					ctx.output.writeLine("Next: /changes to confirm clean state.");
-					return undefined;
-				}
-				const result = await runGit(cwd, ["checkout", "--", arg]);
-				if (result.type === "error") {
-					ctx.output.writeError("git not available in this working directory.");
-					return undefined;
-				}
-				handler._changedPaths.delete(arg);
-				ctx.output.writeLine(`Reverted: ${arg}`);
-				ctx.output.writeLine("Next: /changes to confirm, or keep iterating.");
+				ctx.output.writeLine("Next: /review to see a summary, or keep iterating.");
 				return undefined;
 			},
 		});
 
 		register({
 			name: "review",
-			description: "Review changes and decide to keep or revert",
+			description: "Review changes and decide next steps",
 			type: "local",
 			async execute(ctx) {
 				const cwd = ctx.session.context.workingDirectory;
@@ -509,8 +475,7 @@ class InteractiveModeHandler implements ModeHandler {
 				await registry.get("changes")!.execute?.(ctx);
 				ctx.output.writeLine("Review tips:");
 				ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
-				ctx.output.writeLine("  /revert <file> Undo a change");
-				ctx.output.writeLine("  /revert --all  Undo all changes");
+				ctx.output.writeLine("  Use git manually if you want to discard changes");
 				ctx.output.writeLine("Next: inspect diffs, then continue chatting.");
 				return undefined;
 			},
