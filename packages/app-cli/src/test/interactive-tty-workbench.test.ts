@@ -1510,6 +1510,31 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
+	it("queues input entered during compacting and sends it after compaction completes", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-compact-queue", compactDelayMs: 150 });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/compact\r");
+			await waitFor(() => screen.snapshot().includes("Compacting."));
+
+			input.write("queued during compact\r");
+			await waitFor(() => screen.snapshot().includes("1 queued"));
+			expect(session.getReceivedContinues()).toEqual([]);
+
+			await waitFor(() => screen.snapshot().includes("Compaction completed."));
+			await waitFor(() => session.getReceivedContinues().includes("queued during compact"));
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
 	it("shows compacted conversation details with ctrl+o after /compact completes", async () => {
 		const session = new FakeInteractiveSession({ sessionId: "session-compact-details", compactDelayMs: 50 });
 		const runtime = createFakeRuntime(session);

@@ -172,6 +172,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _resumeBrowser: ResumeBrowserState | null = null;
 	private _resumeSearchRequestId = 0;
 	private _inputLoop: InputLoop | null = null;
+	private _activeLocalCommand: Promise<void> | null = null;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -459,7 +460,7 @@ class InteractiveModeHandler implements ModeHandler {
 			type: "local",
 			visibility: "public",
 			async execute(ctx) {
-				if (handler._activeTurn || handler._pendingPermissionCallId) {
+				if (handler.isInteractionBusy() || handler._pendingPermissionCallId) {
 					ctx.output.writeError("Session is busy.");
 					return undefined;
 				}
@@ -585,7 +586,7 @@ class InteractiveModeHandler implements ModeHandler {
 				ctx.output.writeLine("Next:");
 				if (handler._pendingPermissionCallId) {
 					ctx.output.writeLine("  Reply y (once), Y (session), n (deny), or Ctrl+C to deny");
-				} else if (handler._activeTurn) {
+				} else if (handler.isInteractionBusy()) {
 					ctx.output.writeLine("  Wait for the active turn, or Ctrl+C to abort");
 				} else if (handler._changedPaths.size > 0) {
 					ctx.output.writeLine("  /review to inspect changes, or /diff <file>");
@@ -755,7 +756,7 @@ class InteractiveModeHandler implements ModeHandler {
 			type: "local",
 			visibility: "public",
 			async execute(ctx) {
-				if (handler._activeTurn || handler._pendingPermissionCallId) {
+				if (handler.isInteractionBusy() || handler._pendingPermissionCallId) {
 					ctx.output.writeError("Session is busy.");
 					return undefined;
 				}
@@ -895,7 +896,7 @@ class InteractiveModeHandler implements ModeHandler {
 				// Check for slash commands
 				const resolution = registry.resolve(trimmed);
 				if (resolution && resolution.type === "command") {
-					try {
+					const executeCommand = async (): Promise<void> => {
 						await resolution.command.execute?.({
 							args: resolution.args,
 							runtime,
@@ -903,6 +904,13 @@ class InteractiveModeHandler implements ModeHandler {
 							output: sink,
 							host: commandHost,
 						});
+					};
+					try {
+						if (resolution.command.name === "compact") {
+							this.startLocalBusyCommand(executeCommand(), sessionRef, sink);
+						} else {
+							await executeCommand();
+						}
 					} catch (error) {
 						this._lastError = error instanceof Error ? error.message : String(error);
 						getActiveDebugLogger()?.error("interactive.slash_command", "Slash command failed", {
@@ -925,7 +933,7 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				// Regular prompt
-				if (this._activeTurn !== null) {
+				if (this.isInteractionBusy()) {
 					this._queuedInputs.push(trimmed);
 					this.preserveThinkingNoticeForQueuedBacklog();
 					this.renderFooterRegion();
@@ -1431,8 +1439,30 @@ class InteractiveModeHandler implements ModeHandler {
 		return queued.join("\n\n");
 	}
 
+	private startLocalBusyCommand(command: Promise<void>, sessionRef: { current: SessionFacade }, sink: OutputSink): void {
+		this._activeLocalCommand = command
+			.catch((error: unknown) => {
+				this._lastError = error instanceof Error ? error.message : String(error);
+				getActiveDebugLogger()?.error("interactive.local_command", "Local command failed", { error });
+				sink.writeError(this._lastError);
+			})
+			.finally(() => {
+				this._activeLocalCommand = null;
+				if (this._activeTurn !== null || this._turnNotice === "compacting") {
+					this.renderFooterRegion();
+					return;
+				}
+				const queuedInputBatch = this.drainQueuedInputs();
+				if (queuedInputBatch !== null) {
+					this.startQueuedContinueTurn(sessionRef.current, queuedInputBatch, sink);
+					return;
+				}
+				this.fullRedrawInteractiveScreen();
+			});
+	}
+
 	private preserveThinkingNoticeForQueuedBacklog(): void {
-		if (this._activeTurn === null) {
+		if (this._activeTurn === null && this._turnNotice !== "compacting") {
 			return;
 		}
 		if (this._turnNotice === "responding") {
@@ -1443,6 +1473,10 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._turnNotice === null) {
 			this.startTurnFeedback();
 		}
+	}
+
+	private isInteractionBusy(): boolean {
+		return this._activeTurn !== null || this._activeLocalCommand !== null || this._turnNotice === "compacting";
 	}
 
 	private toggleDetailPanel(): void {
