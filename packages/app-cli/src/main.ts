@@ -156,6 +156,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 					thinkingLevel: options.thinkingLevel,
 					onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "session_init" }),
 					onUpstreamEvent: (event) => logRawUpstreamEvent(logger, { phase: "session_init", event }),
+					onSessionRecovered: (report) => logSessionRecovery(logger, { ...report, phase: "session_init" }),
 				}),
 		});
 		const recentSessionPrune = await runtime.pruneRecentSessions(10);
@@ -210,6 +211,17 @@ function logRawUpstreamEvent(
 	},
 ): void {
 	logger.debug("model.raw_event", "Received raw upstream event", data);
+}
+
+function logSessionRecovery(
+	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
+	data: {
+		mode: "resume" | "new";
+		sessionFile?: string;
+		phase: "session_init";
+	},
+): void {
+	logger.debug("session.recovery", "Resolved session recovery source", data);
 }
 
 async function startInteractiveWithStartupChecks(
@@ -311,6 +323,7 @@ async function prepareInteractiveLaunch(
 				thinkingLevel: options.thinkingLevel,
 				onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "session_init" }),
 				onUpstreamEvent: (event) => logRawUpstreamEvent(logger, { phase: "session_init", event }),
+				onSessionRecovered: (report) => logSessionRecovery(logger, { ...report, phase: "session_init" }),
 			}),
 	});
 	const recentSessionPrune = await runtime.pruneRecentSessions(10);

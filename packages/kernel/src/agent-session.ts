@@ -1,3 +1,4 @@
+import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Agent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, Message, Model, UserMessage } from "@pickle-pee/pi-ai";
@@ -5,7 +6,11 @@ import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
 import { streamWithKernelProvider } from "./provider-registry.js";
 import { SessionManager } from "./session-manager.js";
-import { type GenesisSessionMetadata, loadSessionMetadataFromSessionFile } from "./session-metadata.js";
+import {
+	type GenesisSessionMetadata,
+	loadSessionMessagesFromSessionFile,
+	loadSessionMetadataFromSessionFile,
+} from "./session-metadata.js";
 import { createBashTool, createEditTool, createReadTool, createWriteTool, type KernelTool } from "./tools.js";
 
 export interface CreateAgentSessionOptions {
@@ -44,12 +49,16 @@ export interface CreateAgentSessionResult {
 
 class GenesisAgentSessionImpl implements GenesisAgentSession {
 	private readonly listeners = new Set<(event: unknown) => void>();
+	private persistedMessageCount: number;
 
 	constructor(
 		private readonly agent: Agent,
 		private readonly sessionManager: SessionManager,
 		private readonly modelRegistry: ModelRegistry,
-	) {}
+		initialMessageCount = 0,
+	) {
+		this.persistedMessageCount = initialMessageCount;
+	}
 
 	get sessionId(): string {
 		return this.sessionManager.getSessionId();
@@ -76,6 +85,7 @@ class GenesisAgentSessionImpl implements GenesisAgentSession {
 
 	async prompt(input: string): Promise<void> {
 		await this.agent.prompt(input);
+		await this.persistNewMessages();
 	}
 
 	async followUp(input: string): Promise<void> {
@@ -85,6 +95,7 @@ class GenesisAgentSessionImpl implements GenesisAgentSession {
 			timestamp: Date.now(),
 		});
 		await this.agent.waitForIdle();
+		await this.persistNewMessages();
 	}
 
 	async compact(customInstructions?: string): Promise<void> {
@@ -102,6 +113,9 @@ class GenesisAgentSessionImpl implements GenesisAgentSession {
 			await this.agent.waitForIdle();
 			const summary = await this.generateCompactionSummary(customInstructions);
 			this.agent.state.messages = createCompactedContextMessage(summary);
+			this.persistedMessageCount = 0;
+			await this.appendSessionEntry({ type: "compaction", summary });
+			await this.persistNewMessages();
 			this.emit({
 				type: "compaction_end",
 				reason: "manual",
@@ -151,6 +165,29 @@ class GenesisAgentSessionImpl implements GenesisAgentSession {
 		for (const listener of this.listeners) {
 			listener(event);
 		}
+	}
+
+	private async persistNewMessages(): Promise<void> {
+		const pending = this.agent.state.messages.slice(this.persistedMessageCount);
+		if (pending.length === 0) {
+			return;
+		}
+		for (const message of pending) {
+			const serialized = serializeSessionMessage(message);
+			if (!serialized) {
+				continue;
+			}
+			await this.appendSessionEntry({ type: "message", message: serialized });
+		}
+		this.persistedMessageCount = this.agent.state.messages.length;
+	}
+
+	private async appendSessionEntry(entry: Record<string, unknown>): Promise<void> {
+		const sessionFile = this.sessionFile;
+		if (!sessionFile) {
+			return;
+		}
+		await appendFile(sessionFile, `${JSON.stringify(entry)}\n`, "utf8");
 	}
 
 	private async generateCompactionSummary(customInstructions?: string): Promise<string> {
@@ -204,6 +241,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions): Pr
 
 	const tools = options.tools?.length ? [...options.tools] : createDefaultTools(options.cwd);
 	const toolDescriptions = tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
+	const recoveredMessages = await loadSessionMessagesFromSessionFile(sessionManager.getSessionFile(), model);
 	const streamFn: StreamFn = async (activeModel, context, streamOptions) => {
 		const auth = modelRegistry.getRequestAuth(activeModel);
 		if (!auth.ok) {
@@ -222,6 +260,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions): Pr
 	const agent = new Agent({
 		initialState: {
 			systemPrompt: buildSystemPrompt(options.cwd, toolDescriptions),
+			messages: recoveredMessages,
 			model,
 			thinkingLevel: options.thinkingLevel ?? (model.reasoning ? "minimal" : "off"),
 			tools,
@@ -232,7 +271,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions): Pr
 	});
 
 	return {
-		session: new GenesisAgentSessionImpl(agent, sessionManager, modelRegistry),
+		session: new GenesisAgentSessionImpl(agent, sessionManager, modelRegistry, recoveredMessages.length),
 	};
 }
 
@@ -318,6 +357,21 @@ function extractTextContent(content: readonly { type: string }[]): string | unde
 
 function extractAssistantText(message: AssistantMessage): string | undefined {
 	return extractTextContent(message.content as readonly { type: string }[]);
+}
+
+function serializeSessionMessage(message: AgentMessage): { role: "user" | "assistant"; content: string } | null {
+	if (!message || typeof message !== "object" || !("role" in message)) {
+		return null;
+	}
+	const role = (message as { role?: unknown }).role;
+	if (role !== "user" && role !== "assistant") {
+		return null;
+	}
+	const content = "content" in message ? extractTextContent((message as Message).content) : undefined;
+	if (!content) {
+		return null;
+	}
+	return { role, content };
 }
 
 function createCompactedContextMessage(summary: string): Message[] {

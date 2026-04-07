@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 interface SessionMetadata {
 	readonly cwd?: string;
@@ -14,7 +15,11 @@ export class SessionManager {
 	) {}
 
 	static create(cwd: string): SessionManager {
-		return new SessionManager(cwd, randomUUID());
+		const sessionId = randomUUID();
+		const sessionFile = join(cwd, ".genesis-local", "sessions", `${sessionId}.jsonl`);
+		mkdirSync(dirname(sessionFile), { recursive: true });
+		writeFileSync(sessionFile, `${JSON.stringify({ cwd, sessionId })}\n`, "utf8");
+		return new SessionManager(cwd, sessionId, sessionFile);
 	}
 
 	static open(sessionPath: string): SessionManager {
@@ -40,7 +45,14 @@ export class SessionManager {
 		}
 
 		try {
-			return JSON.parse(readFileSync(sessionPath, "utf8")) as SessionMetadata;
+			const firstLine = readFileSync(sessionPath, "utf8")
+				.split("\n")
+				.map((line) => line.trim())
+				.find((line) => line.length > 0);
+			if (!firstLine) {
+				return {};
+			}
+			return JSON.parse(firstLine) as SessionMetadata;
 		} catch {
 			return {};
 		}

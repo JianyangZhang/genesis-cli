@@ -12,7 +12,7 @@ describe("render summary", () => {
 			summarizeTerminalCapabilities({
 				hostFamily: "vscode-xtermjs",
 				alternateScreen: true,
-				mouseTracking: false,
+				mouseTracking: true,
 				focusReporting: false,
 				bracketedPaste: true,
 				synchronizedOutput: true,
