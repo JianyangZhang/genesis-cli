@@ -3,7 +3,7 @@
   "version": "1.0.2",
   "description": "CLI entry point, argument parsing, and mode routing",
   "bin": {
-    "genesis": "./dist/main.js"
+    "genesis": "dist/main.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
