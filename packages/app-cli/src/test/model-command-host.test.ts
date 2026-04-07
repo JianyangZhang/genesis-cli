@@ -59,7 +59,11 @@ describe("createModelCommandHost", () => {
 		settingsDir = await mkdtemp(join(tmpdir(), "genesis-model-host-"));
 		agentDir = await mkdtemp(join(tmpdir(), "genesis-model-agent-"));
 		const settingsPath = join(settingsDir, "settings.json");
-		await writeFile(settingsPath, `${JSON.stringify({ provider: "anthropic", model: "claude-3-7-sonnet" })}\n`, "utf8");
+		await writeFile(
+			settingsPath,
+			`${JSON.stringify({ provider: "anthropic", model: "claude-3-7-sonnet" })}\n`,
+			"utf8",
+		);
 		const host = createModelCommandHost({
 			agentDir,
 			settingsPath,

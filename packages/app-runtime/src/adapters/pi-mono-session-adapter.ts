@@ -128,10 +128,7 @@ export interface PiMonoSessionAdapterOptions {
 	readonly createSession?: (options: CreateAgentSessionOptions) => Promise<AgentSession>;
 	readonly onAuthResolved?: (report: PiMonoResolvedAuthReport) => void;
 	readonly onUpstreamEvent?: (event: unknown) => void;
-	readonly onSessionRecovered?: (report: {
-		readonly mode: "resume" | "new";
-		readonly sessionFile?: string;
-	}) => void;
+	readonly onSessionRecovered?: (report: { readonly mode: "resume" | "new"; readonly sessionFile?: string }) => void;
 }
 
 export class PiMonoSessionAdapter implements KernelSessionAdapter {

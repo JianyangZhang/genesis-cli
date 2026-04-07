@@ -748,7 +748,11 @@ describe("createAppRuntime", () => {
 
 		expect(prune).toEqual({ before: 5, after: 3, removed: 2 });
 		expect(recent).toHaveLength(3);
-		expect(recent.map((entry) => entry.recoveryData.sessionId.value)).toEqual(["session-0", "session-1", "session-2"]);
+		expect(recent.map((entry) => entry.recoveryData.sessionId.value)).toEqual([
+			"session-0",
+			"session-1",
+			"session-2",
+		]);
 	});
 
 	it("tracks and updates the default model for newly created sessions", async () => {
