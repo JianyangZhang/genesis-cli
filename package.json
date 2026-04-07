@@ -20,7 +20,9 @@
 		"publish:all": "./scripts/publish-all.sh all",
 		"publish:packages": "./scripts/publish-all.sh publish",
 		"publish:verify": "./scripts/publish-all.sh verify",
-		"test:live:pi-mono": "node --env-file=.env.local ./node_modules/vitest/vitest.mjs run packages/app-runtime/src/test/pi-mono-live.test.ts",
+		"test:live:pi-mono": "npm run test:live:pi-mono:openai",
+		"test:live:pi-mono:openai": "node --env-file=.env.openai.local ./node_modules/vitest/vitest.mjs run packages/app-runtime/src/test/pi-mono-live.test.ts",
+		"test:live:pi-mono:anthropic": "node --env-file=.env.anthropic.local ./node_modules/vitest/vitest.mjs run packages/app-runtime/src/test/pi-mono-live.test.ts",
 		"test:tui": "./scripts/test-tui-regressions.sh",
 		"test": "npm run build && vitest run --passWithNoTests",
 		"prepare": "husky"

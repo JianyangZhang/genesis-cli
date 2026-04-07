@@ -99,11 +99,11 @@ export interface ModeHandler {
 
 export function createModeHandler(
 	mode: CliMode,
-	options?: { readonly modelHost?: ModelCommandHostOptions },
+	options?: { readonly modelHost?: ModelCommandHostOptions; readonly welcomeProvider?: string },
 ): ModeHandler {
 	switch (mode) {
 		case "interactive":
-			return new InteractiveModeHandler(options?.modelHost);
+			return new InteractiveModeHandler(options?.modelHost, options?.welcomeProvider);
 		case "print":
 			return new PrintModeHandler();
 		case "json":
@@ -133,7 +133,10 @@ const RESIZE_REDRAW_DEBOUNCE_MS = 120;
 // ---------------------------------------------------------------------------
 
 class InteractiveModeHandler implements ModeHandler {
-	constructor(private readonly _modelHostOptions?: ModelCommandHostOptions) {}
+	constructor(
+		private readonly _modelHostOptions?: ModelCommandHostOptions,
+		private readonly _welcomeProvider?: string,
+	) {}
 
 	private _pendingPermissionCallId: string | null = null;
 	private _pendingPermissionDetails: {
@@ -1120,7 +1123,7 @@ class InteractiveModeHandler implements ModeHandler {
 			terminalWidth: process.stdout.columns ?? 80,
 			version: readInteractiveCliPackageVersion(),
 			model: session.state.model.displayName ?? session.state.model.id,
-			provider: session.state.model.provider,
+			provider: this._welcomeProvider ?? session.state.model.provider,
 			greeting: pickWelcomeGreeting(),
 			debugTraceId,
 		});

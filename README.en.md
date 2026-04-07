@@ -168,7 +168,9 @@ npm run test:live:pi-mono
 
 - `npm test`: primary pre-commit verification entry
 - `npm run test:tui`: TUI and interaction regressions
-- `npm run test:live:pi-mono`: live integration check; requires a valid API key in `.env.local`
+- `npm run test:live:pi-mono`: live integration check (defaults to the OpenAI-compatible config)
+- `npm run test:live:pi-mono:openai`: uses the OpenAI-compatible config from `.env.openai.local`
+- `npm run test:live:pi-mono:anthropic`: uses the Anthropic-compatible config from `.env.anthropic.local`
 
 ### Release
 
@@ -199,3 +201,46 @@ npm run publish:verify
 - package-level docs: `packages/*/README.md`
 - source entry points: `packages/app-cli`, `packages/app-tui-core`, `packages/app-ui`, `packages/app-runtime`, `packages/app-tools`, `packages/kernel`
 - verification entry points: `npm test`, `npm run test:tui`, `npm run build`
+
+---
+
+## Configuration Appendix
+
+Only environment variables that are **actually supported and read by the current code** are listed below.
+
+### Core Runtime Configuration
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `GENESIS_API_KEY` | Yes (real requests / live tests) | empty | API key used for model authentication. |
+| `GENESIS_BOOTSTRAP_BASE_URL` | No | `https://open.bigmodel.cn/api/coding/paas/v4/` | Base URL used when bootstrap writes `models.json`; live tests also reuse it. |
+| `GENESIS_BOOTSTRAP_API` | No | `openai-completions` | Protocol used by bootstrap and live tests; currently supports `openai-completions` and `anthropic-messages`. |
+| `GENESIS_MODEL_PROVIDER` | No | `zai` | Provider name for the selected model. If not explicitly configured, the internal default is used. |
+| `GENESIS_MODEL_ID` | Yes (interactive startup requires a non-default source) | `glm-5.1` | Model ID. There is still an internal fallback, but interactive startup checks require it not to come only from the built-in default source. |
+| `GENESIS_TOOL_SET` | No | `read,bash,edit,write` | Default enabled tool set, as a comma-separated list. |
+| `GENESIS_THINKING_LEVEL` | No | empty | Thinking level; supported values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. |
+| `GENESIS_DEBUG` | No | `false` | Enables debug logging; accepts boolean-like values such as `true` and `1`. |
+
+### Advanced Bootstrap Configuration
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `GENESIS_BOOTSTRAP_API_KEY_ENV` | No | `GENESIS_API_KEY` | Environment variable name written into `models.json` for API key lookup. |
+| `GENESIS_BOOTSTRAP_AUTH_HEADER` | No | `true` (`false` for `anthropic-messages`) | Whether the provider uses the `Authorization` header. |
+| `GENESIS_BOOTSTRAP_REASONING` | No | `true` when `thinking != off`, otherwise `false` | `reasoning` flag written during bootstrap model generation. |
+| `GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE` | No | empty | Provider compatibility flag: whether developer role is supported. |
+| `GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT` | No | empty | Provider compatibility flag: whether reasoning effort is supported. |
+
+### Debug And Retention
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `GENESIS_RECENT_SESSION_MAX_ENTRIES` | No | `10` | Number of recent sessions to retain. `sessionFile` retention is fixed to this value plus `5`. |
+| `GENESIS_DEBUG_LOG_MAX_SESSIONS` | No | `10` | Maximum number of debug-log sessions to retain. |
+| `GENESIS_DEBUG_LOG_RETENTION_DAYS` | No | `7` | Number of days to retain debug logs. |
+
+### Legacy Compatibility
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `GENESIS_OPENAI_BASE_URL` | No | empty | Legacy compatibility variable. It is still read as a fallback for `GENESIS_BOOTSTRAP_BASE_URL`. Prefer `GENESIS_BOOTSTRAP_BASE_URL` for new configs. |

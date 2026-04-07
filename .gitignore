@@ -6,6 +6,8 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.openai.example
+!.env.anthropic.example
 .genesis-local/
 .tmp-tests/
 coverage/

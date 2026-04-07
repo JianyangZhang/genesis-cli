@@ -247,6 +247,7 @@ async function startInteractiveWithStartupChecks(
 				api: options.bootstrapOverrides?.api,
 			},
 		},
+		welcomeProvider: options.configSources.provider?.layer === "default" ? "" : options.model.provider,
 	});
 	logger.info("cli.mode", "Starting mode handler", { mode: options.mode });
 	try {

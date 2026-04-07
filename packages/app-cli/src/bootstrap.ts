@@ -27,7 +27,6 @@ export function resolveDefaultBootstrapBaseUrl(env: NodeJS.ProcessEnv = process.
 	return (
 		pick(env.GENESIS_BOOTSTRAP_BASE_URL) ??
 		pick(env.GENESIS_OPENAI_BASE_URL) ??
-		pick(env.GENESIS_LIVE_OPENAI_BASE_URL) ??
 		"https://open.bigmodel.cn/api/coding/paas/v4/"
 	);
 }
