@@ -106,7 +106,6 @@ async function persistDefaultModel(
 	const current = await readSettingsFile(settingsPath);
 	const next: SettingsFile = {
 		...current,
-		provider: model.provider,
 		model: model.id,
 	};
 	await writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");

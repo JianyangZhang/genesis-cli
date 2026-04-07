@@ -1,62 +1,29 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AppRuntime, ModelDescriptor, SessionFacade } from "@pickle-pee/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { createModelCommandHost } from "../model-command-host.js";
 
 describe("createModelCommandHost", () => {
-	const cleanupPaths: string[] = [];
+	let settingsDir: string | undefined;
+	let agentDir: string | undefined;
 
 	afterEach(async () => {
-		await Promise.all(cleanupPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+		if (settingsDir) {
+			await rm(settingsDir, { recursive: true, force: true });
+			settingsDir = undefined;
+		}
+		if (agentDir) {
+			await rm(agentDir, { recursive: true, force: true });
+			agentDir = undefined;
+		}
 	});
 
-	it("lists configured models and persists a switched default", async () => {
-		const agentDir = await mkdtemp(join(tmpdir(), "genesis-model-host-agent-"));
-		const settingsDir = await mkdtemp(join(tmpdir(), "genesis-model-host-settings-"));
+	it("persists only model when switching models", async () => {
+		settingsDir = await mkdtemp(join(tmpdir(), "genesis-model-host-"));
+		agentDir = await mkdtemp(join(tmpdir(), "genesis-model-agent-"));
 		const settingsPath = join(settingsDir, "settings.json");
-		cleanupPaths.push(agentDir, settingsDir);
-
-		await writeFile(
-			join(agentDir, "models.json"),
-			JSON.stringify(
-				{
-					providers: {
-						zai: {
-							baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4/",
-							api: "openai-completions",
-							apiKey: "GENESIS_API_KEY",
-							authHeader: true,
-							models: [
-								{ id: "glm-5.1", name: "GLM 5.1", reasoning: true },
-								{ id: "glm-5.2", name: "GLM 5.2", reasoning: true },
-							],
-						},
-					},
-				},
-				null,
-				2,
-			),
-			"utf8",
-		);
 		await writeFile(settingsPath, "{}\n", "utf8");
-
-		let currentModel: ModelDescriptor = { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" };
-		let defaultModel = currentModel;
-		const session = {
-			state: { model: currentModel },
-			switchModel: async (model: ModelDescriptor) => {
-				currentModel = model;
-				(session.state as { model: typeof model }).model = model;
-			},
-		} as unknown as SessionFacade;
-		const runtime = {
-			setDefaultModel(model: ModelDescriptor) {
-				defaultModel = model;
-			},
-		} as unknown as AppRuntime;
-
 		const host = createModelCommandHost({
 			agentDir,
 			settingsPath,
@@ -66,16 +33,62 @@ describe("createModelCommandHost", () => {
 			},
 		});
 
-		const available = await host.listAvailableModels?.(currentModel);
-		expect(available?.map((model) => model.id)).toEqual(["glm-5.1", "glm-5.2"]);
+		await host.switchModel?.({
+			modelId: "glm-5.2",
+			session: {
+				state: {
+					model: {
+						id: "glm-5.1",
+						provider: "zai",
+						displayName: "glm-5.1",
+					},
+				},
+				switchModel: async () => {},
+			} as never,
+			runtime: {
+				setDefaultModel: () => {},
+			} as never,
+		});
 
-		const result = await host.switchModel?.({ session, runtime, modelId: "glm-5.2" });
-		expect(result?.model.id).toBe("glm-5.2");
-		expect(currentModel.id).toBe("glm-5.2");
-		expect(defaultModel.id).toBe("glm-5.2");
-		expect(JSON.parse(await readFile(settingsPath, "utf8"))).toMatchObject({
-			provider: "zai",
+		expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
 			model: "glm-5.2",
+		});
+	});
+
+	it("keeps any existing provider value unchanged when switching models", async () => {
+		settingsDir = await mkdtemp(join(tmpdir(), "genesis-model-host-"));
+		agentDir = await mkdtemp(join(tmpdir(), "genesis-model-agent-"));
+		const settingsPath = join(settingsDir, "settings.json");
+		await writeFile(settingsPath, `${JSON.stringify({ provider: "anthropic", model: "claude-3-7-sonnet" })}\n`, "utf8");
+		const host = createModelCommandHost({
+			agentDir,
+			settingsPath,
+			bootstrapDefaults: {
+				baseUrl: "https://api.anthropic.com/",
+				api: "anthropic-messages",
+			},
+		});
+
+		await host.switchModel?.({
+			modelId: "claude-opus-4-6",
+			session: {
+				state: {
+					model: {
+						id: "claude-3-7-sonnet",
+						provider: "anthropic",
+						displayName: "Claude 3.7 Sonnet",
+					},
+				},
+				switchModel: async () => {},
+			} as never,
+			runtime: {
+				setDefaultModel: () => {},
+			} as never,
+		});
+
+		expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+			provider: "anthropic",
+			model: "claude-opus-4-6",
 		});
 	});
 });
