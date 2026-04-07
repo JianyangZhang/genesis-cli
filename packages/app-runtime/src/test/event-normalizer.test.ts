@@ -48,12 +48,13 @@ describe("EventNormalizer", () => {
 		const result = normalizer.normalize(raw);
 
 		expect(result).not.toBeNull();
-		expect(result!.category).toBe("session");
-		expect(result!.type).toBe("session_error");
-		if (result!.type === "session_error") {
-			expect(result.message).toBe("401 Unauthorized");
-			expect(result.source).toBe("auth");
-			expect(result.fatal).toBe(true);
+		const event = result!;
+		expect(event.category).toBe("session");
+		expect(event.type).toBe("session_error");
+		if (event.type === "session_error") {
+			expect(event.message).toBe("401 Unauthorized");
+			expect(event.source).toBe("auth");
+			expect(event.fatal).toBe(true);
 		}
 	});
 

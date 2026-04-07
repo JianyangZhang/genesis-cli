@@ -66,9 +66,7 @@ interface PiMonoSdk {
 			modelsPath?: string,
 		): {
 			find(provider: string, modelId: string): PiMonoModel | undefined;
-			getRequestAuth?(
-				model: PiMonoModel,
-			):
+			getRequestAuth?(model: PiMonoModel):
 				| {
 						ok: true;
 						source?: {
@@ -249,10 +247,10 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 				report.placeholder
 					? `Placeholder API key configured for ${report.provider}/${report.modelId}. Replace ${
 							report.sourceDetail ?? "the configured api key"
-					  } with a real API key.`
+						} with a real API key.`
 					: `No API key found for ${report.provider}/${report.modelId}. Set ${
 							report.sourceDetail ?? "the configured api key"
-					  } before sending prompts.`,
+						} before sending prompts.`,
 			);
 		}
 		return report;

@@ -109,9 +109,7 @@ describe("formatDebugSessionBanner", () => {
 				logRootDir: "/tmp/log-root",
 				sessionDir: `/tmp/log-root/${traceId}`,
 			}),
-		).toBe(
-			`[genesis-debug] trace-id: ${traceId}\n` + `[genesis-debug] logs: /tmp/log-root/${traceId}\n`,
-		);
+		).toBe(`[genesis-debug] trace-id: ${traceId}\n` + `[genesis-debug] logs: /tmp/log-root/${traceId}\n`);
 	});
 });
 
