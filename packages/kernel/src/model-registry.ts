@@ -143,7 +143,8 @@ export class ModelRegistry {
 		}
 
 		if ((!apiKey || hasPlaceholderApiKey) && Object.keys(headers).length === 0) {
-			const envName = explicit && /^[A-Z0-9_]+$/.test(explicit) ? explicit : `${model.provider.toUpperCase()}_API_KEY`;
+			const envName =
+				explicit && /^[A-Z0-9_]+$/.test(explicit) ? explicit : `${model.provider.toUpperCase()}_API_KEY`;
 			return {
 				ok: false,
 				error: hasPlaceholderApiKey
@@ -185,17 +186,10 @@ export class ModelRegistry {
 		}
 	}
 
-	private resolveConfigValue(value: string): string | undefined {
-		if (value.startsWith("$")) {
-			return process.env[value.slice(1)];
-		}
-		if (/^[A-Z0-9_]+$/.test(value)) {
-			return process.env[value];
-		}
-		return value;
-	}
-
-	private resolveApiKey(provider: string, explicit: string | undefined): { apiKey?: string; source: KernelAuthSource } {
+	private resolveApiKey(
+		provider: string,
+		explicit: string | undefined,
+	): { apiKey?: string; source: KernelAuthSource } {
 		const stored = this.authStorage.getApiKey(provider);
 		if (stored) {
 			return {

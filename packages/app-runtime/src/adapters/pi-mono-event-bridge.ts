@@ -280,7 +280,9 @@ function hasAssistantMessageError(message: unknown): boolean {
 		return false;
 	}
 	const record = message as Record<string, unknown>;
-	return record.role === "assistant" && typeof record.errorMessage === "string" && record.errorMessage.trim().length > 0;
+	return (
+		record.role === "assistant" && typeof record.errorMessage === "string" && record.errorMessage.trim().length > 0
+	);
 }
 
 function extractErrorPayload(error: unknown): {

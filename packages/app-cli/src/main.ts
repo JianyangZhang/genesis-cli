@@ -4,7 +4,13 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { type AppRuntime, type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@pickle-pee/runtime";
+import {
+	type AppRuntime,
+	type CliMode,
+	createAppRuntime,
+	type ModelDescriptor,
+	PiMonoSessionAdapter,
+} from "@pickle-pee/runtime";
 import { ensureAgentDirBootstrapped, resolveDefaultBootstrapBaseUrl } from "./bootstrap.js";
 import { type DebugLoggerSession, getLastDebugSession, initializeDebugLogger } from "./debug-logger.js";
 import { createModeHandler, runInteractiveStartupChecks } from "./mode-dispatch.js";
@@ -802,10 +808,7 @@ async function loadSettingsLayers(settingsPath: string, workingDirectory: string
 	};
 }
 
-async function readOptionalSettingsFile(
-	filePath: string,
-	layerLabel = "settings",
-): Promise<SettingsFile | null> {
+async function readOptionalSettingsFile(filePath: string, layerLabel = "settings"): Promise<SettingsFile | null> {
 	try {
 		const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

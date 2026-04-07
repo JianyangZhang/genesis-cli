@@ -1079,7 +1079,7 @@ class InteractiveModeHandler implements ModeHandler {
 		try {
 			for (;;) {
 				this._lastError = null;
-					this.writeTranscriptText(formatInteractiveInfoLine("Running startup checks..."), true);
+				this.writeTranscriptText(formatInteractiveInfoLine("Running startup checks..."), true);
 				try {
 					await check();
 					return;
