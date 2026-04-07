@@ -211,11 +211,11 @@ npm run publish:verify
 
 | 变量名 | 是否必填 | 默认值 | 描述 |
 | --- | --- | --- | --- |
-| `GENESIS_API_KEY` | 是（真实请求 / live test） | 空 | 模型鉴权使用的 API key。 |
-| `GENESIS_BOOTSTRAP_BASE_URL` | 否 | `https://open.bigmodel.cn/api/coding/paas/v4/` | bootstrap 写入 `models.json` 时使用的 base URL；live test 也复用它。 |
-| `GENESIS_BOOTSTRAP_API` | 否 | `openai-completions` | bootstrap / live test 使用的协议类型；当前支持 `openai-completions`、`anthropic-messages`。 |
-| `GENESIS_MODEL_PROVIDER` | 否 | `zai` | 模型所属 provider 名称。未显式配置时会使用内部默认值。 |
-| `GENESIS_MODEL_ID` | 是（interactive 启动需显式来源） | `glm-5.1` | 模型 ID。内部仍有 fallback，但 interactive 启动自检要求它不是纯默认来源。 |
+| `GENESIS_API_KEY` | 是 | 空 | 模型鉴权使用的 API key。 |
+| `GENESIS_BOOTSTRAP_BASE_URL` | 是 | 空 | 模型服务的 base URL。 |
+| `GENESIS_BOOTSTRAP_API` | 是 | 空 | 请求协议；当前支持 `openai-completions`、`anthropic-messages`。 |
+| `GENESIS_MODEL_PROVIDER` | 是 | 空 | 模型所属 provider 名称。 |
+| `GENESIS_MODEL_ID` | 是 | 空 | 模型 ID。 |
 | `GENESIS_TOOL_SET` | 否 | `read,bash,edit,write` | 默认启用的工具集合，逗号分隔。 |
 | `GENESIS_THINKING_LEVEL` | 否 | 空 | 思考强度；支持 `off`、`minimal`、`low`、`medium`、`high`、`xhigh`。 |
 | `GENESIS_DEBUG` | 否 | `false` | 打开 debug 日志；支持布尔值语义，如 `true` / `1`。 |
@@ -224,9 +224,9 @@ npm run publish:verify
 
 | 变量名 | 是否必填 | 默认值 | 描述 |
 | --- | --- | --- | --- |
-| `GENESIS_BOOTSTRAP_API_KEY_ENV` | 否 | `GENESIS_API_KEY` | 写入 `models.json` 的鉴权环境变量名。 |
+| `GENESIS_BOOTSTRAP_API_KEY_ENV` | 否 | `GENESIS_API_KEY` | 读取 API key 时使用的环境变量名。 |
 | `GENESIS_BOOTSTRAP_AUTH_HEADER` | 否 | `true`（`anthropic-messages` 时为 `false`） | provider 是否使用 `Authorization` 头。 |
-| `GENESIS_BOOTSTRAP_REASONING` | 否 | `thinking != off` 时为 `true`，否则为 `false` | bootstrap 写入模型配置时的 `reasoning` 标记。 |
+| `GENESIS_BOOTSTRAP_REASONING` | 否 | `thinking != off` 时为 `true`，否则为 `false` | 是否启用 reasoning。 |
 | `GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE` | 否 | 空 | provider 兼容性开关：是否支持 developer role。 |
 | `GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT` | 否 | 空 | provider 兼容性开关：是否支持 reasoning effort。 |
 
@@ -237,9 +237,3 @@ npm run publish:verify
 | `GENESIS_RECENT_SESSION_MAX_ENTRIES` | 否 | `10` | 最近对话历史保留数量。`sessionFile` 数量固定为该值加 `5`。 |
 | `GENESIS_DEBUG_LOG_MAX_SESSIONS` | 否 | `10` | debug 日志最多保留的最近会话数。 |
 | `GENESIS_DEBUG_LOG_RETENTION_DAYS` | 否 | `7` | debug 日志保留天数。 |
-
-### 兼容旧变量
-
-| 变量名 | 是否必填 | 默认值 | 描述 |
-| --- | --- | --- | --- |
-| `GENESIS_OPENAI_BASE_URL` | 否 | 空 | 旧兼容变量；当前仍会被当作 `GENESIS_BOOTSTRAP_BASE_URL` 的 fallback 读取。建议新配置改用 `GENESIS_BOOTSTRAP_BASE_URL`。 |

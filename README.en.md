@@ -212,11 +212,11 @@ Only environment variables that are **actually supported and read by the current
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `GENESIS_API_KEY` | Yes (real requests / live tests) | empty | API key used for model authentication. |
-| `GENESIS_BOOTSTRAP_BASE_URL` | No | `https://open.bigmodel.cn/api/coding/paas/v4/` | Base URL used when bootstrap writes `models.json`; live tests also reuse it. |
-| `GENESIS_BOOTSTRAP_API` | No | `openai-completions` | Protocol used by bootstrap and live tests; currently supports `openai-completions` and `anthropic-messages`. |
-| `GENESIS_MODEL_PROVIDER` | No | `zai` | Provider name for the selected model. If not explicitly configured, the internal default is used. |
-| `GENESIS_MODEL_ID` | Yes (interactive startup requires a non-default source) | `glm-5.1` | Model ID. There is still an internal fallback, but interactive startup checks require it not to come only from the built-in default source. |
+| `GENESIS_API_KEY` | Yes | empty | API key used for model authentication. |
+| `GENESIS_BOOTSTRAP_BASE_URL` | Yes | empty | Base URL for the model service. |
+| `GENESIS_BOOTSTRAP_API` | Yes | empty | Request protocol; currently supports `openai-completions` and `anthropic-messages`. |
+| `GENESIS_MODEL_PROVIDER` | Yes | empty | Provider name for the selected model. |
+| `GENESIS_MODEL_ID` | Yes | empty | Model ID. |
 | `GENESIS_TOOL_SET` | No | `read,bash,edit,write` | Default enabled tool set, as a comma-separated list. |
 | `GENESIS_THINKING_LEVEL` | No | empty | Thinking level; supported values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. |
 | `GENESIS_DEBUG` | No | `false` | Enables debug logging; accepts boolean-like values such as `true` and `1`. |
@@ -225,9 +225,9 @@ Only environment variables that are **actually supported and read by the current
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `GENESIS_BOOTSTRAP_API_KEY_ENV` | No | `GENESIS_API_KEY` | Environment variable name written into `models.json` for API key lookup. |
+| `GENESIS_BOOTSTRAP_API_KEY_ENV` | No | `GENESIS_API_KEY` | Environment variable name used to read the API key. |
 | `GENESIS_BOOTSTRAP_AUTH_HEADER` | No | `true` (`false` for `anthropic-messages`) | Whether the provider uses the `Authorization` header. |
-| `GENESIS_BOOTSTRAP_REASONING` | No | `true` when `thinking != off`, otherwise `false` | `reasoning` flag written during bootstrap model generation. |
+| `GENESIS_BOOTSTRAP_REASONING` | No | `true` when `thinking != off`, otherwise `false` | Whether reasoning is enabled. |
 | `GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE` | No | empty | Provider compatibility flag: whether developer role is supported. |
 | `GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT` | No | empty | Provider compatibility flag: whether reasoning effort is supported. |
 
@@ -238,9 +238,3 @@ Only environment variables that are **actually supported and read by the current
 | `GENESIS_RECENT_SESSION_MAX_ENTRIES` | No | `10` | Number of recent sessions to retain. `sessionFile` retention is fixed to this value plus `5`. |
 | `GENESIS_DEBUG_LOG_MAX_SESSIONS` | No | `10` | Maximum number of debug-log sessions to retain. |
 | `GENESIS_DEBUG_LOG_RETENTION_DAYS` | No | `7` | Number of days to retain debug logs. |
-
-### Legacy Compatibility
-
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `GENESIS_OPENAI_BASE_URL` | No | empty | Legacy compatibility variable. It is still read as a fallback for `GENESIS_BOOTSTRAP_BASE_URL`. Prefer `GENESIS_BOOTSTRAP_BASE_URL` for new configs. |

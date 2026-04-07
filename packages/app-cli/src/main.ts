@@ -334,9 +334,26 @@ async function prepareInteractiveLaunch(
 	return { options, runtime };
 }
 
-export function validateInteractiveModelConfiguration(options: CliOptions): void {
-	if (options.configSources.model?.layer === "default") {
-		throw new Error("MODEL_ID is required for interactive mode. Set GENESIS_MODEL_ID or pass --model.");
+export function validateInteractiveModelConfiguration(
+	options: CliOptions,
+	env: NodeJS.ProcessEnv = process.env,
+): void {
+	const requiredApiKeyEnv = options.bootstrapOverrides?.apiKeyEnv?.trim() || "GENESIS_API_KEY";
+	const requiredApiKeyValue = env[requiredApiKeyEnv]?.trim();
+	if (!requiredApiKeyValue || requiredApiKeyValue === "your_zhipu_api_key") {
+		throw new Error(`${requiredApiKeyEnv} is required for interactive mode.`);
+	}
+	if (!options.bootstrapOverrides?.baseUrl?.trim()) {
+		throw new Error("GENESIS_BOOTSTRAP_BASE_URL is required for interactive mode.");
+	}
+	if (!options.bootstrapOverrides?.api?.trim()) {
+		throw new Error("GENESIS_BOOTSTRAP_API is required for interactive mode.");
+	}
+	if (!options.model.provider.trim()) {
+		throw new Error("GENESIS_MODEL_PROVIDER is required for interactive mode.");
+	}
+	if (!options.model.id.trim()) {
+		throw new Error("GENESIS_MODEL_ID is required for interactive mode.");
 	}
 }
 
@@ -403,7 +420,8 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 			? { layer: "cli", detail: "--agent-dir" }
 			: { layer: "default", detail: ".genesis-local/agent" };
 
-	const provider = pickString(
+	const provider =
+		pickOptionalString(
 		[
 			{ value: asOptionalString(flags.provider), layer: "cli", detail: "--provider" },
 			{ value: shellEnv.GENESIS_MODEL_PROVIDER, layer: "env", detail: "GENESIS_MODEL_PROVIDER" },
@@ -439,15 +457,14 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 			},
 			{ value: agentConfig?.provider, layer: "agent", detail: agentConfigPath },
 		],
-		"zai",
-		{ layer: "default", detail: "default" },
 		(value, source) => {
 			sources.provider = source;
 			return value;
 		},
-	);
+	) ?? "";
 
-	const modelId = pickString(
+	const modelId =
+		pickOptionalString(
 		[
 			{ value: asOptionalString(flags.model), layer: "cli", detail: "--model" },
 			{ value: shellEnv.GENESIS_MODEL_ID, layer: "env", detail: "GENESIS_MODEL_ID" },
@@ -483,13 +500,11 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 			},
 			{ value: agentConfig?.model, layer: "agent", detail: agentConfigPath },
 		],
-		"glm-5.1",
-		{ layer: "default", detail: "default" },
 		(value, source) => {
 			sources.model = source;
 			return value;
 		},
-	);
+	) ?? "";
 
 	const displayName = pickOptionalString(
 		[
