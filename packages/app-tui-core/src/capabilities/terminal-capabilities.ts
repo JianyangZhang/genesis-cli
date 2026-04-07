@@ -27,7 +27,7 @@ export function detectTerminalCapabilities(env: TerminalEnvironment): TerminalCa
 	return {
 		hostFamily,
 		alternateScreen: hostFamily !== "unknown",
-		mouseTracking: hostFamily === "native",
+		mouseTracking: hostFamily === "native" || hostFamily === "vscode-xtermjs",
 		focusReporting: hostFamily === "native",
 		bracketedPaste: true,
 		synchronizedOutput,

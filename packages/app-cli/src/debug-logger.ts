@@ -57,6 +57,7 @@ interface DebugLoggerOptions {
 	readonly randomHex?: () => string;
 	readonly stderrWrite?: (text: string) => void;
 	readonly io?: LoggerIo;
+	readonly env?: NodeJS.ProcessEnv;
 }
 
 const defaultIo: LoggerIo = {
@@ -71,8 +72,10 @@ const defaultIo: LoggerIo = {
 	},
 };
 
-const DEBUG_LOG_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const DEBUG_LOG_MAX_SESSIONS = 10;
+const DEFAULT_DEBUG_LOG_RETENTION_DAYS = 7;
+const DEFAULT_DEBUG_LOG_MAX_SESSIONS = 10;
+const DEBUG_LOG_RETENTION_DAYS_ENV = "GENESIS_DEBUG_LOG_RETENTION_DAYS";
+const DEBUG_LOG_MAX_SESSIONS_ENV = "GENESIS_DEBUG_LOG_MAX_SESSIONS";
 
 const runtimeSeverityOrder: Record<DebugLogLevel, number> = {
 	DEBUG: 10,
@@ -95,6 +98,8 @@ export class DebugLogger {
 	private readonly metadataPath: string;
 	private readonly minRuntimeLevel: number;
 	private readonly argv: readonly string[];
+	private readonly debugLogRetentionMs: number;
+	private readonly debugLogMaxSessions: number;
 	private context: DebugLoggerContext = {};
 	private initialized = false;
 	private pendingWrites = new Map<string, string[]>();
@@ -128,6 +133,8 @@ export class DebugLogger {
 		this.metadataPath = join(sessionDir, `session-${fileTimestamp}.json`);
 		this.minRuntimeLevel = options.debugEnabled ? runtimeSeverityOrder.DEBUG : runtimeSeverityOrder.ERROR;
 		this.argv = [...options.argv];
+		this.debugLogRetentionMs = readDebugLogRetentionMs(options.env ?? process.env);
+		this.debugLogMaxSessions = readDebugLogMaxSessions(options.env ?? process.env);
 	}
 
 	get session(): DebugLoggerSession {
@@ -266,7 +273,7 @@ export class DebugLogger {
 	}
 
 	private async cleanupExpiredSessions(): Promise<void> {
-		const cutoff = Date.parse(this.sessionValue.startedAt) - DEBUG_LOG_RETENTION_MS;
+		const cutoff = Date.parse(this.sessionValue.startedAt) - this.debugLogRetentionMs;
 		try {
 			const entries = await this.io.readdir(this.sessionValue.logRootDir);
 			const tracedEntries = entries
@@ -276,7 +283,7 @@ export class DebugLogger {
 				}))
 				.filter((entry): entry is { entry: string; startedAt: number } => entry.startedAt !== null)
 				.sort((left, right) => right.startedAt - left.startedAt || left.entry.localeCompare(right.entry));
-			const keepEntries = new Set(tracedEntries.slice(0, DEBUG_LOG_MAX_SESSIONS).map((entry) => entry.entry));
+			const keepEntries = new Set(tracedEntries.slice(0, this.debugLogMaxSessions).map((entry) => entry.entry));
 			for (const { entry, startedAt } of tracedEntries) {
 				if (startedAt >= cutoff && keepEntries.has(entry)) {
 					continue;
@@ -334,6 +341,25 @@ export class DebugLogger {
 		const message = error instanceof Error ? error.message : String(error);
 		this.stderrWrite(`[genesis-debug] Failed to ${action}: ${message}\n`);
 	}
+}
+
+function readDebugLogRetentionMs(env: NodeJS.ProcessEnv): number {
+	const raw = env[DEBUG_LOG_RETENTION_DAYS_ENV];
+	if (typeof raw !== "string") {
+		return DEFAULT_DEBUG_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+	}
+	const parsed = Number.parseInt(raw.trim(), 10);
+	const days = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DEBUG_LOG_RETENTION_DAYS;
+	return days * 24 * 60 * 60 * 1000;
+}
+
+function readDebugLogMaxSessions(env: NodeJS.ProcessEnv): number {
+	const raw = env[DEBUG_LOG_MAX_SESSIONS_ENV];
+	if (typeof raw !== "string") {
+		return DEFAULT_DEBUG_LOG_MAX_SESSIONS;
+	}
+	const parsed = Number.parseInt(raw.trim(), 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DEBUG_LOG_MAX_SESSIONS;
 }
 
 export async function initializeDebugLogger(options: DebugLoggerOptions): Promise<DebugLogger> {

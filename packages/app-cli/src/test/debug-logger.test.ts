@@ -172,6 +172,45 @@ describe("DebugLogger", () => {
 		await logger.shutdown();
 	});
 
+	it("honors env overrides for debug log retention settings", async () => {
+		const removed: string[] = [];
+		const logger = await initializeDebugLogger({
+			debugEnabled: true,
+			argv: ["--debug"],
+			now: () => new Date("2026-04-20T12:00:00.000Z"),
+			pid: 4321,
+			randomHex: () => "deadbeef",
+			logRootDir: "/tmp/genesis-debug-logs",
+			env: {
+				...process.env,
+				GENESIS_DEBUG_LOG_MAX_SESSIONS: "2",
+				GENESIS_DEBUG_LOG_RETENTION_DAYS: "3",
+			},
+			io: {
+				async mkdir() {},
+				async appendFile() {},
+				async writeFile() {},
+				async readdir() {
+					return [
+						"20260420T120000-p1-deadbeef",
+						"20260419T120000-p2-deadbeef",
+						"20260418T120000-p3-deadbeef",
+						"20260417T120000-p4-deadbeef",
+					];
+				},
+				async rm(path) {
+					removed.push(path);
+				},
+			},
+		});
+
+		expect(removed).toEqual([
+			"/tmp/genesis-debug-logs/20260418T120000-p3-deadbeef",
+			"/tmp/genesis-debug-logs/20260417T120000-p4-deadbeef",
+		]);
+		await logger.shutdown();
+	});
+
 	it("applies the seven-day ttl even within the ten most recent sessions", async () => {
 		const removed: string[] = [];
 		const logger = await initializeDebugLogger({

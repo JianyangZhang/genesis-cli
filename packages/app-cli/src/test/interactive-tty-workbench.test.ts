@@ -2393,7 +2393,7 @@ describe("interactive workbench TTY", () => {
 		}
 	});
 
-	it("disables mouse and focus tracking inside VS Code terminals", async () => {
+	it("keeps mouse tracking but disables focus tracking inside VS Code terminals", async () => {
 		const originalTerm = process.env.TERM;
 		const originalTermProgram = process.env.TERM_PROGRAM;
 		const originalTerminalEmulator = process.env.TERMINAL_EMULATOR;
@@ -2413,9 +2413,56 @@ describe("interactive workbench TTY", () => {
 				await waitFor(() => screen.snapshot().includes("❯"));
 
 				expect(output.getRawOutput()).not.toContain("\x1b[?1004h");
-				expect(output.getRawOutput()).not.toContain("\x1b[?1000h");
-				expect(output.getRawOutput()).not.toContain("\x1b[?1002h");
-				expect(output.getRawOutput()).not.toContain("\x1b[?1006h");
+				expect(output.getRawOutput()).toContain("\x1b[?1000h");
+				expect(output.getRawOutput()).toContain("\x1b[?1002h");
+				expect(output.getRawOutput()).toContain("\x1b[?1006h");
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			if (originalTerm === undefined) {
+				delete process.env.TERM;
+			} else {
+				process.env.TERM = originalTerm;
+			}
+			if (originalTermProgram === undefined) {
+				delete process.env.TERM_PROGRAM;
+			} else {
+				process.env.TERM_PROGRAM = originalTermProgram;
+			}
+			if (originalTerminalEmulator === undefined) {
+				delete process.env.TERMINAL_EMULATOR;
+			} else {
+				process.env.TERMINAL_EMULATOR = originalTerminalEmulator;
+			}
+		}
+	}, 10000);
+
+	it("supports wheel scrolling transcript history inside VS Code terminals", async () => {
+		const originalTerm = process.env.TERM;
+		const originalTermProgram = process.env.TERM_PROGRAM;
+		const originalTerminalEmulator = process.env.TERMINAL_EMULATOR;
+		process.env.TERM = "xterm-256color";
+		process.env.TERM_PROGRAM = "vscode";
+		delete process.env.TERMINAL_EMULATOR;
+
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("scroll history\r");
+				await waitFor(() => screen.snapshot().includes("History line 30"));
+				expect(screen.snapshot()).not.toContain("History line 01");
+
+				input.write("\x1b[<64;1;1M");
+				await waitFor(() => screen.snapshot().includes("History line 27"));
 
 				input.write("/exit\r");
 				await startPromise;

@@ -96,6 +96,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 		return;
 	}
 	const requestedMode = readModeFlag(parsed.flags, "mode", "interactive");
+	await preloadSettingsEnv(parsed.flags);
 
 	const logger = await initializeDebugLogger({
 		debugEnabled: readDebugFlag(parsed.flags),
@@ -156,9 +157,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 					thinkingLevel: options.thinkingLevel,
 					onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "session_init" }),
 					onUpstreamEvent: (event) => logRawUpstreamEvent(logger, { phase: "session_init", event }),
+					onSessionRecovered: (report) => logSessionRecovery(logger, { ...report, phase: "session_init" }),
 				}),
 		});
-		const recentSessionPrune = await runtime.pruneRecentSessions(10);
+		const recentSessionPrune = await runtime.pruneRecentSessions();
 		logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
 
 		const handler = createModeHandler(options.mode, {
@@ -212,6 +214,17 @@ function logRawUpstreamEvent(
 	logger.debug("model.raw_event", "Received raw upstream event", data);
 }
 
+function logSessionRecovery(
+	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
+	data: {
+		mode: "resume" | "new";
+		sessionFile?: string;
+		phase: "session_init";
+	},
+): void {
+	logger.debug("session.recovery", "Resolved session recovery source", data);
+}
+
 async function startInteractiveWithStartupChecks(
 	flags: Readonly<Record<string, string | boolean>>,
 	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
@@ -249,6 +262,7 @@ async function prepareInteractiveLaunch(
 	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
 ): Promise<{ options: CliOptions; runtime: AppRuntime }> {
 	const options = await resolveCliOptions(flags);
+	validateInteractiveModelConfiguration(options);
 	logger.updateContext({
 		workingDirectory: options.workingDirectory,
 		agentDir: options.agentDir,
@@ -311,11 +325,18 @@ async function prepareInteractiveLaunch(
 				thinkingLevel: options.thinkingLevel,
 				onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "session_init" }),
 				onUpstreamEvent: (event) => logRawUpstreamEvent(logger, { phase: "session_init", event }),
+				onSessionRecovered: (report) => logSessionRecovery(logger, { ...report, phase: "session_init" }),
 			}),
 	});
-	const recentSessionPrune = await runtime.pruneRecentSessions(10);
+	const recentSessionPrune = await runtime.pruneRecentSessions();
 	logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
 	return { options, runtime };
+}
+
+export function validateInteractiveModelConfiguration(options: CliOptions): void {
+	if (options.configSources.model?.layer === "default") {
+		throw new Error("MODEL_ID is required for interactive mode. Set GENESIS_MODEL_ID or pass --model.");
+	}
 }
 
 interface FileConfig {
@@ -728,6 +749,16 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 		},
 		configSources: sources,
 	};
+}
+
+async function preloadSettingsEnv(flags: Readonly<Record<string, string | boolean>>): Promise<void> {
+	const workingDirectory = resolve(readStringFlag(flags, "cwd", process.cwd()));
+	const settingsPath = resolve(homedir(), ".genesis-cli", "settings.json");
+	try {
+		await ensureUserSettingsFile(settingsPath);
+	} catch {}
+	const settingsLayers = await loadSettingsLayers(settingsPath, workingDirectory);
+	applySettingsEnv(settingsLayers.mergedEnv);
 }
 
 function normalizeOptionalString(value: string | undefined): string | undefined {

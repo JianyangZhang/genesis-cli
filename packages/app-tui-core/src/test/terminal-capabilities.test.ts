@@ -11,6 +11,18 @@ describe("terminal capabilities", () => {
 		).toBe("vscode-xtermjs");
 	});
 
+	it("keeps mouse wheel tracking but disables focus reporting for VS Code terminals", () => {
+		const capabilities = detectTerminalCapabilities({
+			term: "xterm-256color",
+			termProgram: "vscode",
+		});
+
+		expect(capabilities.hostFamily).toBe("vscode-xtermjs");
+		expect(capabilities.mouseTracking).toBe(true);
+		expect(capabilities.focusReporting).toBe(false);
+		expect(capabilities.alternateScreen).toBe(true);
+	});
+
 	it("disables mouse and focus reporting for JetBrains terminals", () => {
 		const capabilities = detectTerminalCapabilities({
 			term: "xterm-256color",

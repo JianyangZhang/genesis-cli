@@ -19,9 +19,6 @@
 - **用户级配置文件**
   - macOS / Linux：`~/.genesis-cli/settings.json`
   - Windows：`%USERPROFILE%/.genesis-cli/settings.json`
-- **自动初始化**
-  - 若文件不存在，`genesis` 会自动创建目录与模板
-  - 若文件已存在，CLI 不会改写你的现有内容
 - **最小示例**
 
 ```json
@@ -38,9 +35,8 @@
 
 - **关键字段**
   - `GENESIS_API_KEY`：模型 API key
-  - `GENESIS_BOOTSTRAP_BASE_URL`：provider 初始化基地址
-  - `GENESIS_BOOTSTRAP_API`：初始化协议，通常为 `openai-completions`
-  - `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`：默认 provider 与模型
+  - `GENESIS_MODEL_PROVIDER`：可选；未显式指定时使用默认 provider
+  - `GENESIS_MODEL_ID`：模型 ID；interactive 模式下为空会在启动自检时报错
 - **可选项目级覆盖**
   - `.genesis/settings.json`
   - `.genesis/settings.local.json`

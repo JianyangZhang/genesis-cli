@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createAppRuntime } from "../create-app-runtime.js";
 import type { RuntimeEvent } from "../events/runtime-event.js";
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
@@ -27,6 +27,16 @@ class SequencedRecoveryAdapter extends StubKernelSessionAdapter {
 }
 
 describe("createAppRuntime", () => {
+	const originalRecentSessionMaxEntries = process.env.GENESIS_RECENT_SESSION_MAX_ENTRIES;
+
+	afterEach(() => {
+		if (originalRecentSessionMaxEntries === undefined) {
+			delete process.env.GENESIS_RECENT_SESSION_MAX_ENTRIES;
+		} else {
+			process.env.GENESIS_RECENT_SESSION_MAX_ENTRIES = originalRecentSessionMaxEntries;
+		}
+	});
+
 	it("creates a runtime with an event bus", () => {
 		const adapter = new StubKernelSessionAdapter();
 		const runtime = createAppRuntime({
@@ -697,6 +707,48 @@ describe("createAppRuntime", () => {
 		expect(rewritten[0]?.recoveryData.metadata).toBeUndefined();
 		expect(rewrittenLast.model).toEqual({ id: "", provider: "" });
 		expect(rewrittenLast.metadata).toBeUndefined();
+	});
+
+	it("uses the configured recent-session max entries by default", async () => {
+		process.env.GENESIS_RECENT_SESSION_MAX_ENTRIES = "3";
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-configured-prune-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		await mkdir(historyDir, { recursive: true });
+		await writeFile(
+			join(historyDir, "recent.json"),
+			`${JSON.stringify(
+				Array.from({ length: 5 }, (_, index) => ({
+					recoveryData: {
+						sessionId: { value: `session-${index}` },
+						model: stubModel,
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: null,
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+					updatedAt: 1000 - index,
+				})),
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		const prune = await runtime.pruneRecentSessions();
+		const recent = await runtime.listRecentSessions();
+
+		expect(prune).toEqual({ before: 5, after: 3, removed: 2 });
+		expect(recent).toHaveLength(3);
+		expect(recent.map((entry) => entry.recoveryData.sessionId.value)).toEqual(["session-0", "session-1", "session-2"]);
 	});
 
 	it("tracks and updates the default model for newly created sessions", async () => {

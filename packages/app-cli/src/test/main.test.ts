@@ -9,6 +9,7 @@ import {
 	parseArgs,
 	readCliPackageVersion,
 	resolveCliOptions,
+	validateInteractiveModelConfiguration,
 } from "../main.js";
 
 const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -173,6 +174,25 @@ describe("resolveCliOptions", () => {
 		expect(options.model.id).toBe("settings-model");
 		expect(options.bootstrapOverrides?.baseUrl).toBe("https://settings.example/api/");
 		expect(process.env.GENESIS_API_KEY).toBe("settings-api-key");
+	});
+
+	it("requires an explicit model id for interactive startup validation", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		const settingsDir = join(homeDir, ".genesis-cli");
+		const settingsPath = join(settingsDir, "settings.json");
+		process.env.HOME = homeDir;
+		delete process.env.GENESIS_MODEL_ID;
+		await mkdir(settingsDir, { recursive: true });
+		await writeFile(settingsPath, JSON.stringify({ env: { GENESIS_MODEL_ID: "" } }), "utf8");
+
+		const options = await resolveCliOptions({});
+		expect(options.configSources.model).toEqual({
+			layer: "default",
+			detail: "default",
+		});
+		expect(() => validateInteractiveModelConfiguration(options)).toThrow(
+			"MODEL_ID is required for interactive mode. Set GENESIS_MODEL_ID or pass --model.",
+		);
 	});
 
 	it("fails fast when ~/.genesis-cli/settings.json contains invalid JSON", async () => {

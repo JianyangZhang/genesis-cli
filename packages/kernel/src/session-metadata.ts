@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import type { AssistantMessage, Message, Model, UserMessage } from "@pickle-pee/pi-ai";
 
 export interface GenesisTranscriptMessagePreview {
 	readonly role: "user" | "assistant";
@@ -22,6 +23,15 @@ interface SessionJsonlEntry {
 		readonly content?: unknown;
 	};
 }
+
+const ZERO_USAGE = {
+	input: 0,
+	output: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+	totalTokens: 0,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} as const;
 
 export async function loadSessionMetadataFromSessionFile(sessionFile?: string): Promise<GenesisSessionMetadata | null> {
 	if (!sessionFile) return null;
@@ -94,6 +104,82 @@ export async function loadSessionMetadataFromSessionFile(sessionFile?: string): 
 		};
 	} catch {
 		return null;
+	}
+}
+
+export async function loadSessionMessagesFromSessionFile(
+	sessionFile: string | undefined,
+	model: Pick<Model<any>, "api" | "provider" | "id">,
+): Promise<Message[]> {
+	if (!sessionFile) return [];
+	try {
+		const raw = await readFile(sessionFile, "utf8");
+		const lines = raw
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0);
+		if (lines.length === 0) {
+			return [];
+		}
+
+		const messages: Message[] = [];
+		for (const [index, line] of lines.entries()) {
+			let entry: SessionJsonlEntry;
+			try {
+				entry = JSON.parse(line) as SessionJsonlEntry;
+			} catch {
+				continue;
+			}
+			if (entry.type === "compaction") {
+				const summary = sanitizeLine(entry.summary);
+				if (!summary) {
+					continue;
+				}
+				messages.length = 0;
+				messages.push({
+					role: "user",
+					content: [
+						{
+							type: "text",
+							text: [
+								"Compacted session summary:",
+								summary,
+								"Continue from this summary and ask follow-up questions only if critical context is missing.",
+							].join("\n\n"),
+						},
+					],
+					timestamp: index + 1,
+				} satisfies UserMessage);
+				continue;
+			}
+			if (entry.type !== "message") continue;
+			const role = entry.message?.role;
+			if (role !== "user" && role !== "assistant") continue;
+			const text = extractMessageText(entry.message?.content);
+			if (!text) continue;
+			const timestamp = index + 1;
+			if (role === "user") {
+				messages.push({
+					role: "user",
+					content: [{ type: "text", text }],
+					timestamp,
+				} satisfies UserMessage);
+				continue;
+			}
+			messages.push({
+				role: "assistant",
+				stopReason: "stop",
+				content: [{ type: "text", text }],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: { ...ZERO_USAGE, cost: { ...ZERO_USAGE.cost } },
+				timestamp,
+			} satisfies AssistantMessage);
+		}
+		return messages;
+	} catch {
+		return [];
 	}
 }
 

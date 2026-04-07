@@ -2609,7 +2609,7 @@ export function buildWelcomeLines(input: {
 	terminalWidth: number;
 	version: string;
 	model: string;
-	provider: string;
+	provider?: string;
 	greeting: string;
 	debugTraceId?: string;
 }): readonly string[] {
@@ -2622,6 +2622,9 @@ export function buildWelcomeLines(input: {
 	const contentWidth = width - 2;
 	const center = (text: string): string => formatWelcomeCenteredLine(contentWidth, text);
 	const fill = (text = ""): string => formatWelcomeFilledLine(contentWidth, text);
+	const modelLine = input.provider
+		? `${CYAN}${input.model}${RESET} ${DIM}via${RESET} ${input.provider}`
+		: `${CYAN}${input.model}${RESET}`;
 	return [
 		formatWelcomeTopBorder(width, input.version),
 		fill(),
@@ -2631,7 +2634,7 @@ export function buildWelcomeLines(input: {
 		center(`${CYAN}      ──╂──      ${RESET}`),
 		center(`${DIM}        ${CYAN}│${RESET}        ${RESET}`),
 		fill(),
-		center(`${CYAN}${input.model}${RESET} ${DIM}via${RESET} ${input.provider}`),
+		center(modelLine),
 		formatWelcomeBottomBorder(width),
 		buildWelcomeHintLine(input.terminalWidth),
 		...(input.debugTraceId ? [`${INTERACTIVE_THEME.muted}Debug trace: ${input.debugTraceId}${RESET}`] : []),

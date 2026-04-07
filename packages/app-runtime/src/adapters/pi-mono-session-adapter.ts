@@ -128,6 +128,10 @@ export interface PiMonoSessionAdapterOptions {
 	readonly createSession?: (options: CreateAgentSessionOptions) => Promise<AgentSession>;
 	readonly onAuthResolved?: (report: PiMonoResolvedAuthReport) => void;
 	readonly onUpstreamEvent?: (event: unknown) => void;
+	readonly onSessionRecovered?: (report: {
+		readonly mode: "resume" | "new";
+		readonly sessionFile?: string;
+	}) => void;
 }
 
 export class PiMonoSessionAdapter implements KernelSessionAdapter {
@@ -536,6 +540,10 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 			recovery?.sessionFile && recovery.sessionFile.length > 0
 				? sdk.SessionManager.open(recovery.sessionFile)
 				: sdk.SessionManager.create(workingDirectory);
+		this.options.onSessionRecovered?.({
+			mode: recovery?.sessionFile && recovery.sessionFile.length > 0 ? "resume" : "new",
+			sessionFile: recovery?.sessionFile,
+		});
 
 		const session = await defaultCreateSession({
 			cwd: workingDirectory,
