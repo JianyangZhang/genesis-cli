@@ -96,6 +96,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 		return;
 	}
 	const requestedMode = readModeFlag(parsed.flags, "mode", "interactive");
+	await preloadSettingsEnv(parsed.flags);
 
 	const logger = await initializeDebugLogger({
 		debugEnabled: readDebugFlag(parsed.flags),
@@ -159,7 +160,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 					onSessionRecovered: (report) => logSessionRecovery(logger, { ...report, phase: "session_init" }),
 				}),
 		});
-		const recentSessionPrune = await runtime.pruneRecentSessions(10);
+		const recentSessionPrune = await runtime.pruneRecentSessions();
 		logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
 
 		const handler = createModeHandler(options.mode, {
@@ -326,7 +327,7 @@ async function prepareInteractiveLaunch(
 				onSessionRecovered: (report) => logSessionRecovery(logger, { ...report, phase: "session_init" }),
 			}),
 	});
-	const recentSessionPrune = await runtime.pruneRecentSessions(10);
+	const recentSessionPrune = await runtime.pruneRecentSessions();
 	logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
 	return { options, runtime };
 }
@@ -741,6 +742,16 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 		},
 		configSources: sources,
 	};
+}
+
+async function preloadSettingsEnv(flags: Readonly<Record<string, string | boolean>>): Promise<void> {
+	const workingDirectory = resolve(readStringFlag(flags, "cwd", process.cwd()));
+	const settingsPath = resolve(homedir(), ".genesis-cli", "settings.json");
+	try {
+		await ensureUserSettingsFile(settingsPath);
+	} catch {}
+	const settingsLayers = await loadSettingsLayers(settingsPath, workingDirectory);
+	applySettingsEnv(settingsLayers.mergedEnv);
 }
 
 function normalizeOptionalString(value: string | undefined): string | undefined {

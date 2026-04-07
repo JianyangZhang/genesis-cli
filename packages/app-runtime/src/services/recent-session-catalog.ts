@@ -10,7 +10,8 @@ import type {
 	SessionTranscriptMessagePreview,
 } from "../types/index.js";
 
-export const MAX_RECENT_SESSION_COUNT = 10;
+export const DEFAULT_RECENT_SESSION_MAX_ENTRIES = 10;
+export const RECENT_SESSION_MAX_ENTRIES_ENV = "GENESIS_RECENT_SESSION_MAX_ENTRIES";
 
 export function getRecentSessionCatalogDir(historyDir: string): string {
 	return historyDir;
@@ -86,7 +87,7 @@ export async function listRecentSessions(historyDir: string | undefined): Promis
 
 export async function pruneRecentSessions(
 	historyDir: string | undefined,
-	maxEntries = MAX_RECENT_SESSION_COUNT,
+	maxEntries = readRecentSessionMaxEntries(),
 ): Promise<{ readonly before: number; readonly after: number; readonly removed: number }> {
 	if (!historyDir) {
 		return { before: 0, after: 0, removed: 0 };
@@ -144,8 +145,17 @@ async function upsertRecentSession(storeDir: string, recoveryData: SessionRecove
 		updatedAt: Date.now(),
 	};
 	const filtered = existing.filter((entry) => entry.recoveryData.sessionId.value !== recoveryData.sessionId.value);
-	const compacted = [next, ...filtered].slice(0, MAX_RECENT_SESSION_COUNT);
+	const compacted = [next, ...filtered].slice(0, readRecentSessionMaxEntries());
 	await writeFile(join(storeDir, "recent.json"), `${JSON.stringify(compacted, null, 2)}\n`, "utf8");
+}
+
+function readRecentSessionMaxEntries(env: NodeJS.ProcessEnv = process.env): number {
+	const raw = env[RECENT_SESSION_MAX_ENTRIES_ENV];
+	if (typeof raw !== "string") {
+		return DEFAULT_RECENT_SESSION_MAX_ENTRIES;
+	}
+	const parsed = Number.parseInt(raw.trim(), 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RECENT_SESSION_MAX_ENTRIES;
 }
 
 async function readRecentSessionsByDir(storeDir: string): Promise<readonly RecentSessionEntry[]> {
