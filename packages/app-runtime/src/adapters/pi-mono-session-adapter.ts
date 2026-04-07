@@ -9,6 +9,15 @@ type PermissionDecision = "allow" | "allow_for_session" | "allow_once" | "deny";
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type PiMonoModel = Record<string, unknown>;
 
+export interface PiMonoResolvedAuthReport {
+	readonly provider: string;
+	readonly modelId: string;
+	readonly sourceKind: "auth_storage" | "env" | "literal" | "missing";
+	readonly sourceDetail?: string;
+	readonly placeholder: boolean;
+	readonly authorized: boolean;
+}
+
 interface AgentSession {
 	readonly isStreaming: boolean;
 	subscribe(listener: (event: unknown) => void): () => void;
@@ -57,6 +66,26 @@ interface PiMonoSdk {
 			modelsPath?: string,
 		): {
 			find(provider: string, modelId: string): PiMonoModel | undefined;
+			getRequestAuth?(
+				model: PiMonoModel,
+			):
+				| {
+						ok: true;
+						source?: {
+							kind: PiMonoResolvedAuthReport["sourceKind"];
+							detail?: string;
+							placeholder?: boolean;
+						};
+				  }
+				| {
+						ok: false;
+						error: string;
+						source?: {
+							kind: PiMonoResolvedAuthReport["sourceKind"];
+							detail?: string;
+							placeholder?: boolean;
+						};
+				  };
 		};
 	};
 	SessionManager: {
@@ -99,6 +128,8 @@ export interface PiMonoSessionAdapterOptions {
 	readonly thinkingLevel?: ThinkingLevel;
 	readonly createTools?: (cwd: string, toolSet: readonly string[]) => PiMonoTool[];
 	readonly createSession?: (options: CreateAgentSessionOptions) => Promise<AgentSession>;
+	readonly onAuthResolved?: (report: PiMonoResolvedAuthReport) => void;
+	readonly onUpstreamEvent?: (event: unknown) => void;
 }
 
 export class PiMonoSessionAdapter implements KernelSessionAdapter {
@@ -201,6 +232,57 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		};
 	}
 
+	async validateStartupConfiguration(): Promise<PiMonoResolvedAuthReport> {
+		if (this.options.createSession) {
+			return {
+				provider: this.currentModel.provider,
+				modelId: this.currentModel.id,
+				sourceKind: "missing",
+				authorized: true,
+				placeholder: false,
+			};
+		}
+		const report = await this.resolveAuthReport();
+		this.options.onAuthResolved?.(report);
+		if (!report.authorized) {
+			throw new Error(
+				report.placeholder
+					? `Placeholder API key configured for ${report.provider}/${report.modelId}. Replace ${
+							report.sourceDetail ?? "the configured api key"
+					  } with a real API key.`
+					: `No API key found for ${report.provider}/${report.modelId}. Set ${
+							report.sourceDetail ?? "the configured api key"
+					  } before sending prompts.`,
+			);
+		}
+		return report;
+	}
+
+	private async resolveAuthReport(): Promise<PiMonoResolvedAuthReport> {
+		const recovery = this.pendingRecoveryData;
+		const agentDir = recovery?.agentDir ?? this.options.agentDir;
+		const sdk = await loadPiMonoSdk();
+		const authStorage = sdk.AuthStorage.create(agentDir ? join(agentDir, "auth.json") : undefined);
+		const modelRegistry = sdk.ModelRegistry.create(authStorage, agentDir ? join(agentDir, "models.json") : undefined);
+		const model = modelRegistry.find(this.currentModel.provider, this.currentModel.id) as PiMonoModel | undefined;
+		if (!model) {
+			throw new Error(
+				`Model ${this.currentModel.provider}/${this.currentModel.id} is not configured in ${
+					agentDir ?? ".genesis-local/agent"
+				}/models.json`,
+			);
+		}
+		const auth = modelRegistry.getRequestAuth?.(model);
+		return {
+			provider: this.currentModel.provider,
+			modelId: this.currentModel.id,
+			sourceKind: auth?.source?.kind ?? "missing",
+			sourceDetail: auth?.source?.detail,
+			placeholder: auth?.source?.placeholder === true,
+			authorized: auth?.ok ?? true,
+		};
+	}
+
 	private async *runPromptLikeOperation(input: string, mode: "prompt" | "continue"): AsyncIterable<RawUpstreamEvent> {
 		if (this.closed) {
 			throw new Error("Session adapter is closed");
@@ -220,6 +302,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		let promptCompleted = false;
 
 		const unsubscribe = this.session.subscribe((event) => {
+			this.options.onUpstreamEvent?.(event);
 			const bridged = bridgePiMonoEvent(event as never, this.bridgeState);
 			this.bridgeState = bridged.nextState;
 
@@ -284,6 +367,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		let compactCompleted = false;
 
 		const unsubscribe = this.session.subscribe((event) => {
+			this.options.onUpstreamEvent?.(event);
 			const bridged = bridgePiMonoEvent(event as never, this.bridgeState);
 			this.bridgeState = bridged.nextState;
 
@@ -394,6 +478,9 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 	private async initialize(): Promise<void> {
 		if (this.session) {
 			return;
+		}
+		if (!this.options.createSession) {
+			this.options.onAuthResolved?.(await this.resolveAuthReport());
 		}
 		this.session = await this.createUnderlyingSession();
 	}

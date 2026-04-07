@@ -136,6 +136,9 @@ function extractRpcParams(event: RuntimeEvent): Readonly<Record<string, unknown>
 		"usage",
 		"isFinal",
 		"recoveryData",
+		"message",
+		"source",
+		"fatal",
 	] as const;
 
 	for (const key of allowed) {

@@ -98,6 +98,8 @@ function formatSessionEvent(event: RuntimeEvent): string {
 			return `${GREEN}Session resumed${RESET}`;
 		case "session_closed":
 			return `${DIM}Session closed${RESET}`;
+		case "session_error":
+			return `${RED}Error${RESET}: ${event.message}`;
 		default:
 			return "";
 	}

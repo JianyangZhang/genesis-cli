@@ -143,6 +143,42 @@ describe("PiMonoEventBridge", () => {
 		]);
 	});
 
+	it("emits agent_error when assistant message_end carries errorMessage", () => {
+		const state = createInitialBridgeState({
+			model: { id: "glm-5.1", provider: "zai" },
+			toolSet: [],
+		});
+
+		const result = bridgePiMonoEvent(
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					errorMessage: "401 Unauthorized",
+					usage: {
+						input: 200,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 200,
+					},
+				},
+			} as never,
+			state,
+		);
+
+		expect(result.rawEvents).toContainEqual(
+			expect.objectContaining({
+				type: "agent_error",
+				payload: expect.objectContaining({
+					message: "401 Unauthorized",
+					source: "auth",
+					fatal: true,
+				}),
+			}),
+		);
+	});
+
 	it("tracks tool execution lifecycle", () => {
 		const state = createInitialBridgeState({
 			model: { id: "glm-5.1", provider: "zai" },

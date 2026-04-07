@@ -61,12 +61,21 @@ export interface SessionClosedEvent extends BaseEvent {
 	readonly recoveryData: SessionRecoveryData;
 }
 
+export interface SessionErrorEvent extends BaseEvent {
+	readonly category: "session";
+	readonly type: "session_error";
+	readonly message: string;
+	readonly source: "auth" | "provider" | "runtime";
+	readonly fatal: boolean;
+}
+
 export type SessionLifecycleEvent =
 	| SessionCreatedEvent
 	| SessionResumedEvent
 	| SessionSuspendedEvent
 	| SessionClosingEvent
-	| SessionClosedEvent;
+	| SessionClosedEvent
+	| SessionErrorEvent;
 
 // ---------------------------------------------------------------------------
 // 2. Tool Execution

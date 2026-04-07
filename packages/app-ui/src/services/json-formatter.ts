@@ -47,6 +47,9 @@ export function sanitizeForJson(event: RuntimeEvent): Readonly<Record<string, un
 			if ("model" in event) base.model = event.model;
 			if ("toolSet" in event) base.toolSet = event.toolSet;
 			if ("recoveryData" in event) base.recoveryData = event.recoveryData;
+			if ("message" in event) base.message = event.message;
+			if ("source" in event) base.source = event.source;
+			if ("fatal" in event) base.fatal = event.fatal;
 			break;
 		}
 		case "tool": {

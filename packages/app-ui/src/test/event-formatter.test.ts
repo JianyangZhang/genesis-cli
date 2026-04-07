@@ -45,6 +45,20 @@ describe("formatEventAsText", () => {
 		expect(text).toContain("Session resumed");
 	});
 
+	it("formats session_error", () => {
+		const event: RuntimeEvent = {
+			...base,
+			category: "session",
+			type: "session_error",
+			message: "401 Unauthorized",
+			source: "auth",
+			fatal: true,
+		};
+		const text = formatEventAsText(event);
+		expect(text).toContain("Error");
+		expect(text).toContain("401 Unauthorized");
+	});
+
 	it("formats tool_started", () => {
 		const event: RuntimeEvent = {
 			...base,

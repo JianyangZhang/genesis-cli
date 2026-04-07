@@ -1,6 +1,6 @@
 {
   "name": "@pickle-pee/runtime",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Product-layer runtime: session facade, plan execution, event normalization",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,8 +15,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@pickle-pee/kernel": "1.0.1",
-    "@pickle-pee/tools": "1.0.1"
+    "@pickle-pee/kernel": "1.0.2",
+    "@pickle-pee/tools": "1.0.2"
   },
   "publishConfig": {
     "access": "public"

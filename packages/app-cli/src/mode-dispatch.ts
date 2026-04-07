@@ -113,6 +113,11 @@ export function createModeHandler(
 	}
 }
 
+export async function runInteractiveStartupChecks(check: () => Promise<void>): Promise<void> {
+	const handler = new InteractiveModeHandler();
+	await handler.startStartupCheckScreen(check);
+}
+
 interface UsageSnapshot {
 	readonly input: number;
 	readonly output: number;
@@ -186,6 +191,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _sink: OutputSink | null = null;
 	private _runtime: AppRuntime | null = null;
 	private _recentSessionPersistTimer: ReturnType<typeof setTimeout> | null = null;
+	private _startupCheckScreenActive = false;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -203,7 +209,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this.writeTranscriptText(text, true);
 			},
 			writeError: (text) => {
-				this.writeTranscriptText(`Error: ${text}`, true);
+				this.writeTranscriptText(formatInteractiveErrorLine(text), true);
 			},
 		};
 		this._sessionRef = sessionRef;
@@ -1006,6 +1012,106 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 	}
 
+	async startStartupCheckScreen(check: () => Promise<void>): Promise<void> {
+		if (!process.stdin.isTTY || !process.stdout.isTTY) {
+			await check();
+			return;
+		}
+		this._startupCheckScreenActive = true;
+		this._lastError = null;
+		this._inputState = { buffer: "", cursor: 0 };
+		this._commandSuggestions = [];
+		this._welcomeLines = buildWelcomeLines({
+			terminalWidth: process.stdout.columns ?? 80,
+			version: readInteractiveCliPackageVersion(),
+			model: "Startup checks",
+			provider: "Genesis",
+			greeting: pickWelcomeGreeting(),
+			debugTraceId: getActiveDebugLogger()?.session.debugEnabled
+				? getActiveDebugLogger()?.session.traceId
+				: undefined,
+		});
+
+		const terminalCapabilities = detectTerminalCapabilities({
+			term: process.env.TERM,
+			termProgram: process.env.TERM_PROGRAM,
+			terminalEmulator: process.env.TERMINAL_EMULATOR,
+			tmux: process.env.TMUX,
+		});
+		const terminalModePlan = createInteractiveModePlan({
+			...terminalCapabilities,
+			bracketedPaste: false,
+		});
+		const ttySession = createTtySession({
+			onResume: () => {
+				this.rerenderInteractiveRegions();
+			},
+			modePlan: terminalModePlan,
+		});
+		const debouncedResizeRedraw = createDebouncedCallback(() => {
+			this.rerenderInteractiveRegions();
+		}, RESIZE_REDRAW_DEBOUNCE_MS);
+		const onResize = (): void => {
+			debouncedResizeRedraw.schedule();
+		};
+		process.stdout.on("resize", onResize);
+
+		const inputLoop = createInputLoop({
+			prompt: this.currentPrompt(),
+			input: process.stdin,
+			output: process.stdout,
+			rawMode: true,
+			onInputStateChange: (state) => {
+				this._inputState = state;
+				this.renderPromptLine();
+			},
+			onKey: (key) => {
+				if (key === "ctrlc") {
+					inputLoop.close();
+				}
+			},
+		});
+		this._inputLoop = inputLoop;
+
+		ttySession.enter();
+		this.fullRedrawInteractiveScreen();
+
+		try {
+			for (;;) {
+				this._lastError = null;
+					this.writeTranscriptText(formatInteractiveInfoLine("Running startup checks..."), true);
+				try {
+					await check();
+					return;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					this._lastError = message;
+					getActiveDebugLogger()?.error("interactive.startup_check", "Interactive startup check failed", {
+						error,
+					});
+					this.writeTranscriptText(formatInteractiveErrorLine("Startup checks failed"), true);
+					this.writeTranscriptText(formatInteractiveErrorDetailLine(message), true);
+					this.writeTranscriptText(
+						formatInteractiveInfoLine("Fix the configuration, then press Enter to retry."),
+						true,
+					);
+				}
+				const line = await inputLoop.nextLine();
+				if (line === null) {
+					throw new Error(this._lastError ?? "Interactive startup checks aborted");
+				}
+				this._inputState = { buffer: "", cursor: 0 };
+			}
+		} finally {
+			debouncedResizeRedraw.cancel();
+			process.stdout.off("resize", onResize);
+			inputLoop.close();
+			this._inputLoop = null;
+			this._startupCheckScreenActive = false;
+			ttySession.restore();
+		}
+	}
+
 	private renderWelcome(session: SessionFacade): void {
 		const debugTraceId = getActiveDebugLogger()?.session.debugEnabled
 			? getActiveDebugLogger()?.session.traceId
@@ -1205,6 +1311,20 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 			}
 			this.renderPromptLine();
+			return;
+		}
+		if (event.category === "session" && event.type === "session_error") {
+			this._lastError = event.message;
+			this._turnNotice = null;
+			this._turnNoticeAnimationFrame = 0;
+			this._turnStartedAt = null;
+			getActiveDebugLogger()?.error("interactive.session_error", "Interactive session reported an upstream error", {
+				message: event.message,
+				source: event.source,
+				fatal: event.fatal,
+			});
+			this.flushAssistantBuffer(false);
+			this.writeTranscriptText(formatInteractiveErrorLine(event.message), true);
 			return;
 		}
 		if (!shouldRenderInteractiveTranscriptEvent(event)) {
@@ -1770,6 +1890,9 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentPrompt(): string {
+		if (this._startupCheckScreenActive) {
+			return this._lastError ? "Press Enter to retry " : "Running startup checks ";
+		}
 		return this._resumeBrowser === null ? this._prompt : "Search> ";
 	}
 
@@ -3134,6 +3257,22 @@ export function formatFullWidthTranscriptUserLine(content: string, width: number
 
 export function formatTranscriptAssistantLine(content: string): string {
 	return `${INTERACTIVE_THEME.assistantBullet}⏺${INTERACTIVE_THEME.reset} ${content}`;
+}
+
+export function formatInteractiveInfoLine(content: string): string {
+	return `${INTERACTIVE_THEME.brand}${content}${INTERACTIVE_THEME.reset}`;
+}
+
+export function formatInteractiveWarningLine(content: string): string {
+	return `${INTERACTIVE_THEME.warning}${content}${INTERACTIVE_THEME.reset}`;
+}
+
+export function formatInteractiveErrorLine(content: string): string {
+	return `${INTERACTIVE_THEME.warningSoft}${INTERACTIVE_THEME.bold}Error:${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.warningSoft}${content}${INTERACTIVE_THEME.reset}`;
+}
+
+export function formatInteractiveErrorDetailLine(content: string): string {
+	return `${INTERACTIVE_THEME.warningSoft}${content}${INTERACTIVE_THEME.reset}`;
 }
 
 export function formatInteractivePromptBuffer(content: string, plain = false): string {

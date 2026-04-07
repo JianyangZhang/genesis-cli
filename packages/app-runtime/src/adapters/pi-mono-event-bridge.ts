@@ -2,7 +2,7 @@ import type { RawUpstreamEvent } from "./kernel-session-adapter.js";
 
 type PiMonoBridgeEvent =
 	| { type: "agent_start" }
-	| { type: "agent_end" }
+	| { type: "agent_end"; messages?: unknown[] }
 	| {
 			type: "message_update";
 			assistantMessageEvent: {
@@ -14,6 +14,10 @@ type PiMonoBridgeEvent =
 	| {
 			type: "message_end";
 			message?: unknown;
+	  }
+	| {
+			type: "error";
+			error?: unknown;
 	  }
 	| {
 			type: "tool_execution_start";
@@ -122,6 +126,25 @@ export function bridgePiMonoEvent(event: PiMonoBridgeEvent, state: PiMonoBridgeS
 				set signature(value: string | null) {
 					lastUsageSignature = value;
 				},
+			});
+			if (hasAssistantMessageError(event.message)) {
+				rawEvents.push({
+					type: "agent_error",
+					timestamp,
+					payload: {
+						message: extractErrorMessage(event.message),
+						source: inferErrorSource(extractErrorMessage(event.message)),
+						fatal: true,
+					},
+				});
+			}
+			break;
+
+		case "error":
+			rawEvents.push({
+				type: "agent_error",
+				timestamp,
+				payload: extractErrorPayload(event.error),
 			});
 			break;
 
@@ -250,6 +273,57 @@ function extractMessageUsage(message: unknown): {
 		return null;
 	}
 	return normalizeUsage((message as { usage?: unknown }).usage);
+}
+
+function hasAssistantMessageError(message: unknown): boolean {
+	if (!message || typeof message !== "object") {
+		return false;
+	}
+	const record = message as Record<string, unknown>;
+	return record.role === "assistant" && typeof record.errorMessage === "string" && record.errorMessage.trim().length > 0;
+}
+
+function extractErrorPayload(error: unknown): {
+	message: string;
+	source: "auth" | "provider" | "runtime";
+	fatal: boolean;
+} {
+	const message = extractErrorMessage(error);
+	return {
+		message,
+		source: inferErrorSource(message),
+		fatal: true,
+	};
+}
+
+function extractErrorMessage(error: unknown): string {
+	if (typeof error === "string" && error.trim().length > 0) {
+		return error.trim();
+	}
+	if (error && typeof error === "object") {
+		const record = error as Record<string, unknown>;
+		const candidates = [record.errorMessage, record.message, record.error];
+		for (const candidate of candidates) {
+			if (typeof candidate === "string" && candidate.trim().length > 0) {
+				return candidate.trim();
+			}
+		}
+	}
+	return "Upstream model request failed";
+}
+
+function inferErrorSource(message: string): "auth" | "provider" | "runtime" {
+	const normalized = message.toLowerCase();
+	if (
+		normalized.includes("api key") ||
+		normalized.includes("unauthorized") ||
+		normalized.includes("forbidden") ||
+		normalized.includes("401") ||
+		normalized.includes("403")
+	) {
+		return "auth";
+	}
+	return "provider";
 }
 
 function normalizeUsage(usage: unknown): {

@@ -23,6 +23,9 @@ import {
 	fitTerminalLine,
 	formatFullWidthTranscriptUserLine,
 	formatInteractiveFooter,
+	formatInteractiveErrorLine,
+	formatInteractiveErrorDetailLine,
+	formatInteractiveInfoLine,
 	formatInteractiveInputSeparator,
 	formatInteractivePermissionBlock,
 	formatInteractivePromptBuffer,
@@ -84,6 +87,18 @@ describe("interactive transcript formatting", () => {
 		const line = formatTranscriptAssistantLine("Hello");
 		expect(line).toContain("⏺");
 		expect(line).toContain("Hello");
+	});
+
+	it("formats startup info and error lines with themed colors", () => {
+		expect(formatInteractiveInfoLine("Running startup checks...")).toContain(INTERACTIVE_THEME.brand);
+		expect(formatInteractiveInfoLine("Fix the configuration, then press Enter to retry.")).toContain(
+			INTERACTIVE_THEME.brand,
+		);
+		const errorLine = formatInteractiveErrorLine("Invalid settings.json");
+		expect(errorLine).toContain("Error:");
+		expect(errorLine).toContain(INTERACTIVE_THEME.warningSoft);
+		expect(errorLine).toContain(INTERACTIVE_THEME.bold);
+		expect(formatInteractiveErrorDetailLine("Invalid settings.json")).toContain(INTERACTIVE_THEME.warningSoft);
 	});
 
 	it("keeps the live interactive prompt buffer unstyled", () => {

@@ -44,14 +44,7 @@
 - **可选项目级覆盖**
   - `.genesis/settings.json`
   - `.genesis/settings.local.json`
-  - `.genesis-local/agent/models.json`
-- **当前优先级（高 -> 低）**
-  1. CLI flags
-  2. shell 环境变量
-  3. 项目级 `.genesis/settings.local.json`
-  4. 项目级 `.genesis/settings.json`
-  5. `~/.genesis-cli/settings.json` 的 `env`
-  6. `--agent-dir` 下的本地 agent 配置
+- 默认情况下，Genesis 会优先读取你的 shell 环境变量和 `~/.genesis-cli/settings.json`；项目内覆盖仅在需要时再加。
 
 ### 2. 安装
 

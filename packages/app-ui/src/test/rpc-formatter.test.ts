@@ -72,6 +72,21 @@ describe("eventToRpcNotification", () => {
 		expect((rpc.params as Record<string, unknown>)?.usage).toEqual(event.usage);
 		expect((rpc.params as Record<string, unknown>)?.isFinal).toBe(true);
 	});
+
+	it("includes session error details in notifications", () => {
+		const event: RuntimeEvent = {
+			...base,
+			category: "session",
+			type: "session_error",
+			message: "401 Unauthorized",
+			source: "auth",
+			fatal: true,
+		};
+		const rpc = eventToRpcNotification(event);
+		expect((rpc.params as Record<string, unknown>)?.message).toBe("401 Unauthorized");
+		expect((rpc.params as Record<string, unknown>)?.source).toBe("auth");
+		expect((rpc.params as Record<string, unknown>)?.fatal).toBe(true);
+	});
 });
 
 describe("createRpcResponse", () => {

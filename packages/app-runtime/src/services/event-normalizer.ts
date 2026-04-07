@@ -57,6 +57,16 @@ export class EventNormalizer {
 					},
 				};
 
+			case "agent_error":
+				return {
+					...base,
+					category: "session",
+					type: "session_error",
+					message: (raw.payload?.message as string) ?? "Upstream model request failed",
+					source: (raw.payload?.source as "auth" | "provider" | "runtime") ?? "runtime",
+					fatal: raw.payload?.fatal !== false,
+				};
+
 			// -- Tool execution --
 			case "tool_execution_start":
 				return {

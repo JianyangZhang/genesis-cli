@@ -177,6 +177,40 @@ describe("resolveCliOptions", () => {
 		expect(process.env.GENESIS_API_KEY).toBe("settings-api-key");
 	});
 
+	it("fails fast when ~/.genesis-cli/settings.json contains invalid JSON", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		const settingsDir = join(homeDir, ".genesis-cli");
+		const settingsPath = join(settingsDir, "settings.json");
+		process.env.HOME = homeDir;
+		await mkdir(settingsDir, { recursive: true });
+		await writeFile(settingsPath, '{"env":{"GENESIS_MODEL_ID":"glm-5.1",}', "utf8");
+
+		await expect(resolveCliOptions({})).rejects.toThrow(`Invalid user file at ${settingsPath}:`);
+	});
+
+	it("does not inject placeholder api keys from settings into process.env", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
+		const settingsDir = join(homeDir, ".genesis-cli");
+		await mkdir(settingsDir, { recursive: true });
+		await writeFile(
+			join(settingsDir, "settings.json"),
+			JSON.stringify({
+				env: {
+					GENESIS_API_KEY: "your_zhipu_api_key",
+					GENESIS_MODEL_PROVIDER: "settings-provider",
+				},
+			}),
+			"utf8",
+		);
+
+		delete process.env.GENESIS_API_KEY;
+		process.env.HOME = homeDir;
+
+		const options = await resolveCliOptions({});
+		expect(options.model.provider).toBe("settings-provider");
+		expect(process.env.GENESIS_API_KEY).toBeUndefined();
+	});
+
 	it("prefers explicit shell env over ~/.genesis-cli/settings.json", async () => {
 		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
 		const settingsDir = join(homeDir, ".genesis-cli");

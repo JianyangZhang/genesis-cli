@@ -35,6 +35,28 @@ describe("EventNormalizer", () => {
 		expect(result!.type).toBe("session_closed");
 	});
 
+	it("maps agent_error to session_error", () => {
+		const raw: RawUpstreamEvent = {
+			type: "agent_error",
+			timestamp: 2500,
+			payload: {
+				message: "401 Unauthorized",
+				source: "auth",
+				fatal: true,
+			},
+		};
+		const result = normalizer.normalize(raw);
+
+		expect(result).not.toBeNull();
+		expect(result!.category).toBe("session");
+		expect(result!.type).toBe("session_error");
+		if (result!.type === "session_error") {
+			expect(result.message).toBe("401 Unauthorized");
+			expect(result.source).toBe("auth");
+			expect(result.fatal).toBe(true);
+		}
+	});
+
 	it("maps tool_execution_start to tool_started", () => {
 		const raw: RawUpstreamEvent = {
 			type: "tool_execution_start",

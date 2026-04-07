@@ -15,7 +15,7 @@ import type {
 import { createEventBus, createPlanEngine, createToolGovernor } from "@pickle-pee/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { initializeDebugLogger } from "../debug-logger.js";
-import { createModeHandler } from "../mode-dispatch.js";
+import { createModeHandler, runInteractiveStartupChecks } from "../mode-dispatch.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -25,6 +25,10 @@ function formatLocalTraceTimestamp(value: Date): string {
 		`${value.getFullYear()}${padTwo(value.getMonth() + 1)}${padTwo(value.getDate())}` +
 		`T${padTwo(value.getHours())}${padTwo(value.getMinutes())}${padTwo(value.getSeconds())}`
 	);
+}
+
+function stripAnsi(text: string): string {
+	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
 class FakeTtyInput extends PassThrough {
@@ -428,6 +432,20 @@ class FakeInteractiveSession implements SessionFacade {
 				category: "text",
 				type: "text_delta",
 				content: "Reply without usage yet finished",
+			} as RuntimeEvent);
+			return;
+		}
+
+		if (input === "auth fail") {
+			this.emit({
+				id: "session-error-auth-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "session",
+				type: "session_error",
+				message: "401 Unauthorized",
+				source: "auth",
+				fatal: true,
 			} as RuntimeEvent);
 			return;
 		}
@@ -1176,6 +1194,29 @@ afterEach(() => {
 });
 
 describe("interactive workbench TTY", () => {
+	it("shows startup check failures inside the TUI and retries in place", async () => {
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+		let attempts = 0;
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = runInteractiveStartupChecks(async () => {
+				attempts += 1;
+				if (attempts === 1) {
+					throw new Error("Invalid user file at ~/.genesis-cli/settings.json: bad json");
+				}
+			});
+			await waitFor(() => screen.snapshot().includes("Genesis CLI"));
+			await waitFor(() => screen.snapshot().includes("Press Enter to retry"));
+			expect(stripAnsi(output.getRawOutput())).toContain("Fix the configuration, then press Enter to retry.");
+
+			input.write("\r");
+			await startPromise;
+		});
+
+		expect(attempts).toBe(2);
+	}, 10000);
+
 	it("shows the debug trace in the welcome history buffer when debug logging is enabled", async () => {
 		const traceId = `${formatLocalTraceTimestamp(new Date("2026-04-06T12:00:00.000Z"))}-p4321-deadbeef`;
 		const logger = await initializeDebugLogger({
@@ -1292,6 +1333,56 @@ describe("interactive workbench TTY", () => {
 		expect(runtimeLog).toContain('"scope":"resume.browser.resume"');
 	}, 10000);
 
+	it("writes session errors into debug logs when --debug is enabled", async () => {
+		const writes: Array<{ path: string; data: string }> = [];
+		const logger = await initializeDebugLogger({
+			debugEnabled: true,
+			argv: ["--debug"],
+			now: () => new Date("2026-04-06T12:45:00.000Z"),
+			pid: 2468,
+			randomHex: () => "cafefeed",
+			io: {
+				async mkdir() {},
+				async appendFile(path, data) {
+					writes.push({ path, data });
+				},
+				async writeFile() {},
+				async readdir() {
+					return [];
+				},
+				async rm() {},
+			},
+		});
+		const session = new FakeInteractiveSession({ sessionId: "session-debug-error" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				input.write("auth fail\r");
+				await waitFor(() => screen.snapshot().includes("Error: 401 Unauthorized"));
+
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await logger.shutdown();
+		}
+
+		const runtimeLog = writes
+			.filter((write) => write.path.includes("runtime-") && write.path.endsWith(".jsonl"))
+			.map((write) => write.data)
+			.join("");
+		expect(runtimeLog).toContain('"scope":"interactive.session_error"');
+		expect(runtimeLog).toContain('"message":"Interactive session reported an upstream error"');
+		expect(runtimeLog).toContain('"source":"auth"');
+		expect(runtimeLog).toContain('"message":"401 Unauthorized"');
+	}, 10000);
+
 	it("renders a completed assistant reply and keeps the composer visible", async () => {
 		const session = new FakeInteractiveSession();
 		const runtime = createFakeRuntime(session);
@@ -1314,6 +1405,29 @@ describe("interactive workbench TTY", () => {
 			const footerSeparatorLine = findLineIndexContaining(snapshot, "────────────────");
 			expect(assistantLine - userLine).toBe(2);
 			expect(footerSeparatorLine - assistantLine).toBeLessThanOrEqual(2);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("surfaces session errors in the transcript and keeps the composer usable", async () => {
+		const session = new FakeInteractiveSession();
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("auth fail\r");
+			await waitFor(() => screen.snapshot().includes("Error: 401 Unauthorized"));
+			expect(screen.snapshot()).toContain("❯");
+
+			input.write("hello\r");
+			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
+			expect(screen.snapshot()).toContain("hello");
 
 			input.write("/exit\r");
 			await startPromise;

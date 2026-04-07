@@ -44,14 +44,7 @@ Minimal path: configure, install, then run.
 - **Optional project-level overrides**
   - `.genesis/settings.json`
   - `.genesis/settings.local.json`
-  - `.genesis-local/agent/models.json`
-- **Current precedence (highest -> lowest)**
-  1. CLI flags
-  2. shell environment variables
-  3. project `.genesis/settings.local.json`
-  4. project `.genesis/settings.json`
-  5. `env` from `~/.genesis-cli/settings.json`
-  6. local agent config under `--agent-dir`
+- By default, Genesis reads your shell environment variables and `~/.genesis-cli/settings.json`; add project overrides only when you actually need them.
 
 ### 2. Install
 

@@ -283,6 +283,7 @@ describe("PiMonoSessionAdapter", () => {
 		const recovery = await adapter.getRecoveryData();
 		expect(recovery.metadata?.summary).toBe("fake summary");
 	});
+
 });
 
 class FakeAgentSession {

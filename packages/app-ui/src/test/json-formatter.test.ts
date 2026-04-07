@@ -101,6 +101,21 @@ describe("eventToJsonEnvelope", () => {
 		expect(envelope.data.model).toEqual({ id: "claude-3", provider: "anthropic" });
 	});
 
+	it("includes session error details in data", () => {
+		const event: RuntimeEvent = {
+			...base,
+			category: "session",
+			type: "session_error",
+			message: "Placeholder API key configured",
+			source: "auth",
+			fatal: true,
+		};
+		const envelope = eventToJsonEnvelope(event);
+		expect(envelope.data.message).toBe("Placeholder API key configured");
+		expect(envelope.data.source).toBe("auth");
+		expect(envelope.data.fatal).toBe(true);
+	});
+
 	it("maps compaction event fields to data", () => {
 		const event: RuntimeEvent = {
 			...base,

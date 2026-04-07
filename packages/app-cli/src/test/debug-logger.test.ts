@@ -138,4 +138,76 @@ describe("DebugLogger", () => {
 		expect(removed).toEqual(["/tmp/genesis-debug-logs/20260401T115959Z-p1-deadbeef"]);
 		await logger.shutdown();
 	});
+
+	it("keeps only the ten most recent trace directories during startup", async () => {
+		const removed: string[] = [];
+		const entries = Array.from({ length: 12 }, (_, index) => {
+			const pid = String(index + 1).padStart(2, "0");
+			return `20260412T120000-p${pid}-deadbeef`;
+		});
+		const logger = await initializeDebugLogger({
+			debugEnabled: true,
+			argv: ["--debug"],
+			now: () => new Date("2026-04-12T12:00:00.000Z"),
+			pid: 4321,
+			randomHex: () => "deadbeef",
+			logRootDir: "/tmp/genesis-debug-logs",
+			io: {
+				async mkdir() {},
+				async appendFile() {},
+				async writeFile() {},
+				async readdir() {
+					return entries;
+				},
+				async rm(path) {
+					removed.push(path);
+				},
+			},
+		});
+
+		expect(removed).toEqual([
+			"/tmp/genesis-debug-logs/20260412T120000-p11-deadbeef",
+			"/tmp/genesis-debug-logs/20260412T120000-p12-deadbeef",
+		]);
+		await logger.shutdown();
+	});
+
+	it("applies the seven-day ttl even within the ten most recent sessions", async () => {
+		const removed: string[] = [];
+		const logger = await initializeDebugLogger({
+			debugEnabled: true,
+			argv: ["--debug"],
+			now: () => new Date("2026-04-20T12:00:00.000Z"),
+			pid: 4321,
+			randomHex: () => "deadbeef",
+			logRootDir: "/tmp/genesis-debug-logs",
+			io: {
+				async mkdir() {},
+				async appendFile() {},
+				async writeFile() {},
+				async readdir() {
+					return [
+						"20260420T120000-p1-deadbeef",
+						"20260419T120000-p2-deadbeef",
+						"20260418T120000-p3-deadbeef",
+						"20260417T120000-p4-deadbeef",
+						"20260416T120000-p5-deadbeef",
+						"20260415T120000-p6-deadbeef",
+						"20260414T120000-p7-deadbeef",
+						"20260410T120000-p8-deadbeef",
+						"20260409T120000-p9-deadbeef",
+					];
+				},
+				async rm(path) {
+					removed.push(path);
+				},
+			},
+		});
+
+		expect(removed).toEqual([
+			"/tmp/genesis-debug-logs/20260410T120000-p8-deadbeef",
+			"/tmp/genesis-debug-logs/20260409T120000-p9-deadbeef",
+		]);
+		await logger.shutdown();
+	});
 });

@@ -45,11 +45,19 @@ export type KernelResolvedAuth =
 			readonly ok: true;
 			readonly apiKey?: string;
 			readonly headers?: Record<string, string>;
+			readonly source: KernelAuthSource;
 	  }
 	| {
 			readonly ok: false;
 			readonly error: string;
+			readonly source: KernelAuthSource;
 	  };
+
+export interface KernelAuthSource {
+	readonly kind: "auth_storage" | "env" | "literal" | "missing";
+	readonly detail?: string;
+	readonly placeholder?: boolean;
+}
 
 export class ModelRegistry {
 	private readonly providers: Map<string, KernelProviderConfig>;
@@ -113,32 +121,47 @@ export class ModelRegistry {
 		const record = this.models.get(this.key(model.provider, model.id));
 		const providerConfig = record?.providerConfig ?? this.providers.get(model.provider);
 		if (!providerConfig) {
-			return { ok: false, error: `Unknown provider: ${model.provider}` };
+			return {
+				ok: false,
+				error: `Unknown provider: ${model.provider}`,
+				source: { kind: "missing", detail: "provider config not found" },
+			};
 		}
 
 		const explicit = providerConfig.apiKey;
-		const apiKey =
-			this.authStorage.getApiKey(model.provider) ??
-			(explicit ? this.resolveConfigValue(explicit) : undefined) ??
-			this.resolveProviderEnvFallback(model.provider);
+		const resolved = this.resolveApiKey(model.provider, explicit);
+		const apiKey = resolved.apiKey;
+		const hasPlaceholderApiKey = typeof apiKey === "string" && isPlaceholderApiKeyValue(apiKey);
 
 		const headers = {
 			...(providerConfig.headers ?? {}),
 			...(model.headers ?? {}),
 		};
 
-		if (providerConfig.authHeader !== false && apiKey) {
+		if (providerConfig.authHeader !== false && apiKey && !hasPlaceholderApiKey) {
 			headers.authorization = `Bearer ${apiKey}`;
 		}
 
-		if (!apiKey && Object.keys(headers).length === 0) {
-			return { ok: false, error: `No API key found for ${model.provider}/${model.id}` };
+		if ((!apiKey || hasPlaceholderApiKey) && Object.keys(headers).length === 0) {
+			const envName = explicit && /^[A-Z0-9_]+$/.test(explicit) ? explicit : `${model.provider.toUpperCase()}_API_KEY`;
+			return {
+				ok: false,
+				error: hasPlaceholderApiKey
+					? `Placeholder API key configured for ${model.provider}/${model.id}. Replace ${envName} with a real API key.`
+					: `No API key found for ${model.provider}/${model.id}. Set ${envName} before sending prompts.`,
+				source: hasPlaceholderApiKey
+					? { ...resolved.source, placeholder: true }
+					: resolved.source.kind === "missing"
+						? { kind: "missing", detail: envName }
+						: resolved.source,
+			};
 		}
 
 		return {
 			ok: true,
-			apiKey,
+			apiKey: hasPlaceholderApiKey ? undefined : apiKey,
 			headers: Object.keys(headers).length > 0 ? headers : undefined,
+			source: hasPlaceholderApiKey ? { ...resolved.source, placeholder: true } : resolved.source,
 		};
 	}
 
@@ -167,13 +190,43 @@ export class ModelRegistry {
 			return process.env[value.slice(1)];
 		}
 		if (/^[A-Z0-9_]+$/.test(value)) {
-			return process.env[value] ?? value;
+			return process.env[value];
 		}
 		return value;
 	}
 
-	private resolveProviderEnvFallback(provider: string): string | undefined {
-		const normalized = provider.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase();
-		return process.env[`${normalized}_API_KEY`];
+	private resolveApiKey(provider: string, explicit: string | undefined): { apiKey?: string; source: KernelAuthSource } {
+		const stored = this.authStorage.getApiKey(provider);
+		if (stored) {
+			return {
+				apiKey: stored,
+				source: { kind: "auth_storage", detail: `${provider} auth.json` },
+			};
+		}
+		if (!explicit) {
+			return { apiKey: undefined, source: { kind: "missing" } };
+		}
+		if (explicit.startsWith("$")) {
+			const envName = explicit.slice(1);
+			return {
+				apiKey: process.env[envName],
+				source: process.env[envName] ? { kind: "env", detail: envName } : { kind: "missing", detail: envName },
+			};
+		}
+		if (/^[A-Z0-9_]+$/.test(explicit)) {
+			return {
+				apiKey: process.env[explicit],
+				source: process.env[explicit] ? { kind: "env", detail: explicit } : { kind: "missing", detail: explicit },
+			};
+		}
+		return {
+			apiKey: explicit,
+			source: { kind: "literal", detail: "models.json literal apiKey" },
+		};
 	}
+}
+
+function isPlaceholderApiKeyValue(value: string): boolean {
+	const normalized = value.trim().toLowerCase();
+	return normalized === "your_api_key" || /^your_[a-z0-9_]+_api_key$/.test(normalized);
 }

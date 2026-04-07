@@ -72,6 +72,7 @@ const defaultIo: LoggerIo = {
 };
 
 const DEBUG_LOG_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const DEBUG_LOG_MAX_SESSIONS = 10;
 
 const runtimeSeverityOrder: Record<DebugLogLevel, number> = {
 	DEBUG: 10,
@@ -268,9 +269,16 @@ export class DebugLogger {
 		const cutoff = Date.parse(this.sessionValue.startedAt) - DEBUG_LOG_RETENTION_MS;
 		try {
 			const entries = await this.io.readdir(this.sessionValue.logRootDir);
-			for (const entry of entries) {
-				const entryStartedAt = parseTraceTimestamp(entry);
-				if (entryStartedAt === null || entryStartedAt >= cutoff) {
+			const tracedEntries = entries
+				.map((entry) => ({
+					entry,
+					startedAt: parseTraceTimestamp(entry),
+				}))
+				.filter((entry): entry is { entry: string; startedAt: number } => entry.startedAt !== null)
+				.sort((left, right) => right.startedAt - left.startedAt || left.entry.localeCompare(right.entry));
+			const keepEntries = new Set(tracedEntries.slice(0, DEBUG_LOG_MAX_SESSIONS).map((entry) => entry.entry));
+			for (const { entry, startedAt } of tracedEntries) {
+				if (startedAt >= cutoff && keepEntries.has(entry)) {
 					continue;
 				}
 				try {

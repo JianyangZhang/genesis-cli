@@ -4,10 +4,10 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@pickle-pee/runtime";
+import { type AppRuntime, type CliMode, createAppRuntime, type ModelDescriptor, PiMonoSessionAdapter } from "@pickle-pee/runtime";
 import { ensureAgentDirBootstrapped, resolveDefaultBootstrapBaseUrl } from "./bootstrap.js";
 import { type DebugLoggerSession, getLastDebugSession, initializeDebugLogger } from "./debug-logger.js";
-import { createModeHandler } from "./mode-dispatch.js";
+import { createModeHandler, runInteractiveStartupChecks } from "./mode-dispatch.js";
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -89,12 +89,17 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 		printHelp();
 		return;
 	}
+	const requestedMode = readModeFlag(parsed.flags, "mode", "interactive");
 
 	const logger = await initializeDebugLogger({
 		debugEnabled: readDebugFlag(parsed.flags),
 		argv,
 	});
 	try {
+		if (requestedMode === "interactive") {
+			await startInteractiveWithStartupChecks(parsed.flags, logger);
+			return;
+		}
 		const options = await resolveCliOptions(parsed.flags);
 		logger.updateContext({
 			workingDirectory: options.workingDirectory,
@@ -143,6 +148,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 					model,
 					toolSet: options.toolSet,
 					thinkingLevel: options.thinkingLevel,
+					onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "session_init" }),
+					onUpstreamEvent: (event) => logRawUpstreamEvent(logger, { phase: "session_init", event }),
 				}),
 		});
 		const recentSessionPrune = await runtime.pruneRecentSessions(10);
@@ -174,6 +181,137 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 	}
 }
 
+function logAuthResolution(
+	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
+	data: {
+		provider: string;
+		modelId: string;
+		sourceKind: "auth_storage" | "env" | "literal" | "missing";
+		sourceDetail?: string;
+		placeholder: boolean;
+		authorized: boolean;
+		phase: "startup_check" | "session_init";
+	},
+): void {
+	logger.debug("auth.resolve", "Resolved model auth source", data);
+}
+
+function logRawUpstreamEvent(
+	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
+	data: {
+		phase: "session_init";
+		event: unknown;
+	},
+): void {
+	logger.debug("model.raw_event", "Received raw upstream event", data);
+}
+
+async function startInteractiveWithStartupChecks(
+	flags: Readonly<Record<string, string | boolean>>,
+	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
+): Promise<void> {
+	let prepared: { options: CliOptions; runtime: AppRuntime } | null = null;
+	await runInteractiveStartupChecks(async () => {
+		prepared = await prepareInteractiveLaunch(flags, logger);
+	});
+	if (!prepared) {
+		throw new Error("Interactive startup checks did not produce a runtime");
+	}
+	const launch = prepared as { options: CliOptions; runtime: AppRuntime };
+	const { options, runtime } = launch;
+	const handler = createModeHandler("interactive", {
+		modelHost: {
+			agentDir: options.agentDir,
+			settingsPath: options.settingsPath,
+			bootstrapDefaults: {
+				baseUrl: options.bootstrapOverrides?.baseUrl,
+				api: options.bootstrapOverrides?.api,
+			},
+		},
+	});
+	logger.info("cli.mode", "Starting mode handler", { mode: options.mode });
+	try {
+		await handler.start(runtime);
+	} finally {
+		await runtime.shutdown();
+		logger.info("cli.runtime", "Runtime shut down");
+	}
+}
+
+async function prepareInteractiveLaunch(
+	flags: Readonly<Record<string, string | boolean>>,
+	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
+): Promise<{ options: CliOptions; runtime: AppRuntime }> {
+	const options = await resolveCliOptions(flags);
+	logger.updateContext({
+		workingDirectory: options.workingDirectory,
+		agentDir: options.agentDir,
+		mode: options.mode,
+		model: options.model,
+	});
+	logger.info("cli.options", "CLI options resolved", {
+		mode: options.mode,
+		toolSet: options.toolSet,
+		debug: options.debug,
+	});
+	await ensureAgentDirBootstrapped({
+		agentDir: options.agentDir,
+		provider: options.model.provider,
+		modelId: options.model.id,
+		displayName: options.model.displayName,
+		thinkingLevel: options.thinkingLevel,
+		bootstrapBaseUrl: options.bootstrapOverrides?.baseUrl,
+		bootstrapApi: options.bootstrapOverrides?.api,
+		bootstrapApiKeyEnv: options.bootstrapOverrides?.apiKeyEnv,
+		bootstrapAuthHeader: options.bootstrapOverrides?.authHeader,
+		bootstrapReasoning: options.bootstrapOverrides?.reasoning,
+		supportsDeveloperRole: options.bootstrapOverrides?.compat?.supportsDeveloperRole,
+		supportsReasoningEffort: options.bootstrapOverrides?.compat?.supportsReasoningEffort,
+	});
+	logger.debug("cli.bootstrap", "Agent directory bootstrapped");
+
+	const startupAdapter = new PiMonoSessionAdapter({
+		workingDirectory: options.workingDirectory,
+		agentDir: options.agentDir,
+		historyDir: options.historyDir,
+		model: options.model,
+		toolSet: options.toolSet,
+		thinkingLevel: options.thinkingLevel,
+		onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "startup_check" }),
+	});
+	const startupAuth = await startupAdapter.validateStartupConfiguration();
+	await startupAdapter.close();
+	logger.debug("cli.startup_check", "Interactive startup checks passed", {
+		model: options.model,
+		agentDir: options.agentDir,
+		auth: startupAuth,
+	});
+
+	const runtime = createAppRuntime({
+		workingDirectory: options.workingDirectory,
+		agentDir: options.agentDir,
+		historyDir: options.historyDir,
+		configSources: options.configSources,
+		mode: options.mode,
+		model: options.model,
+		toolSet: options.toolSet,
+		createAdapter: (model) =>
+			new PiMonoSessionAdapter({
+				workingDirectory: options.workingDirectory,
+				agentDir: options.agentDir,
+				historyDir: options.historyDir,
+				model,
+				toolSet: options.toolSet,
+				thinkingLevel: options.thinkingLevel,
+				onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "session_init" }),
+				onUpstreamEvent: (event) => logRawUpstreamEvent(logger, { phase: "session_init", event }),
+			}),
+	});
+	const recentSessionPrune = await runtime.pruneRecentSessions(10);
+	logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
+	return { options, runtime };
+}
+
 interface FileConfig {
 	readonly provider?: string;
 	readonly model?: string;
@@ -191,6 +329,17 @@ interface SettingsFile extends FileConfig {
 }
 
 type SourceLayer = "default" | "agent" | "user" | "project" | "local" | "env" | "cli";
+
+class SettingsFileFormatError extends Error {
+	constructor(
+		readonly filePath: string,
+		readonly layerLabel: string,
+		message: string,
+	) {
+		super(`Invalid ${layerLabel} file at ${filePath}: ${message}`);
+		this.name = "SettingsFileFormatError";
+	}
+}
 
 interface LoadedSettingsLayers {
 	readonly user: SettingsFile | null;
@@ -212,7 +361,7 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 	applySettingsEnv(settingsLayers.mergedEnv);
 
 	const agentConfigPath = resolve(agentDir, "config.json");
-	const agentConfig = await readOptionalSettingsFile(agentConfigPath);
+	const agentConfig = await readOptionalSettingsFile(agentConfigPath, "agent config");
 	const projectSettingsPath = resolve(workingDirectory, ".genesis/settings.json");
 	const localSettingsPath = resolve(workingDirectory, ".genesis/settings.local.json");
 
@@ -642,9 +791,9 @@ function pickTools(
 async function loadSettingsLayers(settingsPath: string, workingDirectory: string): Promise<LoadedSettingsLayers> {
 	const projectSettingsPath = resolve(workingDirectory, ".genesis/settings.json");
 	const localSettingsPath = resolve(workingDirectory, ".genesis/settings.local.json");
-	const user = await readOptionalSettingsFile(settingsPath);
-	const project = await readOptionalSettingsFile(projectSettingsPath);
-	const local = await readOptionalSettingsFile(localSettingsPath);
+	const user = await readOptionalSettingsFile(settingsPath, "user");
+	const project = await readOptionalSettingsFile(projectSettingsPath, "project");
+	const local = await readOptionalSettingsFile(localSettingsPath, "local");
 	return {
 		user,
 		project,
@@ -653,13 +802,25 @@ async function loadSettingsLayers(settingsPath: string, workingDirectory: string
 	};
 }
 
-async function readOptionalSettingsFile(filePath: string): Promise<SettingsFile | null> {
+async function readOptionalSettingsFile(
+	filePath: string,
+	layerLabel = "settings",
+): Promise<SettingsFile | null> {
 	try {
 		const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
-		if (!parsed || typeof parsed !== "object") return null;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			throw new SettingsFileFormatError(filePath, layerLabel, "root value must be a JSON object");
+		}
 		return parsed as SettingsFile;
-	} catch {
-		return null;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return null;
+		}
+		if (error instanceof SettingsFileFormatError) {
+			throw error;
+		}
+		const message = error instanceof Error ? error.message : "Unknown JSON parse error";
+		throw new SettingsFileFormatError(filePath, layerLabel, message);
 	}
 }
 
@@ -671,7 +832,11 @@ export async function ensureUserSettingsFile(
 	try {
 		await readFile(settingsPath, "utf8");
 		return;
-	} catch {}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+			throw error;
+		}
+	}
 
 	try {
 		await writeFile(settingsPath, `${JSON.stringify(buildDefaultSettingsFile(env), null, 2)}\n`, {
@@ -705,9 +870,9 @@ function mergeSettingsEnv(...settingsFiles: readonly (SettingsFile | null)[]): R
 		}
 		for (const [key, value] of Object.entries(settingsFile.env)) {
 			if (typeof value === "string") {
-				const trimmed = value.trim();
-				if (trimmed.length > 0) {
-					env[key] = trimmed;
+				const normalized = normalizeSettingsEnvEntry(key, value);
+				if (normalized !== undefined) {
+					env[key] = normalized;
 				}
 				continue;
 			}
@@ -733,13 +898,31 @@ function applySettingsEnv(
 function readSettingsEnvValue(settingsFile: SettingsFile | null, key: string): string | undefined {
 	const value = settingsFile?.env?.[key];
 	if (typeof value === "string") {
-		const trimmed = value.trim();
-		return trimmed.length > 0 ? trimmed : undefined;
+		return normalizeSettingsEnvEntry(key, value);
 	}
 	if (typeof value === "number" || typeof value === "boolean") {
 		return String(value);
 	}
 	return undefined;
+}
+
+function normalizeSettingsEnvEntry(key: string, value: string): string | undefined {
+	const trimmed = value.trim();
+	if (trimmed.length === 0) {
+		return undefined;
+	}
+	if (isPlaceholderApiKeyValue(key, trimmed)) {
+		return undefined;
+	}
+	return trimmed;
+}
+
+function isPlaceholderApiKeyValue(key: string, value: string): boolean {
+	if (!key.endsWith("_API_KEY")) {
+		return false;
+	}
+	const normalized = value.trim().toLowerCase();
+	return normalized === "your_api_key" || /^your_[a-z0-9_]+_api_key$/.test(normalized);
 }
 
 function readModeFlag(flags: Readonly<Record<string, string | boolean>>, key: string, fallback: CliMode): CliMode {
