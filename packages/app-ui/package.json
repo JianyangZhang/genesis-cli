@@ -1,6 +1,6 @@
 {
   "name": "@pickle-pee/ui",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "TUI components, text formatters, and JSON/RPC event format mapping",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -8,7 +8,7 @@
     "build": "node -e \"const fs = require('node:fs'); fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@pickle-pee/runtime": "1.0.2"
+    "@pickle-pee/runtime": "1.0.3"
   },
   "publishConfig": {
     "access": "public"

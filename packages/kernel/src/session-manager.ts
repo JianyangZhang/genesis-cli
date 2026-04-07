@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 const DEFAULT_RECENT_SESSION_MAX_ENTRIES = 10;
 const RECENT_SESSION_MAX_ENTRIES_ENV = "GENESIS_RECENT_SESSION_MAX_ENTRIES";

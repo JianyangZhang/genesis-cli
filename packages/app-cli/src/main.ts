@@ -334,10 +334,7 @@ async function prepareInteractiveLaunch(
 	return { options, runtime };
 }
 
-export function validateInteractiveModelConfiguration(
-	options: CliOptions,
-	env: NodeJS.ProcessEnv = process.env,
-): void {
+export function validateInteractiveModelConfiguration(options: CliOptions, env: NodeJS.ProcessEnv = process.env): void {
 	const requiredApiKeyEnv = options.bootstrapOverrides?.apiKeyEnv?.trim() || "GENESIS_API_KEY";
 	const requiredApiKeyValue = env[requiredApiKeyEnv]?.trim();
 	if (!requiredApiKeyValue || requiredApiKeyValue === "your_zhipu_api_key") {
@@ -422,89 +419,89 @@ export async function resolveCliOptions(flags: Readonly<Record<string, string | 
 
 	const provider =
 		pickOptionalString(
-		[
-			{ value: asOptionalString(flags.provider), layer: "cli", detail: "--provider" },
-			{ value: shellEnv.GENESIS_MODEL_PROVIDER, layer: "env", detail: "GENESIS_MODEL_PROVIDER" },
-			{
-				value: settingsLayers.local?.provider,
-				layer: "local",
-				detail: localSettingsPath,
+			[
+				{ value: asOptionalString(flags.provider), layer: "cli", detail: "--provider" },
+				{ value: shellEnv.GENESIS_MODEL_PROVIDER, layer: "env", detail: "GENESIS_MODEL_PROVIDER" },
+				{
+					value: settingsLayers.local?.provider,
+					layer: "local",
+					detail: localSettingsPath,
+				},
+				{
+					value: readSettingsEnvValue(settingsLayers.local, "GENESIS_MODEL_PROVIDER"),
+					layer: "local",
+					detail: `${localSettingsPath} env.GENESIS_MODEL_PROVIDER`,
+				},
+				{
+					value: settingsLayers.project?.provider,
+					layer: "project",
+					detail: projectSettingsPath,
+				},
+				{
+					value: readSettingsEnvValue(settingsLayers.project, "GENESIS_MODEL_PROVIDER"),
+					layer: "project",
+					detail: `${projectSettingsPath} env.GENESIS_MODEL_PROVIDER`,
+				},
+				{
+					value: settingsLayers.user?.provider,
+					layer: "user",
+					detail: settingsPath,
+				},
+				{
+					value: readSettingsEnvValue(settingsLayers.user, "GENESIS_MODEL_PROVIDER"),
+					layer: "user",
+					detail: `${settingsPath} env.GENESIS_MODEL_PROVIDER`,
+				},
+				{ value: agentConfig?.provider, layer: "agent", detail: agentConfigPath },
+			],
+			(value, source) => {
+				sources.provider = source;
+				return value;
 			},
-			{
-				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_MODEL_PROVIDER"),
-				layer: "local",
-				detail: `${localSettingsPath} env.GENESIS_MODEL_PROVIDER`,
-			},
-			{
-				value: settingsLayers.project?.provider,
-				layer: "project",
-				detail: projectSettingsPath,
-			},
-			{
-				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_MODEL_PROVIDER"),
-				layer: "project",
-				detail: `${projectSettingsPath} env.GENESIS_MODEL_PROVIDER`,
-			},
-			{
-				value: settingsLayers.user?.provider,
-				layer: "user",
-				detail: settingsPath,
-			},
-			{
-				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_MODEL_PROVIDER"),
-				layer: "user",
-				detail: `${settingsPath} env.GENESIS_MODEL_PROVIDER`,
-			},
-			{ value: agentConfig?.provider, layer: "agent", detail: agentConfigPath },
-		],
-		(value, source) => {
-			sources.provider = source;
-			return value;
-		},
-	) ?? "";
+		) ?? "";
 
 	const modelId =
 		pickOptionalString(
-		[
-			{ value: asOptionalString(flags.model), layer: "cli", detail: "--model" },
-			{ value: shellEnv.GENESIS_MODEL_ID, layer: "env", detail: "GENESIS_MODEL_ID" },
-			{
-				value: settingsLayers.local?.model,
-				layer: "local",
-				detail: localSettingsPath,
+			[
+				{ value: asOptionalString(flags.model), layer: "cli", detail: "--model" },
+				{ value: shellEnv.GENESIS_MODEL_ID, layer: "env", detail: "GENESIS_MODEL_ID" },
+				{
+					value: settingsLayers.local?.model,
+					layer: "local",
+					detail: localSettingsPath,
+				},
+				{
+					value: readSettingsEnvValue(settingsLayers.local, "GENESIS_MODEL_ID"),
+					layer: "local",
+					detail: `${localSettingsPath} env.GENESIS_MODEL_ID`,
+				},
+				{
+					value: settingsLayers.project?.model,
+					layer: "project",
+					detail: projectSettingsPath,
+				},
+				{
+					value: readSettingsEnvValue(settingsLayers.project, "GENESIS_MODEL_ID"),
+					layer: "project",
+					detail: `${projectSettingsPath} env.GENESIS_MODEL_ID`,
+				},
+				{
+					value: settingsLayers.user?.model,
+					layer: "user",
+					detail: settingsPath,
+				},
+				{
+					value: readSettingsEnvValue(settingsLayers.user, "GENESIS_MODEL_ID"),
+					layer: "user",
+					detail: `${settingsPath} env.GENESIS_MODEL_ID`,
+				},
+				{ value: agentConfig?.model, layer: "agent", detail: agentConfigPath },
+			],
+			(value, source) => {
+				sources.model = source;
+				return value;
 			},
-			{
-				value: readSettingsEnvValue(settingsLayers.local, "GENESIS_MODEL_ID"),
-				layer: "local",
-				detail: `${localSettingsPath} env.GENESIS_MODEL_ID`,
-			},
-			{
-				value: settingsLayers.project?.model,
-				layer: "project",
-				detail: projectSettingsPath,
-			},
-			{
-				value: readSettingsEnvValue(settingsLayers.project, "GENESIS_MODEL_ID"),
-				layer: "project",
-				detail: `${projectSettingsPath} env.GENESIS_MODEL_ID`,
-			},
-			{
-				value: settingsLayers.user?.model,
-				layer: "user",
-				detail: settingsPath,
-			},
-			{
-				value: readSettingsEnvValue(settingsLayers.user, "GENESIS_MODEL_ID"),
-				layer: "user",
-				detail: `${settingsPath} env.GENESIS_MODEL_ID`,
-			},
-			{ value: agentConfig?.model, layer: "agent", detail: agentConfigPath },
-		],
-		(value, source) => {
-			sources.model = source;
-			return value;
-		},
-	) ?? "";
+		) ?? "";
 
 	const displayName = pickOptionalString(
 		[
@@ -786,21 +783,6 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 function asOptionalString(value: string | boolean | undefined): string | undefined {
 	if (typeof value !== "string") return undefined;
 	return value;
-}
-
-function pickString(
-	candidates: readonly { value: string | undefined; layer: SourceLayer; detail: string }[],
-	fallback: string,
-	fallbackSource: { layer: SourceLayer; detail: string },
-	onPicked: (value: string, source: { layer: SourceLayer; detail: string }) => string,
-): string {
-	for (const candidate of candidates) {
-		const value = normalizeOptionalString(candidate.value);
-		if (value !== undefined) {
-			return onPicked(value, { layer: candidate.layer, detail: candidate.detail });
-		}
-	}
-	return onPicked(fallback, fallbackSource);
 }
 
 function pickOptionalString(

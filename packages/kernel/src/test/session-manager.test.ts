@@ -20,7 +20,9 @@ describe("SessionManager", () => {
 		const manager = SessionManager.create(workspace);
 
 		expect(manager.getSessionId().length).toBeGreaterThan(0);
-		expect(manager.getSessionFile()).toBe(join(workspace, ".genesis-local", "sessions", `${manager.getSessionId()}.jsonl`));
+		expect(manager.getSessionFile()).toBe(
+			join(workspace, ".genesis-local", "sessions", `${manager.getSessionId()}.jsonl`),
+		);
 	});
 
 	it("keeps only the configured number of recent session files", async () => {
@@ -38,6 +40,11 @@ describe("SessionManager", () => {
 
 		const remaining = (await readdir(join(workspace, ".genesis-local", "sessions"))).sort();
 		expect(remaining).toHaveLength(7);
-		expect(remaining).toEqual(createdFiles.slice(-7).map((file) => file.split("/").pop()).sort());
+		expect(remaining).toEqual(
+			createdFiles
+				.slice(-7)
+				.map((file) => file.split("/").pop())
+				.sort(),
+		);
 	});
 });

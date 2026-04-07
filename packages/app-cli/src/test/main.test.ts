@@ -206,31 +206,40 @@ describe("resolveCliOptions", () => {
 			}),
 		).toThrow("GENESIS_API_KEY is required for interactive mode.");
 		expect(() =>
-			validateInteractiveModelConfiguration({
-				...baseOptions,
-				bootstrapOverrides: { ...baseOptions.bootstrapOverrides, baseUrl: undefined },
-			} as never, {
-				...process.env,
-				GENESIS_API_KEY: "test-key",
-			}),
+			validateInteractiveModelConfiguration(
+				{
+					...baseOptions,
+					bootstrapOverrides: { ...baseOptions.bootstrapOverrides, baseUrl: undefined },
+				} as never,
+				{
+					...process.env,
+					GENESIS_API_KEY: "test-key",
+				},
+			),
 		).toThrow("GENESIS_BOOTSTRAP_BASE_URL is required for interactive mode.");
 		expect(() =>
-			validateInteractiveModelConfiguration({
-				...baseOptions,
-				model: { ...baseOptions.model, provider: "" },
-			} as never, {
-				...process.env,
-				GENESIS_API_KEY: "test-key",
-			}),
+			validateInteractiveModelConfiguration(
+				{
+					...baseOptions,
+					model: { ...baseOptions.model, provider: "" },
+				} as never,
+				{
+					...process.env,
+					GENESIS_API_KEY: "test-key",
+				},
+			),
 		).toThrow("GENESIS_MODEL_PROVIDER is required for interactive mode.");
 		expect(() =>
-			validateInteractiveModelConfiguration({
-				...baseOptions,
-				model: { ...baseOptions.model, id: "" },
-			} as never, {
-				...process.env,
-				GENESIS_API_KEY: "test-key",
-			}),
+			validateInteractiveModelConfiguration(
+				{
+					...baseOptions,
+					model: { ...baseOptions.model, id: "" },
+				} as never,
+				{
+					...process.env,
+					GENESIS_API_KEY: "test-key",
+				},
+			),
 		).toThrow("GENESIS_MODEL_ID is required for interactive mode.");
 	});
 

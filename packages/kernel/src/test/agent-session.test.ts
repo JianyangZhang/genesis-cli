@@ -1,11 +1,10 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readFile } from "node:fs/promises";
-import { SessionManager } from "../session-manager.js";
 import { type AssistantMessage, createAssistantMessageEventStream, type Model } from "@pickle-pee/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentSession } from "../agent-session.js";
+import { SessionManager } from "../session-manager.js";
 
 const streamCalls: Array<{ systemPrompt: string; messages: readonly unknown[] }> = [];
 

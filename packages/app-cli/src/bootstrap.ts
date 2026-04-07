@@ -24,10 +24,7 @@ export function resolveDefaultBootstrapBaseUrl(env: NodeJS.ProcessEnv = process.
 		const trimmed = value.trim();
 		return trimmed.length > 0 ? trimmed : undefined;
 	};
-	return (
-		pick(env.GENESIS_BOOTSTRAP_BASE_URL) ??
-		"https://open.bigmodel.cn/api/coding/paas/v4/"
-	);
+	return pick(env.GENESIS_BOOTSTRAP_BASE_URL) ?? "https://open.bigmodel.cn/api/coding/paas/v4/";
 }
 
 export async function ensureAgentDirBootstrapped(options: EnsureBootstrapOptions): Promise<void> {
@@ -65,7 +62,10 @@ export async function ensureAgentDirBootstrapped(options: EnsureBootstrapOptions
 	if (!explicitBaseUrl) {
 		throw new Error("GENESIS_BOOTSTRAP_BASE_URL is required for bootstrap.");
 	}
-	const api = typeof options.bootstrapApi === "string" && options.bootstrapApi.trim().length > 0 ? options.bootstrapApi : undefined;
+	const api =
+		typeof options.bootstrapApi === "string" && options.bootstrapApi.trim().length > 0
+			? options.bootstrapApi
+			: undefined;
 	if (!api) {
 		throw new Error("GENESIS_BOOTSTRAP_API is required for bootstrap.");
 	}
