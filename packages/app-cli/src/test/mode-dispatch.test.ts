@@ -211,6 +211,19 @@ describe("interactive transcript formatting", () => {
 		expect(lines[8]).toContain("GLM 5.1");
 	});
 
+	it("omits the provider label when the welcome model has no provider", () => {
+		const lines = buildWelcomeLines({
+			terminalWidth: 80,
+			version: "0.0.0",
+			model: "GLM 5.1",
+			provider: "",
+			greeting: "Let there be light.",
+		});
+
+		expect(lines[8]).toContain("GLM 5.1");
+		expect(lines[8]).not.toContain("via");
+	});
+
 	it("shows debug trace information in the welcome buffer when provided", () => {
 		const traceId = `${formatLocalTraceTimestamp(new Date("2026-04-06T12:00:00.000Z"))}-p123-abcdef12`;
 		const lines = buildWelcomeLines({

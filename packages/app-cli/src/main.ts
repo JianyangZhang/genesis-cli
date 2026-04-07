@@ -262,6 +262,7 @@ async function prepareInteractiveLaunch(
 	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
 ): Promise<{ options: CliOptions; runtime: AppRuntime }> {
 	const options = await resolveCliOptions(flags);
+	validateInteractiveModelConfiguration(options);
 	logger.updateContext({
 		workingDirectory: options.workingDirectory,
 		agentDir: options.agentDir,
@@ -330,6 +331,12 @@ async function prepareInteractiveLaunch(
 	const recentSessionPrune = await runtime.pruneRecentSessions();
 	logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
 	return { options, runtime };
+}
+
+export function validateInteractiveModelConfiguration(options: CliOptions): void {
+	if (options.configSources.model?.layer === "default") {
+		throw new Error("MODEL_ID is required for interactive mode. Set GENESIS_MODEL_ID or pass --model.");
+	}
 }
 
 interface FileConfig {

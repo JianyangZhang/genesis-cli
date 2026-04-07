@@ -19,9 +19,6 @@ Minimal path: configure, install, then run.
 - **User settings file**
   - macOS / Linux: `~/.genesis-cli/settings.json`
   - Windows: `%USERPROFILE%/.genesis-cli/settings.json`
-- **Automatic initialization**
-  - If the file does not exist yet, `genesis` creates the directory and a starter template automatically
-  - If it already exists, the CLI leaves your current file untouched
 - **Minimal example**
 
 ```json
@@ -38,9 +35,8 @@ Minimal path: configure, install, then run.
 
 - **Key fields**
   - `GENESIS_API_KEY`: model API key
-  - `GENESIS_BOOTSTRAP_BASE_URL`: provider bootstrap base URL
-  - `GENESIS_BOOTSTRAP_API`: bootstrap transport, typically `openai-completions`
-  - `GENESIS_MODEL_PROVIDER` / `GENESIS_MODEL_ID`: default provider and model
+  - `GENESIS_MODEL_PROVIDER`: optional; defaults to the built-in provider when omitted
+  - `GENESIS_MODEL_ID`: model ID; interactive startup checks fail when it is empty
 - **Optional project-level overrides**
   - `.genesis/settings.json`
   - `.genesis/settings.local.json`
