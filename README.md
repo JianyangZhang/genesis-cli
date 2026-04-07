@@ -167,7 +167,9 @@ npm run test:live:pi-mono
 
 - `npm test`：提交前主测试入口
 - `npm run test:tui`：TUI 与交互回归
-- `npm run test:live:pi-mono`：真实联调检查，要求 `.env.local` 中存在可用 API key
+- `npm run test:live:pi-mono`：真实联调检查（默认走 OpenAI 兼容配置）
+- `npm run test:live:pi-mono:openai`：复用 `.env.openai.local` 的 OpenAI-compatible 配置
+- `npm run test:live:pi-mono:anthropic`：复用 `.env.anthropic.local` 的 Anthropic-compatible 配置
 
 ### 发布
 
@@ -198,3 +200,40 @@ npm run publish:verify
 - 包级文档：`packages/*/README.md`
 - 源码入口：`packages/app-cli`、`packages/app-tui-core`、`packages/app-ui`、`packages/app-runtime`、`packages/app-tools`、`packages/kernel`
 - 验证入口：`npm test`、`npm run test:tui`、`npm run build`
+
+---
+
+## 配置附录
+
+以下仅列出当前代码中**已经支持**、并且会被实际读取的环境变量。
+
+### 核心运行配置
+
+| 变量名 | 是否必填 | 默认值 | 描述 |
+| --- | --- | --- | --- |
+| `GENESIS_API_KEY` | 是 | 空 | 模型鉴权使用的 API key。 |
+| `GENESIS_BOOTSTRAP_BASE_URL` | 是 | 空 | 模型服务的 base URL。 |
+| `GENESIS_BOOTSTRAP_API` | 是 | 空 | 请求协议；当前支持 `openai-completions`、`anthropic-messages`。 |
+| `GENESIS_MODEL_PROVIDER` | 是 | 空 | 模型所属 provider 名称。 |
+| `GENESIS_MODEL_ID` | 是 | 空 | 模型 ID。 |
+| `GENESIS_TOOL_SET` | 否 | `read,bash,edit,write` | 默认启用的工具集合，逗号分隔。 |
+| `GENESIS_THINKING_LEVEL` | 否 | 空 | 思考强度；支持 `off`、`minimal`、`low`、`medium`、`high`、`xhigh`。 |
+| `GENESIS_DEBUG` | 否 | `false` | 打开 debug 日志；支持布尔值语义，如 `true` / `1`。 |
+
+### 高级 Bootstrap 配置
+
+| 变量名 | 是否必填 | 默认值 | 描述 |
+| --- | --- | --- | --- |
+| `GENESIS_BOOTSTRAP_API_KEY_ENV` | 否 | `GENESIS_API_KEY` | 读取 API key 时使用的环境变量名。 |
+| `GENESIS_BOOTSTRAP_AUTH_HEADER` | 否 | `true`（`anthropic-messages` 时为 `false`） | provider 是否使用 `Authorization` 头。 |
+| `GENESIS_BOOTSTRAP_REASONING` | 否 | `thinking != off` 时为 `true`，否则为 `false` | 是否启用 reasoning。 |
+| `GENESIS_BOOTSTRAP_SUPPORTS_DEVELOPER_ROLE` | 否 | 空 | provider 兼容性开关：是否支持 developer role。 |
+| `GENESIS_BOOTSTRAP_SUPPORTS_REASONING_EFFORT` | 否 | 空 | provider 兼容性开关：是否支持 reasoning effort。 |
+
+### 调试与保留策略
+
+| 变量名 | 是否必填 | 默认值 | 描述 |
+| --- | --- | --- | --- |
+| `GENESIS_RECENT_SESSION_MAX_ENTRIES` | 否 | `10` | 最近对话历史保留数量。`sessionFile` 数量固定为该值加 `5`。 |
+| `GENESIS_DEBUG_LOG_MAX_SESSIONS` | 否 | `10` | debug 日志最多保留的最近会话数。 |
+| `GENESIS_DEBUG_LOG_RETENTION_DAYS` | 否 | `7` | debug 日志保留天数。 |

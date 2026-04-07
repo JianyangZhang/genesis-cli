@@ -6,16 +6,14 @@ import { describe, expect, it } from "vitest";
 import type { RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
 import { PiMonoSessionAdapter } from "../adapters/pi-mono-session-adapter.js";
 
-const hasLiveOpenAiConfig =
+const bootstrapApi = process.env.GENESIS_BOOTSTRAP_API;
+const hasLiveConfig =
 	Boolean(process.env.GENESIS_API_KEY) &&
-	Boolean(process.env.GENESIS_LIVE_OPENAI_BASE_URL) &&
+	Boolean(process.env.GENESIS_BOOTSTRAP_BASE_URL) &&
 	Boolean(process.env.GENESIS_MODEL_PROVIDER) &&
 	Boolean(process.env.GENESIS_MODEL_ID);
-const hasLiveAnthropicConfig =
-	Boolean(process.env.GENESIS_API_KEY) &&
-	Boolean(process.env.GENESIS_LIVE_ANTHROPIC_BASE_URL) &&
-	Boolean(process.env.GENESIS_MODEL_PROVIDER) &&
-	Boolean(process.env.GENESIS_MODEL_ID);
+const hasLiveOpenAiConfig = hasLiveConfig && bootstrapApi === "openai-completions";
+const hasLiveAnthropicConfig = hasLiveConfig && bootstrapApi === "anthropic-messages";
 
 const liveDescribe = hasLiveOpenAiConfig ? describe : describe.skip;
 const anthropicDescribe = hasLiveAnthropicConfig ? describe : describe.skip;
@@ -105,7 +103,7 @@ anthropicDescribe("Anthropic live adapter", () => {
 
 		const adapter = await createLiveAdapter({
 			thinkingLevel: "minimal",
-			baseUrl: process.env.GENESIS_LIVE_ANTHROPIC_BASE_URL!,
+			baseUrl: process.env.GENESIS_BOOTSTRAP_BASE_URL!,
 			api: "anthropic-messages",
 			authHeader: false,
 			modelId: availability.modelId,
@@ -134,9 +132,9 @@ async function createLiveAdapter(options: {
 		`${JSON.stringify(
 			createModelsJson({
 				modelId,
-				baseUrl: options.baseUrl ?? process.env.GENESIS_LIVE_OPENAI_BASE_URL!,
-				api: options.api ?? "openai-completions",
-				authHeader: options.authHeader ?? true,
+				baseUrl: options.baseUrl ?? process.env.GENESIS_BOOTSTRAP_BASE_URL!,
+				api: options.api ?? resolveBootstrapApi(),
+				authHeader: options.authHeader ?? resolveBootstrapApi() !== "anthropic-messages",
 			}),
 			null,
 			2,
@@ -222,9 +220,9 @@ async function ensurePiMonoSessionAvailable(): Promise<boolean> {
 				`${JSON.stringify(
 					createModelsJson({
 						modelId,
-						baseUrl: process.env.GENESIS_LIVE_OPENAI_BASE_URL!,
-						api: "openai-completions",
-						authHeader: true,
+						baseUrl: process.env.GENESIS_BOOTSTRAP_BASE_URL!,
+						api: resolveBootstrapApi(),
+						authHeader: resolveBootstrapApi() !== "anthropic-messages",
 					}),
 					null,
 					2,
@@ -327,7 +325,7 @@ function getModelCandidates(): readonly string[] {
 }
 
 async function requestOpenAiCompletion(modelId: string, prompt: string): Promise<Response> {
-	return await fetch(new URL("chat/completions", process.env.GENESIS_LIVE_OPENAI_BASE_URL!).toString(), {
+	return await fetch(new URL("chat/completions", process.env.GENESIS_BOOTSTRAP_BASE_URL!).toString(), {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
@@ -347,7 +345,7 @@ async function requestAnthropicCompletion(
 	thinkingEnabled: boolean,
 	stream: boolean,
 ): Promise<Response> {
-	return await fetch(new URL("v1/messages", process.env.GENESIS_LIVE_ANTHROPIC_BASE_URL!).toString(), {
+	return await fetch(new URL("v1/messages", process.env.GENESIS_BOOTSTRAP_BASE_URL!).toString(), {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
@@ -362,6 +360,10 @@ async function requestAnthropicCompletion(
 			thinking: thinkingEnabled ? { type: "enabled", budget_tokens: 1024 } : { type: "disabled" },
 		}),
 	});
+}
+
+function resolveBootstrapApi(): "openai-completions" | "anthropic-messages" {
+	return process.env.GENESIS_BOOTSTRAP_API === "anthropic-messages" ? "anthropic-messages" : "openai-completions";
 }
 
 async function collectEvents(stream: AsyncIterable<RawUpstreamEvent>): Promise<RawUpstreamEvent[]> {

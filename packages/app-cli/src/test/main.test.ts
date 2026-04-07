@@ -22,6 +22,7 @@ const originalGenesisEnv = {
 	GENESIS_MODEL_PROVIDER: process.env.GENESIS_MODEL_PROVIDER,
 	GENESIS_MODEL_ID: process.env.GENESIS_MODEL_ID,
 	GENESIS_BOOTSTRAP_BASE_URL: process.env.GENESIS_BOOTSTRAP_BASE_URL,
+	GENESIS_BOOTSTRAP_API: process.env.GENESIS_BOOTSTRAP_API,
 };
 
 function formatLocalTraceTimestamp(value: Date): string {
@@ -176,23 +177,61 @@ describe("resolveCliOptions", () => {
 		expect(process.env.GENESIS_API_KEY).toBe("settings-api-key");
 	});
 
-	it("requires an explicit model id for interactive startup validation", async () => {
-		const homeDir = await mkdtemp(join(tmpdir(), "genesis-cli-home-"));
-		const settingsDir = join(homeDir, ".genesis-cli");
-		const settingsPath = join(settingsDir, "settings.json");
-		process.env.HOME = homeDir;
-		delete process.env.GENESIS_MODEL_ID;
-		await mkdir(settingsDir, { recursive: true });
-		await writeFile(settingsPath, JSON.stringify({ env: { GENESIS_MODEL_ID: "" } }), "utf8");
+	it("requires core config for interactive startup validation", async () => {
+		const baseOptions = {
+			mode: "interactive",
+			debug: false,
+			workingDirectory: "/tmp/workspace",
+			agentDir: "/tmp/workspace/.genesis-local/agent",
+			historyDir: "/tmp/history",
+			settingsPath: "/tmp/settings.json",
+			model: {
+				provider: "zai",
+				id: "glm-5.1",
+				displayName: undefined,
+			},
+			toolSet: ["read", "bash"],
+			thinkingLevel: undefined,
+			bootstrapOverrides: {
+				baseUrl: "https://example.com/api/",
+				api: "openai-completions",
+			},
+			configSources: {},
+		} as const;
 
-		const options = await resolveCliOptions({});
-		expect(options.configSources.model).toEqual({
-			layer: "default",
-			detail: "default",
-		});
-		expect(() => validateInteractiveModelConfiguration(options)).toThrow(
-			"MODEL_ID is required for interactive mode. Set GENESIS_MODEL_ID or pass --model.",
-		);
+		expect(() =>
+			validateInteractiveModelConfiguration(baseOptions as never, {
+				...process.env,
+				GENESIS_API_KEY: "",
+			}),
+		).toThrow("GENESIS_API_KEY is required for interactive mode.");
+		expect(() =>
+			validateInteractiveModelConfiguration({
+				...baseOptions,
+				bootstrapOverrides: { ...baseOptions.bootstrapOverrides, baseUrl: undefined },
+			} as never, {
+				...process.env,
+				GENESIS_API_KEY: "test-key",
+			}),
+		).toThrow("GENESIS_BOOTSTRAP_BASE_URL is required for interactive mode.");
+		expect(() =>
+			validateInteractiveModelConfiguration({
+				...baseOptions,
+				model: { ...baseOptions.model, provider: "" },
+			} as never, {
+				...process.env,
+				GENESIS_API_KEY: "test-key",
+			}),
+		).toThrow("GENESIS_MODEL_PROVIDER is required for interactive mode.");
+		expect(() =>
+			validateInteractiveModelConfiguration({
+				...baseOptions,
+				model: { ...baseOptions.model, id: "" },
+			} as never, {
+				...process.env,
+				GENESIS_API_KEY: "test-key",
+			}),
+		).toThrow("GENESIS_MODEL_ID is required for interactive mode.");
 	});
 
 	it("fails fast when ~/.genesis-cli/settings.json contains invalid JSON", async () => {

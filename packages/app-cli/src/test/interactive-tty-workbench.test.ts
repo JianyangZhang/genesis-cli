@@ -1749,8 +1749,7 @@ describe("interactive workbench TTY", () => {
 				expect(output.getRawOutput()).toContain("Current model: glm-5.2");
 				expect(runtime.getDefaultModel().id).toBe("glm-5.2");
 				expect(session.state.model.id).toBe("glm-5.2");
-				expect(JSON.parse(await readFile(settingsPath, "utf8"))).toMatchObject({
-					provider: "zai",
+				expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
 					model: "glm-5.2",
 				});
 

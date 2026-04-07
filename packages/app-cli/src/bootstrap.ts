@@ -26,24 +26,11 @@ export function resolveDefaultBootstrapBaseUrl(env: NodeJS.ProcessEnv = process.
 	};
 	return (
 		pick(env.GENESIS_BOOTSTRAP_BASE_URL) ??
-		pick(env.GENESIS_OPENAI_BASE_URL) ??
-		pick(env.GENESIS_LIVE_OPENAI_BASE_URL) ??
 		"https://open.bigmodel.cn/api/coding/paas/v4/"
 	);
 }
 
 export async function ensureAgentDirBootstrapped(options: EnsureBootstrapOptions): Promise<void> {
-	const explicitBaseUrl =
-		typeof options.bootstrapBaseUrl === "string" && options.bootstrapBaseUrl.trim().length > 0
-			? options.bootstrapBaseUrl.trim()
-			: undefined;
-	const baseUrl = explicitBaseUrl ?? resolveDefaultBootstrapBaseUrl();
-	const api = options.bootstrapApi ?? "openai-completions";
-	const apiKeyEnv = options.bootstrapApiKeyEnv ?? "GENESIS_API_KEY";
-	const authHeader = options.bootstrapAuthHeader ?? api !== "anthropic-messages";
-	const reasoning =
-		options.bootstrapReasoning ?? (options.thinkingLevel !== undefined ? options.thinkingLevel !== "off" : false);
-
 	await mkdir(options.agentDir, { recursive: true });
 	const modelsPath = resolve(options.agentDir, "models.json");
 	const existing = await readJsonFile(modelsPath);
@@ -70,6 +57,23 @@ export async function ensureAgentDirBootstrapped(options: EnsureBootstrapOptions
 	if (providerHasConfig && modelAlreadyConfigured) {
 		return;
 	}
+
+	const explicitBaseUrl =
+		typeof options.bootstrapBaseUrl === "string" && options.bootstrapBaseUrl.trim().length > 0
+			? options.bootstrapBaseUrl.trim()
+			: undefined;
+	if (!explicitBaseUrl) {
+		throw new Error("GENESIS_BOOTSTRAP_BASE_URL is required for bootstrap.");
+	}
+	const api = typeof options.bootstrapApi === "string" && options.bootstrapApi.trim().length > 0 ? options.bootstrapApi : undefined;
+	if (!api) {
+		throw new Error("GENESIS_BOOTSTRAP_API is required for bootstrap.");
+	}
+	const baseUrl = explicitBaseUrl;
+	const apiKeyEnv = options.bootstrapApiKeyEnv ?? "GENESIS_API_KEY";
+	const authHeader = options.bootstrapAuthHeader ?? api !== "anthropic-messages";
+	const reasoning =
+		options.bootstrapReasoning ?? (options.thinkingLevel !== undefined ? options.thinkingLevel !== "off" : false);
 
 	const compat: Record<string, boolean> = {};
 	if (options.supportsDeveloperRole !== undefined) {
