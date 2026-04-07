@@ -1,6 +1,6 @@
 {
   "name": "@pickle-pee/genesis-cli",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "CLI entry point, argument parsing, and mode routing",
   "bin": {
     "genesis": "dist/main.js"
@@ -12,10 +12,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@pickle-pee/config": "1.0.2",
-    "@pickle-pee/runtime": "1.0.2",
-    "@pickle-pee/tui-core": "1.0.2",
-    "@pickle-pee/ui": "1.0.2"
+    "@pickle-pee/config": "1.0.3",
+    "@pickle-pee/runtime": "1.0.3",
+    "@pickle-pee/tui-core": "1.0.3",
+    "@pickle-pee/ui": "1.0.3"
   },
   "publishConfig": {
     "access": "public"

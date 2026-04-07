@@ -1,6 +1,6 @@
 {
   "name": "@pickle-pee/tui-core",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Terminal rendering core: capability detection, screen frames, and terminal mode lifecycle",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
