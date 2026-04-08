@@ -13,6 +13,8 @@ export {
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserSelectedIndex,
+	summarizeResumeBrowserHit,
 } from "./resume-browser.js";
 export {
 	createRpcError,

@@ -135,6 +135,37 @@ export function resolveRecentSessionDirectSelection(
 	return prefixMatches.length === 1 ? (prefixMatches[0] ?? null) : null;
 }
 
+export function resolveResumeBrowserSelectedIndex(
+	hits: readonly RecentSessionSearchHit[],
+	selectedSessionId: string | null,
+	fallbackIndex: number,
+): number {
+	if (hits.length === 0) {
+		return 0;
+	}
+	if (selectedSessionId) {
+		const matchedIndex = hits.findIndex((hit) => hit.entry.recoveryData.sessionId.value === selectedSessionId);
+		if (matchedIndex >= 0) {
+			return matchedIndex;
+		}
+	}
+	return moveResumeBrowserSelection(fallbackIndex, 0, hits.length);
+}
+
+export function summarizeResumeBrowserHit(hit: RecentSessionSearchHit | null | undefined): Record<string, unknown> | null {
+	if (!hit) {
+		return null;
+	}
+	return {
+		sessionId: hit.entry.recoveryData.sessionId.value,
+		matchSource: hit.matchSource,
+		headline: hit.headline,
+		title: hit.entry.title,
+		summarySource: hit.entry.recoveryData.metadata?.resumeSummary?.source ?? "legacy",
+		summaryVersion: hit.entry.recoveryData.metadata?.resumeSummary?.version ?? null,
+	};
+}
+
 function buildResumeBrowserHitLines(
 	hit: RecentSessionSearchHit,
 	options: { readonly selected: boolean; readonly now: number; readonly query: string },

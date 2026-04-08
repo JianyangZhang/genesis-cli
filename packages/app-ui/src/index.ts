@@ -69,8 +69,10 @@ export {
 	RPC_ERRORS,
 	RPC_METHODS,
 	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserSelectedIndex,
 	reduceInteractionState,
 	sanitizeForJson,
+	summarizeResumeBrowserHit,
 } from "./services/index.js";
 // Types
 export type {

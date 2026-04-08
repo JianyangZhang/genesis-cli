@@ -5,6 +5,8 @@ import {
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserSelectedIndex,
+	summarizeResumeBrowserHit,
 } from "../services/resume-browser.js";
 
 describe("resume browser formatter", () => {
@@ -392,5 +394,86 @@ describe("resume browser formatter", () => {
 		expect(resolveRecentSessionDirectSelection("session-search-second", displayed, displayed)).toBe(second);
 		expect(resolveRecentSessionDirectSelection("session-search-sec", displayed, displayed)).toBe(second);
 		expect(resolveRecentSessionDirectSelection("session-search", displayed, displayed)).toBeNull();
+	});
+
+	it("restores selected resume-browser index by session id and clamps fallback", () => {
+		const hits = [
+			{
+				entry: {
+					title: "first",
+					updatedAt: 1,
+					recoveryData: {
+						sessionId: { value: "session-a" },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+				},
+				headline: "first",
+				snippet: "first",
+				matchSource: "recent" as const,
+			},
+			{
+				entry: {
+					title: "second",
+					updatedAt: 2,
+					recoveryData: {
+						sessionId: { value: "session-b" },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+				},
+				headline: "second",
+				snippet: "second",
+				matchSource: "recent" as const,
+			},
+		];
+
+		expect(resolveResumeBrowserSelectedIndex(hits, "session-b", 0)).toBe(1);
+		expect(resolveResumeBrowserSelectedIndex(hits, "missing", 99)).toBe(1);
+		expect(resolveResumeBrowserSelectedIndex([], null, 5)).toBe(0);
+	});
+
+	it("summarizes resume-browser hits for debug logging", () => {
+		const summary = summarizeResumeBrowserHit({
+			entry: {
+				title: "resume target",
+				updatedAt: 1,
+				recoveryData: {
+					sessionId: { value: "session-debug" },
+					model: { id: "glm-5.1", provider: "zai" },
+					toolSet: [],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						messageCount: 0,
+						fileSizeBytes: 0,
+						recentMessages: [],
+						resumeSummary: { source: "rule", version: 2 } as never,
+					},
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+			},
+			headline: "resume headline",
+			snippet: "resume snippet",
+			matchSource: "summary",
+		});
+
+		expect(summary).toEqual({
+			sessionId: "session-debug",
+			matchSource: "summary",
+			headline: "resume headline",
+			title: "resume target",
+			summarySource: "rule",
+			summaryVersion: 2,
+		});
+		expect(summarizeResumeBrowserHit(null)).toBeNull();
 	});
 });
