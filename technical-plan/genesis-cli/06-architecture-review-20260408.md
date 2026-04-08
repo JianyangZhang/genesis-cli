@@ -686,17 +686,24 @@
 
 - [ ] P0-1：补齐 `kernel session core`
   原因：是当前最深层的边界缺口；所有 `resume` / `compact` / `clear` / `history` 问题最终都会回到这里。
+  进行中说明：上层 interactive 命令与 resume 展示逻辑已持续从 `app-cli` 向 `app-ui`/`runtime` 收口，但 kernel 侧统一 session core 还未真正补齐。
 - [ ] P0-2：统一会话事实来源与 recent catalog 投影关系
   原因：当前 `resume` 体验和跨模式一致性都依赖这一层稳定。
+  进行中说明：recent catalog / session metadata / rich recovery 的一致性护栏已补强，但“单一事实源 + 稳定投影”还未彻底收口。
 - [ ] P0-3：建立 session / rich recovery 的架构验收测试
   原因：没有稳定自动化护栏，后续边界收口会频繁回归。
+  进行中说明：TTY、resume、recent-session、interactive 命令链路的回归测试已大幅补齐，但还未形成完整的架构验收层。
 
 ### 9.2 P1
 
 - [ ] P1-1：统一命令平台
+  进行中说明：interactive 本地命令已大规模迁入 `app-ui` 命令工厂，但跨模式统一命令平台仍未完成。
 - [ ] P1-2：把 interactive 体验语义继续从 `app-cli` 回收到 `app-ui`
+  进行中说明：`/title`、`/help`、`/exit`、`/quit`、`/clear`、`/status`、`/usage`、`/config`、`/changes`、`/review`、`/diff`、`/doctor` 已外提，`/resume` 的展示与选择逻辑也在继续下沉；剩余是宿主专属生命周期控制。
 - [ ] P1-3：整理 bootstrap / config / session-init 契约
+  进行中说明：相关配置与模型信息展示已部分收口，但 bootstrap / session-init 契约层还未系统整理。
 - [x] P1-4：建立 `pi-mono` 内化清单与 sync 策略
+  完成说明：已建立并开始持续维护 `pi-mono` 内化清单与 sync 策略，后续重构以此为稳定约束。
 
 ### 9.3 P2
 
