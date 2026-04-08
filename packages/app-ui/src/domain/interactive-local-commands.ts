@@ -2,6 +2,46 @@ import type { SessionFacade } from "@pickle-pee/runtime";
 import type { SlashCommand, SlashCommandContext } from "../types/index.js";
 import type { SlashCommandRegistry } from "./slash-command-registry.js";
 
+export interface InteractiveToolUsageEntry {
+	readonly status: string;
+	readonly toolName: string;
+	readonly riskLevel: string;
+	readonly targetPath?: string;
+	readonly durationMs: number;
+}
+
+export interface InteractiveToolUsageSummary {
+	readonly total: number;
+	readonly success: number;
+	readonly failure: number;
+	readonly denied: number;
+	readonly recent: readonly InteractiveToolUsageEntry[];
+}
+
+export interface InteractiveConfigSnapshot {
+	readonly sources: readonly {
+		readonly key: string;
+		readonly layer: string;
+		readonly detail: string;
+	}[];
+	readonly agentDir: string;
+	readonly modelsPath: string;
+	readonly providerKey?: string;
+	readonly provider?: {
+		readonly api?: string | null;
+		readonly baseUrl?: string | null;
+		readonly apiKeyEnv: string;
+		readonly apiKeyPresent: boolean;
+	};
+	readonly activeModel?: {
+		readonly name: string;
+		readonly id: string;
+		readonly reasoning: boolean;
+	} | null;
+	readonly error?: string | null;
+	readonly modelError?: string | null;
+}
+
 export interface InteractiveLocalCommandDeps {
 	readonly registry: SlashCommandRegistry;
 	readonly getCurrentSession: () => SessionFacade;
@@ -16,6 +56,8 @@ export interface InteractiveLocalCommandDeps {
 	readonly getLastError: () => string | null;
 	readonly getChangedFileCount: () => number;
 	readonly getPendingPermissionCallId: () => string | null;
+	readonly getToolUsageSummary: () => InteractiveToolUsageSummary;
+	readonly getConfigSnapshot: (ctx: SlashCommandContext) => Promise<InteractiveConfigSnapshot>;
 }
 
 export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps): SlashCommand[] {
@@ -23,6 +65,8 @@ export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps
 		createTitleCommand(deps),
 		createHelpCommand(deps.registry),
 		createStatusCommand(deps),
+		createUsageCommand(deps),
+		createConfigCommand(deps),
 		createExitCommand("exit", "Exit the interactive session", deps),
 		createExitCommand("quit", "Exit the interactive session (alias of /exit)", deps),
 		createClearCommand(deps),
@@ -152,6 +196,79 @@ function createStatusCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 			} else {
 				ctx.output.writeLine("  Type a prompt, or /help for commands");
 			}
+			return undefined;
+		},
+	};
+}
+
+function createUsageCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
+	return {
+		name: "usage",
+		description: "Show tool usage and governance summary",
+		type: "local",
+		visibility: "internal",
+		async execute(ctx: SlashCommandContext): Promise<undefined> {
+			const summary = deps.getToolUsageSummary();
+			ctx.output.writeLine(
+				`Tools: ${summary.total} total — ${summary.success} success, ${summary.failure} failure, ${summary.denied} denied`,
+			);
+			if (summary.recent.length > 0) {
+				ctx.output.writeLine("Recent:");
+				for (const entry of summary.recent) {
+					const path = entry.targetPath ? ` ${entry.targetPath}` : "";
+					ctx.output.writeLine(
+						`  ${entry.status} ${entry.toolName} (${entry.riskLevel})${path} ${entry.durationMs}ms`,
+					);
+				}
+			}
+			return undefined;
+		},
+	};
+}
+
+function createConfigCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
+	return {
+		name: "config",
+		description: "Show effective config",
+		type: "local",
+		visibility: "internal",
+		async execute(ctx: SlashCommandContext): Promise<undefined> {
+			const snapshot = await deps.getConfigSnapshot(ctx);
+			ctx.output.writeLine("Precedence: default < agent < project < env < cli");
+			if (snapshot.sources.length > 0) {
+				ctx.output.writeLine("Sources:");
+				for (const source of snapshot.sources) {
+					ctx.output.writeLine(`  ${source.key}: ${source.layer} (${source.detail})`);
+				}
+			}
+
+			ctx.output.writeLine(`agentDir: ${snapshot.agentDir}`);
+			ctx.output.writeLine(`models.json: ${snapshot.modelsPath}`);
+			if (snapshot.error) {
+				ctx.output.writeError(snapshot.error);
+				return undefined;
+			}
+
+			if (!snapshot.providerKey || !snapshot.provider) {
+				ctx.output.writeError(`Provider not configured: ${ctx.session.state.model.provider}`);
+				return undefined;
+			}
+
+			ctx.output.writeLine(`provider: ${snapshot.providerKey}`);
+			ctx.output.writeLine(`  api: ${snapshot.provider.api ?? "(missing)"}`);
+			ctx.output.writeLine(`  baseUrl: ${snapshot.provider.baseUrl ?? "(missing)"}`);
+			ctx.output.writeLine(
+				`  apiKey env: ${snapshot.provider.apiKeyEnv} (${snapshot.provider.apiKeyPresent ? "set" : "missing"})`,
+			);
+
+			if (snapshot.activeModel) {
+				ctx.output.writeLine(`model: ${snapshot.activeModel.name}`);
+				ctx.output.writeLine(`  id: ${snapshot.activeModel.id}`);
+				ctx.output.writeLine(`  reasoning: ${snapshot.activeModel.reasoning}`);
+				return undefined;
+			}
+
+			ctx.output.writeError(snapshot.modelError ?? `Model not configured: ${ctx.session.state.model.id}`);
 			return undefined;
 		},
 	};

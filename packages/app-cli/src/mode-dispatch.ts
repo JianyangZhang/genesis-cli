@@ -429,6 +429,80 @@ class InteractiveModeHandler implements ModeHandler {
 			getLastError: () => handler._lastError,
 			getChangedFileCount: () => handler._changedPaths.size,
 			getPendingPermissionCallId: () => handler._pendingPermissionCallId,
+			getToolUsageSummary: () => {
+				const entries = runtime.governor.audit.getAll();
+				return {
+					total: entries.length,
+					success: entries.filter((e) => e.status === "success").length,
+					failure: entries.filter((e) => e.status === "failure").length,
+					denied: entries.filter((e) => e.status === "denied").length,
+					recent: entries.slice(-10).map((entry) => ({
+						status: entry.status,
+						toolName: entry.toolName,
+						riskLevel: entry.riskLevel,
+						targetPath: entry.targetPath,
+						durationMs: entry.durationMs,
+					})),
+				};
+			},
+			getConfigSnapshot: async (ctx) => {
+				const sources = ctx.session.context.configSources ?? {};
+				const agentDir = resolveAgentDir();
+				const modelsPath = join(agentDir, "models.json");
+				let raw = "";
+				try {
+					raw = await readFile(modelsPath, "utf8");
+				} catch {
+					return {
+						sources: Object.keys(sources)
+							.sort((a, b) => a.localeCompare(b))
+							.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
+						agentDir,
+						modelsPath,
+						error: "models.json not found. Run Genesis once or pass --agent-dir.",
+					};
+				}
+
+				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
+				const providerKey = ctx.session.state.model.provider;
+				const provider = parsed.providers?.[providerKey];
+				if (!provider) {
+					return {
+						sources: Object.keys(sources)
+							.sort((a, b) => a.localeCompare(b))
+							.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
+						agentDir,
+						modelsPath,
+						providerKey,
+					};
+				}
+
+				const models = Array.isArray(provider.models) ? provider.models : [];
+				const active = models.find((m: any) => m?.id === ctx.session.state.model.id);
+				const apiKeyEnv = typeof provider.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
+				return {
+					sources: Object.keys(sources)
+						.sort((a, b) => a.localeCompare(b))
+						.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
+					agentDir,
+					modelsPath,
+					providerKey,
+					provider: {
+						api: provider.api ?? "(missing)",
+						baseUrl: provider.baseUrl ?? "(missing)",
+						apiKeyEnv,
+						apiKeyPresent: Boolean(process.env[apiKeyEnv]),
+					},
+					activeModel: active
+						? {
+								name: active.name ?? active.id,
+								id: active.id,
+								reasoning: Boolean(active.reasoning),
+						  }
+						: null,
+					modelError: active ? null : `Model not configured: ${ctx.session.state.model.id}`,
+				};
+			},
 		})) {
 			register(cmd);
 		}
@@ -499,88 +573,6 @@ class InteractiveModeHandler implements ModeHandler {
 				ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
 				ctx.output.writeLine("  Use git manually if you want to discard changes");
 				ctx.output.writeLine("Next: inspect diffs, then continue chatting.");
-				return undefined;
-			},
-		});
-
-		register({
-			name: "usage",
-			description: "Show tool usage and governance summary",
-			type: "local",
-			visibility: "internal",
-			async execute(ctx) {
-				const entries = ctx.runtime.governor.audit.getAll();
-				const total = entries.length;
-				const success = entries.filter((e) => e.status === "success").length;
-				const failure = entries.filter((e) => e.status === "failure").length;
-				const denied = entries.filter((e) => e.status === "denied").length;
-				ctx.output.writeLine(`Tools: ${total} total — ${success} success, ${failure} failure, ${denied} denied`);
-				const tail = entries.slice(-10);
-				if (tail.length > 0) {
-					ctx.output.writeLine("Recent:");
-					for (const entry of tail) {
-						const path = entry.targetPath ? ` ${entry.targetPath}` : "";
-						ctx.output.writeLine(
-							`  ${entry.status} ${entry.toolName} (${entry.riskLevel})${path} ${entry.durationMs}ms`,
-						);
-					}
-				}
-				return undefined;
-			},
-		});
-
-		register({
-			name: "config",
-			description: "Show effective config",
-			type: "local",
-			visibility: "internal",
-			async execute(ctx) {
-				const sources = ctx.session.context.configSources ?? {};
-				ctx.output.writeLine("Precedence: default < agent < project < env < cli");
-				const keys = Object.keys(sources).sort((a, b) => a.localeCompare(b));
-				if (keys.length > 0) {
-					ctx.output.writeLine("Sources:");
-					for (const key of keys) {
-						const source = sources[key]!;
-						ctx.output.writeLine(`  ${key}: ${source.layer} (${source.detail})`);
-					}
-				}
-
-				const agentDir = resolveAgentDir();
-				const modelsPath = join(agentDir, "models.json");
-				ctx.output.writeLine(`agentDir: ${agentDir}`);
-				ctx.output.writeLine(`models.json: ${modelsPath}`);
-				let raw = "";
-				try {
-					raw = await readFile(modelsPath, "utf8");
-				} catch {
-					ctx.output.writeError("models.json not found. Run Genesis once or pass --agent-dir.");
-					return undefined;
-				}
-
-				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
-				const providerKey = ctx.session.state.model.provider;
-				const provider = parsed.providers?.[providerKey];
-				if (!provider) {
-					ctx.output.writeError(`Provider not configured: ${providerKey}`);
-					return undefined;
-				}
-
-				ctx.output.writeLine(`provider: ${providerKey}`);
-				ctx.output.writeLine(`  api: ${provider.api ?? "(missing)"}`);
-				ctx.output.writeLine(`  baseUrl: ${provider.baseUrl ?? "(missing)"}`);
-				const apiKeyEnv = typeof provider.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
-				ctx.output.writeLine(`  apiKey env: ${apiKeyEnv} (${process.env[apiKeyEnv] ? "set" : "missing"})`);
-
-				const models = Array.isArray(provider.models) ? provider.models : [];
-				const active = models.find((m: any) => m?.id === ctx.session.state.model.id);
-				if (active) {
-					ctx.output.writeLine(`model: ${active.name ?? active.id}`);
-					ctx.output.writeLine(`  id: ${active.id}`);
-					ctx.output.writeLine(`  reasoning: ${Boolean(active.reasoning)}`);
-				} else {
-					ctx.output.writeError(`Model not configured: ${ctx.session.state.model.id}`);
-				}
 				return undefined;
 			},
 		});

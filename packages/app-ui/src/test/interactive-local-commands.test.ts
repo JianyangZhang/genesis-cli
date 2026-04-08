@@ -130,9 +130,20 @@ describe("createInteractiveLocalCommands", () => {
 			getLastError: () => null,
 			getChangedFileCount: () => 0,
 			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 		});
 
-		expect(cmds.map((cmd) => cmd.name).sort()).toEqual(["clear", "exit", "help", "quit", "status", "title"]);
+		expect(cmds.map((cmd) => cmd.name).sort()).toEqual([
+			"clear",
+			"config",
+			"exit",
+			"help",
+			"quit",
+			"status",
+			"title",
+			"usage",
+		]);
 	});
 
 	it("/status renders session state and next-step guidance", async () => {
@@ -160,6 +171,8 @@ describe("createInteractiveLocalCommands", () => {
 			getLastError: () => "network timeout",
 			getChangedFileCount: () => 3,
 			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 		});
 		const output = createMockOutputSink();
 
@@ -179,6 +192,112 @@ describe("createInteractiveLocalCommands", () => {
 		expect(output.lines).toContain("  Changed files: 3");
 		expect(output.lines).toContain("Next:");
 		expect(output.lines).toContain("  /review to inspect changes, or /diff <file>");
+	});
+
+	it("/usage renders audit summary and recent entries", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({
+				total: 4,
+				success: 2,
+				failure: 1,
+				denied: 1,
+				recent: [
+					{ status: "success", toolName: "read", riskLevel: "low", targetPath: "/tmp/a.ts", durationMs: 12 },
+					{ status: "denied", toolName: "write", riskLevel: "high", durationMs: 5 },
+				],
+			}),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "usage")!.execute!(createContext(session, runtime, output));
+
+		expect(output.lines).toContain("Tools: 4 total — 2 success, 1 failure, 1 denied");
+		expect(output.lines).toContain("Recent:");
+		expect(output.lines).toContain("  success read (low) /tmp/a.ts 12ms");
+		expect(output.lines).toContain("  denied write (high) 5ms");
+	});
+
+	it("/config renders effective config from an injected snapshot", async () => {
+		const session = createMockSession();
+		(session.context as SessionFacade["context"]) = {
+			workingDirectory: "/repo",
+			configSources: {
+				model: { layer: "cli", detail: "--model" },
+				provider: { layer: "env", detail: "GENESIS_PROVIDER" },
+			},
+		} as SessionFacade["context"];
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({
+				sources: [
+					{ key: "model", layer: "cli", detail: "--model" },
+					{ key: "provider", layer: "env", detail: "GENESIS_PROVIDER" },
+				],
+				agentDir: "/agent",
+				modelsPath: "/agent/models.json",
+				providerKey: "zai",
+				provider: {
+					api: "openai-completions",
+					baseUrl: "https://api.example.com",
+					apiKeyEnv: "GENESIS_API_KEY",
+					apiKeyPresent: true,
+				},
+				activeModel: {
+					name: "GLM 5.1",
+					id: "glm-5.1",
+					reasoning: true,
+				},
+			}),
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "config")!.execute!(createContext(session, runtime, output));
+
+		expect(output.lines).toContain("Precedence: default < agent < project < env < cli");
+		expect(output.lines).toContain("Sources:");
+		expect(output.lines).toContain("  model: cli (--model)");
+		expect(output.lines).toContain("  provider: env (GENESIS_PROVIDER)");
+		expect(output.lines).toContain("agentDir: /agent");
+		expect(output.lines).toContain("models.json: /agent/models.json");
+		expect(output.lines).toContain("provider: zai");
+		expect(output.lines).toContain("  api: openai-completions");
+		expect(output.lines).toContain("  baseUrl: https://api.example.com");
+		expect(output.lines).toContain("  apiKey env: GENESIS_API_KEY (set)");
+		expect(output.lines).toContain("model: GLM 5.1");
+		expect(output.lines).toContain("  id: glm-5.1");
+		expect(output.lines).toContain("  reasoning: true");
 	});
 
 	it("/title updates the session title through injected state", async () => {
@@ -202,6 +321,8 @@ describe("createInteractiveLocalCommands", () => {
 			getLastError: () => null,
 			getChangedFileCount: () => 0,
 			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 		});
 		const output = createMockOutputSink();
 
@@ -229,6 +350,8 @@ describe("createInteractiveLocalCommands", () => {
 			getLastError: () => null,
 			getChangedFileCount: () => 0,
 			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -266,6 +389,8 @@ describe("createInteractiveLocalCommands", () => {
 			getLastError: () => null,
 			getChangedFileCount: () => 0,
 			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -297,6 +422,8 @@ describe("createInteractiveLocalCommands", () => {
 			getLastError: () => null,
 			getChangedFileCount: () => 0,
 			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 		});
 		const output = createMockOutputSink();
 
@@ -324,6 +451,8 @@ describe("createInteractiveLocalCommands", () => {
 			getLastError: () => null,
 			getChangedFileCount: () => 0,
 			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 		});
 		const output = createMockOutputSink();
 
@@ -355,6 +484,8 @@ describe("createInteractiveLocalCommands", () => {
 			getLastError: () => null,
 			getChangedFileCount: () => 0,
 			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 		});
 		const output = createMockOutputSink();
 		const runtime = createMockRuntimeWithSessions([nextSession]);
