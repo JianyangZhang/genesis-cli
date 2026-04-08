@@ -586,6 +586,82 @@ describe("createAppRuntime", () => {
 		]);
 	});
 
+	it("refreshes cached recent-session metadata from sessionFile when runtime metadata is absent", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-session-refresh-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const sessionFile = join(agentDir, "session.jsonl");
+		const writeSessionFile = async (title: string, prompt: string, assistant: string) =>
+			writeFile(
+				sessionFile,
+				`${[
+					JSON.stringify({ type: "session_info", name: title }),
+					JSON.stringify({ type: "message", message: { role: "user", content: prompt } }),
+					JSON.stringify({ type: "message", message: { role: "assistant", content: assistant } }),
+				].join("\n")}\n`,
+				"utf8",
+			);
+
+		await writeSessionFile("旧标题", "旧问题", "旧回答");
+		await runtime.recordRecentSession({
+			sessionId: { value: "session-refresh" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: null,
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+			sessionFile,
+		});
+
+		await writeSessionFile("新标题", "新问题", "新回答");
+		await runtime.recordRecentSession({
+			sessionId: { value: "session-refresh" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: null,
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+			sessionFile,
+		});
+
+		const recent = await runtime.listRecentSessions();
+		const storedEntry = JSON.parse(await readFile(join(historyDir, "entries", "session-refresh.json"), "utf8")) as {
+			metadata?: {
+				summary?: string;
+				firstPrompt?: string;
+				recentMessages?: Array<{ role: string; text: string }>;
+				resumeSummary?: { title?: string };
+			};
+		};
+
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "新标题",
+			firstPrompt: "新问题",
+		});
+		expect(recent[0]?.recoveryData.metadata?.resumeSummary).toMatchObject({
+			title: "新标题",
+		});
+		expect(storedEntry.metadata).toMatchObject({
+			summary: "新标题",
+			firstPrompt: "新问题",
+		});
+		expect(storedEntry.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "新问题" },
+			{ role: "assistant", text: "新回答" },
+		]);
+	});
+
 	it("prunes recent sessions down to the latest 10 entries", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-prune-"));
 		const historyDir = join(agentDir, "history");

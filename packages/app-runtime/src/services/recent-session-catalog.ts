@@ -331,12 +331,15 @@ function normalizeRecentSessionEntry(entry: RecentSessionEntry): RecentSessionEn
 	};
 }
 
-async function materializeRecentSessionRecoveryData(recoveryData: SessionRecoveryData): Promise<SessionRecoveryData> {
+async function materializeRecentSessionRecoveryData(
+	recoveryData: SessionRecoveryData,
+	options?: { readonly reloadSessionFileMetadata?: boolean },
+): Promise<SessionRecoveryData> {
 	const normalized = normalizeRecentSessionRecoveryData(recoveryData);
-	const metadata =
-		normalized.metadata ??
-		(normalized.sessionFile ? await loadMetadataFromSessionFile(normalized.sessionFile) : null) ??
-		undefined;
+	const sessionFileMetadata = normalized.sessionFile ? await loadMetadataFromSessionFile(normalized.sessionFile) : null;
+	const metadata = options?.reloadSessionFileMetadata
+		? refreshMetadataFromSessionFile(normalized.metadata, sessionFileMetadata)
+		: (normalized.metadata ?? sessionFileMetadata ?? undefined);
 	return enrichRecoveryDataForRecentCatalog(
 		metadata
 			? {
@@ -354,7 +357,11 @@ async function persistRecentSessionRecoveryData(
 ): Promise<void> {
 	const existing = await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value);
 	const mergedRecoveryData = mergeRecentSessionRecoveryData(existing, recoveryData);
-	const enrichedRecoveryData = await materializeRecentSessionRecoveryData(mergedRecoveryData);
+	const enrichedRecoveryData = await materializeRecentSessionRecoveryData(mergedRecoveryData, {
+		// When the caller does not provide runtime-owned metadata, refresh from sessionFile so
+		// the recent-session catalog remains a projection of the underlying session fact source.
+		reloadSessionFileMetadata: recoveryData.metadata == null,
+	});
 	await mkdir(storeDir, { recursive: true });
 	await mkdir(getRecentSessionEntriesDir(storeDir), { recursive: true });
 	await writeFile(join(storeDir, "last.json"), `${JSON.stringify(enrichedRecoveryData, null, 2)}\n`, "utf8");
@@ -414,6 +421,31 @@ function mergeRecentSessionMetadata(
 				: existing?.resumeSummary?.source === "model"
 					? existing.resumeSummary
 					: (incoming?.resumeSummary ?? existing?.resumeSummary ?? null),
+	};
+}
+
+function refreshMetadataFromSessionFile(
+	existing: SessionRecoveryMetadata | null | undefined,
+	sessionFileMetadata: SessionRecoveryData["metadata"] | null,
+): SessionRecoveryMetadata | undefined {
+	if (!existing && !sessionFileMetadata) {
+		return undefined;
+	}
+	if (!sessionFileMetadata) {
+		return existing ?? undefined;
+	}
+	return {
+		...existing,
+		summary: normalizeRecentSessionText(sessionFileMetadata.summary) ?? normalizeRecentSessionText(existing?.summary) ?? undefined,
+		firstPrompt:
+			normalizeRecentSessionText(sessionFileMetadata.firstPrompt) ??
+			normalizeRecentSessionText(existing?.firstPrompt) ??
+			undefined,
+		messageCount: Math.max(sessionFileMetadata.messageCount, existing?.messageCount ?? 0),
+		fileSizeBytes: sessionFileMetadata.fileSizeBytes || existing?.fileSizeBytes || 0,
+		recentMessages:
+			sessionFileMetadata.recentMessages.length > 0 ? sessionFileMetadata.recentMessages : (existing?.recentMessages ?? []),
+		resumeSummary: existing?.resumeSummary ?? null,
 	};
 }
 

@@ -447,9 +447,18 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				all.sort((a, b) => a.name.localeCompare(b.name));
-				const local = all.filter((c) => c.type === "local");
-				const prompt = all.filter((c) => c.type === "prompt");
-				const ui = all.filter((c) => c.type === "ui");
+				const local = registry
+					.listByType("local", "public")
+					.slice()
+					.sort((a, b) => a.name.localeCompare(b.name));
+				const prompt = registry
+					.listByType("prompt", "public")
+					.slice()
+					.sort((a, b) => a.name.localeCompare(b.name));
+				const ui = registry
+					.listByType("ui", "public")
+					.slice()
+					.sort((a, b) => a.name.localeCompare(b.name));
 
 				ctx.output.writeLine("Commands:");
 				const renderGroup = (label: string, items: readonly SlashCommand[]): void => {
