@@ -97,12 +97,16 @@ export async function pruneRecentSessions(
 	}
 	const storeDir = getRecentSessionCatalogDir(historyDir);
 	const existing = await readRecentSessionsByDir(storeDir);
-	const normalized = existing.map((entry) => normalizeRecentSessionEntry(entry));
+	const normalized = await Promise.all(existing.map((entry) => materializeRecentSessionEntry(storeDir, entry)));
 	const compacted = normalized.slice(0, Math.max(0, maxEntries));
 	const before = existing.length;
 	const after = compacted.length;
 	const last = await readLastRecentSessionByDir(storeDir);
-	const normalizedLast = last ? enrichRecoveryDataForRecentCatalog(normalizeRecentSessionRecoveryData(last)) : null;
+	const normalizedLast = last
+		? enrichRecoveryDataForRecentCatalog(
+				normalizeRecentSessionRecoveryData(await materializeRecentSessionRecoveryDataFromEntry(storeDir, last)),
+			)
+		: null;
 	if (before !== after || JSON.stringify(existing) !== JSON.stringify(compacted)) {
 		await mkdir(storeDir, { recursive: true });
 		await writeFile(join(storeDir, "recent.json"), `${JSON.stringify(compacted, null, 2)}\n`, "utf8");
@@ -193,8 +197,7 @@ async function readRecentSessionEntryById(storeDir: string, sessionId: string): 
 
 async function materializeRecentSessionEntry(storeDir: string, entry: RecentSessionEntry): Promise<RecentSessionEntry> {
 	const normalized = normalizeRecentSessionEntry(entry);
-	const sessionId = normalized.recoveryData.sessionId.value;
-	const persistedRecoveryData = await readRecentSessionEntryById(storeDir, sessionId);
+	const persistedRecoveryData = await materializeRecentSessionRecoveryDataFromEntry(storeDir, normalized.recoveryData);
 	if (!persistedRecoveryData) {
 		return normalized;
 	}
@@ -202,6 +205,13 @@ async function materializeRecentSessionEntry(storeDir: string, entry: RecentSess
 		...normalized,
 		recoveryData: enrichRecoveryDataForRecentCatalog(normalizeRecentSessionRecoveryData(persistedRecoveryData)),
 	};
+}
+
+async function materializeRecentSessionRecoveryDataFromEntry(
+	storeDir: string,
+	recoveryData: SessionRecoveryData,
+): Promise<SessionRecoveryData> {
+	return (await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value)) ?? recoveryData;
 }
 
 function getRecentSessionEntriesDir(storeDir: string): string {

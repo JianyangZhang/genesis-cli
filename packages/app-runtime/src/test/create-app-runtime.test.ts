@@ -866,6 +866,112 @@ describe("createAppRuntime", () => {
 		expect(rewrittenLast.metadata).toBeUndefined();
 	});
 
+	it("rewrites recent and last projections from entry facts while pruning", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-prune-fact-source-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const sessionsDir = historyDir;
+		await mkdir(join(sessionsDir, "entries"), { recursive: true });
+		await writeFile(
+			join(sessionsDir, "recent.json"),
+			`${JSON.stringify(
+				[
+					{
+						recoveryData: {
+							sessionId: { value: "projection-session" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "projection summary",
+								firstPrompt: "projection prompt",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "projection prompt" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "Projection Title",
+						updatedAt: 1000,
+					},
+				],
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await writeFile(
+			join(sessionsDir, "last.json"),
+			`${JSON.stringify({
+				sessionId: { value: "projection-session" },
+				model: stubModel,
+				toolSet: ["read"],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: {
+					summary: "projection summary",
+					firstPrompt: "projection prompt",
+					messageCount: 1,
+					fileSizeBytes: 64,
+					recentMessages: [{ role: "user", text: "projection prompt" }],
+				},
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				agentDir,
+			})}\n`,
+			"utf8",
+		);
+		await writeFile(
+			join(sessionsDir, "entries", "projection-session.json"),
+			`${JSON.stringify({
+				sessionId: { value: "projection-session" },
+				model: stubModel,
+				toolSet: ["read"],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: {
+					summary: "entry summary",
+					firstPrompt: "entry prompt",
+					messageCount: 2,
+					fileSizeBytes: 96,
+					recentMessages: [
+						{ role: "user", text: "entry prompt" },
+						{ role: "assistant", text: "entry answer" },
+					],
+				},
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				agentDir,
+			})}\n`,
+			"utf8",
+		);
+
+		const prune = await runtime.pruneRecentSessions(10);
+		const rewritten = JSON.parse(await readFile(join(sessionsDir, "recent.json"), "utf8")) as Array<{
+			recoveryData: { metadata?: { summary?: string; firstPrompt?: string } };
+		}>;
+		const rewrittenLast = JSON.parse(await readFile(join(sessionsDir, "last.json"), "utf8")) as {
+			metadata?: { summary?: string; firstPrompt?: string };
+		};
+
+		expect(prune).toEqual({ before: 1, after: 1, removed: 0 });
+		expect(rewritten[0]?.recoveryData.metadata).toMatchObject({
+			summary: "entry summary",
+			firstPrompt: "entry prompt",
+		});
+		expect(rewrittenLast.metadata).toMatchObject({
+			summary: "entry summary",
+			firstPrompt: "entry prompt",
+		});
+	});
+
 	it("uses the configured recent-session max entries by default", async () => {
 		process.env.GENESIS_RECENT_SESSION_MAX_ENTRIES = "3";
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-configured-prune-"));

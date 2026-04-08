@@ -693,8 +693,8 @@
   已完成子项：
   - [x] P0-2.a：recent-session metadata 缺失时可从 `sessionFile` 回填并刷新缓存
   - [x] P0-2.b：`listRecentSessions()` 优先以 `entries/<sessionId>.json` 作为 `recoveryData` 事实源，`recent.json` 仅作投影
+  - [x] P0-2.c：`pruneRecentSessions()` 重写 `recent.json` / `last.json` 时优先吸收 entry facts
   未完成子项：
-  - [ ] P0-2.c：recent / last / entry 三层投影的统一重写策略
   - [ ] P0-2.d：runtime/kernel 会话事实源边界继续收紧
 - [ ] P0-3：建立 session / rich recovery 的架构验收测试
   原因：没有稳定自动化护栏，后续边界收口会频繁回归。
