@@ -78,6 +78,7 @@ export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps
 		createUsageCommand(deps),
 		createConfigCommand(deps),
 		createChangesCommand(deps),
+		createReviewCommand(deps),
 		createExitCommand("exit", "Exit the interactive session", deps),
 		createExitCommand("quit", "Exit the interactive session (alias of /exit)", deps),
 		createClearCommand(deps),
@@ -299,6 +300,34 @@ function createChangesCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 				return undefined;
 			}
 			ctx.output.writeLine("Next: /review to inspect, or /diff [file] to see patches.");
+			return undefined;
+		},
+	};
+}
+
+function createReviewCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
+	return {
+		name: "review",
+		description: "Review changes and decide next steps",
+		type: "local",
+		visibility: "public",
+		async execute(ctx: SlashCommandContext): Promise<undefined> {
+			const summary = await deps.getWorkingTreeSummary();
+			if (summary.snapshot.available && summary.snapshot.statusLines.length === 0 && summary.changedPaths.length === 0) {
+				ctx.output.writeLine("Review: clean working tree.");
+				ctx.output.writeLine("Next: continue chatting, or /changes if you want a snapshot.");
+				return undefined;
+			}
+			renderWorkingTreeSummary(ctx.output, summary.changedPaths, summary.snapshot);
+			if (summary.snapshot.available === false) {
+				ctx.output.writeError("git not available in this working directory.");
+				ctx.output.writeLine("Next: continue chatting, or inspect tool-observed changes manually.");
+				return undefined;
+			}
+			ctx.output.writeLine("Review tips:");
+			ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
+			ctx.output.writeLine("  Use git manually if you want to discard changes");
+			ctx.output.writeLine("Next: inspect diffs, then continue chatting.");
 			return undefined;
 		},
 	};

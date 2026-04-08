@@ -75,7 +75,6 @@ import {
 	initialInteractionState,
 	moveResumeBrowserSelection,
 	reduceInteractionState,
-	renderWorkingTreeSummary as renderWorkingTreeSummaryFromUi,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
@@ -532,33 +531,6 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				ctx.output.writeLine(diff.stdout.trimEnd().length > 0 ? diff.stdout.trimEnd() : "(no diff)");
 				ctx.output.writeLine("Next: /review to see a summary, or keep iterating.");
-				return undefined;
-			},
-		});
-
-		register({
-			name: "review",
-			description: "Review changes and decide next steps",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				const cwd = ctx.session.context.workingDirectory;
-				const snapshot = await inspectGitWorkingTree(cwd);
-				if (snapshot.available && snapshot.statusLines.length === 0 && handler._changedPaths.size === 0) {
-					ctx.output.writeLine("Review: clean working tree.");
-					ctx.output.writeLine("Next: continue chatting, or /changes if you want a snapshot.");
-					return undefined;
-				}
-				renderWorkingTreeSummaryFromUi(ctx.output, [...handler._changedPaths], snapshot);
-				if (snapshot.available === false) {
-					ctx.output.writeError("git not available in this working directory.");
-					ctx.output.writeLine("Next: continue chatting, or inspect tool-observed changes manually.");
-					return undefined;
-				}
-				ctx.output.writeLine("Review tips:");
-				ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
-				ctx.output.writeLine("  Use git manually if you want to discard changes");
-				ctx.output.writeLine("Next: inspect diffs, then continue chatting.");
 				return undefined;
 			},
 		});

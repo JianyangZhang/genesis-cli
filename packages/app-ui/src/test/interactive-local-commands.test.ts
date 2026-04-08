@@ -142,6 +142,7 @@ describe("createInteractiveLocalCommands", () => {
 			"exit",
 			"help",
 			"quit",
+			"review",
 			"status",
 			"title",
 			"usage",
@@ -238,6 +239,85 @@ describe("createInteractiveLocalCommands", () => {
 		expect(output.lines).toContain("git diff --stat:");
 		expect(output.lines).toContain("  src/main.ts | 2 +-");
 		expect(output.lines).toContain("Next: /review to inspect, or /diff [file] to see patches.");
+	});
+
+	it("/review renders review guidance on top of the shared working-tree summary", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 1,
+			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: ["src/main.ts"],
+				snapshot: {
+					available: true,
+					statusLines: ["M src/main.ts"],
+					diffStatLines: ["src/main.ts | 2 +-"],
+				},
+			}),
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "review")!.execute!(createContext(session, runtime, output));
+
+		expect(output.lines).toContain("Working tree:");
+		expect(output.lines).toContain("Review tips:");
+		expect(output.lines).toContain("  /diff <file>   Inspect a specific patch");
+		expect(output.lines).toContain("  Use git manually if you want to discard changes");
+		expect(output.lines).toContain("Next: inspect diffs, then continue chatting.");
+	});
+
+	it("/review reports a clean working tree when there are no changes", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: {
+					available: true,
+					statusLines: [],
+					diffStatLines: [],
+				},
+			}),
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "review")!.execute!(createContext(session, runtime, output));
+
+		expect(output.lines).toEqual([
+			"Review: clean working tree.",
+			"Next: continue chatting, or /changes if you want a snapshot.",
+		]);
 	});
 
 	it("/usage renders audit summary and recent entries", async () => {
@@ -411,7 +491,7 @@ describe("createInteractiveLocalCommands", () => {
 		await cmds.find((cmd) => cmd.name === "help")!.execute!(createContext(session, runtime, output));
 
 		expect(output.lines).toContain("Commands:");
-		expect(output.lines).toContain("\nLocal (6):");
+		expect(output.lines).toContain("\nLocal (7):");
 		expect(output.lines).toContain("\nPrompt (1):");
 		expect(output.lines).toContain("\nUI (1):");
 		expect(output.lines).toContain("  /help — Show available commands");

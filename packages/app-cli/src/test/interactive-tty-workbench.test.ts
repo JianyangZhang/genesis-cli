@@ -1646,12 +1646,12 @@ describe("interactive workbench TTY", () => {
 				await waitFor(() => screen.snapshot().includes("❯"));
 
 				input.write("/review\r");
-				await waitFor(() => screen.snapshot().includes("Review tips:"));
-				expect(screen.snapshot()).toContain("Working tree:");
-				expect(screen.snapshot()).toContain("git status --porcelain:");
-				expect(screen.snapshot()).toContain("/diff <file>   Inspect a specific patch");
-				expect(screen.snapshot()).toContain("Use git manually if you want to discard changes");
-				expect(screen.snapshot()).not.toContain("/revert");
+				await waitFor(() => output.getRawOutput().includes("Review tips:"));
+				expect(output.getRawOutput()).toContain("Working tree:");
+				expect(output.getRawOutput()).toContain("git status --porcelain:");
+				expect(output.getRawOutput()).toContain("/diff <file>   Inspect a specific patch");
+				expect(output.getRawOutput()).toContain("Use git manually if you want to discard changes");
+				expect(output.getRawOutput()).not.toContain("/revert");
 
 				input.write("/exit\r");
 				await startPromise;
@@ -1674,8 +1674,8 @@ describe("interactive workbench TTY", () => {
 				await waitFor(() => screen.snapshot().includes("❯"));
 
 				input.write("/review\r");
-				await waitFor(() => screen.snapshot().includes("Review: clean working tree."));
-				expect(screen.snapshot()).toContain("Next: continue chatting, or /changes if you want a snapshot.");
+				await waitFor(() => output.getRawOutput().includes("Review: clean working tree."));
+				expect(output.getRawOutput()).toContain("Next: continue chatting, or /changes if you want a snapshot.");
 
 				input.write("/exit\r");
 				await startPromise;
