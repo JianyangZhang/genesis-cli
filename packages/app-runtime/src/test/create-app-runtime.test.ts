@@ -662,6 +662,87 @@ describe("createAppRuntime", () => {
 		]);
 	});
 
+	it("prefers entry-file recovery data over recent.json projections when listing sessions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-fact-source-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		await mkdir(join(historyDir, "entries"), { recursive: true });
+
+		await writeFile(
+			join(historyDir, "recent.json"),
+			`${JSON.stringify(
+				[
+					{
+						recoveryData: {
+							sessionId: { value: "session-fact-source" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "projection summary",
+								firstPrompt: "projection prompt",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "projection prompt" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "Projection Title",
+						updatedAt: 123,
+					},
+				],
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await writeFile(
+			join(historyDir, "entries", "session-fact-source.json"),
+			`${JSON.stringify({
+				sessionId: { value: "session-fact-source" },
+				model: stubModel,
+				toolSet: ["read"],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: {
+					summary: "entry summary",
+					firstPrompt: "entry prompt",
+					messageCount: 2,
+					fileSizeBytes: 96,
+					recentMessages: [
+						{ role: "user", text: "entry prompt" },
+						{ role: "assistant", text: "entry answer" },
+					],
+				},
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				agentDir,
+			})}\n`,
+			"utf8",
+		);
+
+		const recent = await runtime.listRecentSessions();
+
+		expect(recent[0]?.title).toBe("Projection Title");
+		expect(recent[0]?.updatedAt).toBe(123);
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "entry summary",
+			firstPrompt: "entry prompt",
+		});
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "entry prompt" },
+			{ role: "assistant", text: "entry answer" },
+		]);
+	});
+
 	it("prunes recent sessions down to the latest 10 entries", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-prune-"));
 		const historyDir = join(agentDir, "history");

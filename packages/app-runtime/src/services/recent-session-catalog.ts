@@ -72,14 +72,17 @@ export async function listRecentSessions(historyDir: string | undefined): Promis
 	if (!historyDir) {
 		return [];
 	}
+	const storeDir = getRecentSessionCatalogDir(historyDir);
 	try {
 		const parsed = JSON.parse(
-			await readFile(join(getRecentSessionCatalogDir(historyDir), "recent.json"), "utf8"),
+			await readFile(join(storeDir, "recent.json"), "utf8"),
 		) as unknown;
 		if (!Array.isArray(parsed)) {
 			return [];
 		}
-		return (parsed as RecentSessionEntry[]).map((entry) => normalizeRecentSessionEntry(entry));
+		return Promise.all(
+			(parsed as RecentSessionEntry[]).map((entry) => materializeRecentSessionEntry(storeDir, entry)),
+		);
 	} catch {
 		return [];
 	}
@@ -186,6 +189,19 @@ async function readRecentSessionEntryById(storeDir: string, sessionId: string): 
 	} catch {
 		return null;
 	}
+}
+
+async function materializeRecentSessionEntry(storeDir: string, entry: RecentSessionEntry): Promise<RecentSessionEntry> {
+	const normalized = normalizeRecentSessionEntry(entry);
+	const sessionId = normalized.recoveryData.sessionId.value;
+	const persistedRecoveryData = await readRecentSessionEntryById(storeDir, sessionId);
+	if (!persistedRecoveryData) {
+		return normalized;
+	}
+	return {
+		...normalized,
+		recoveryData: enrichRecoveryDataForRecentCatalog(normalizeRecentSessionRecoveryData(persistedRecoveryData)),
+	};
 }
 
 function getRecentSessionEntriesDir(storeDir: string): string {

@@ -690,6 +690,12 @@
 - [ ] P0-2：统一会话事实来源与 recent catalog 投影关系
   原因：当前 `resume` 体验和跨模式一致性都依赖这一层稳定。
   进行中说明：recent catalog / session metadata / rich recovery 的一致性护栏已补强，但“单一事实源 + 稳定投影”还未彻底收口。
+  已完成子项：
+  - [x] P0-2.a：recent-session metadata 缺失时可从 `sessionFile` 回填并刷新缓存
+  - [x] P0-2.b：`listRecentSessions()` 优先以 `entries/<sessionId>.json` 作为 `recoveryData` 事实源，`recent.json` 仅作投影
+  未完成子项：
+  - [ ] P0-2.c：recent / last / entry 三层投影的统一重写策略
+  - [ ] P0-2.d：runtime/kernel 会话事实源边界继续收紧
 - [ ] P0-3：建立 session / rich recovery 的架构验收测试
   原因：没有稳定自动化护栏，后续边界收口会频繁回归。
   进行中说明：TTY、resume、recent-session、interactive 命令链路的回归测试已大幅补齐，但还未形成完整的架构验收层。
