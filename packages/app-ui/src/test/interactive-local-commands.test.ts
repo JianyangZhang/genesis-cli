@@ -125,9 +125,60 @@ describe("createInteractiveLocalCommands", () => {
 			isInteractionBusy: () => false,
 			hasPendingPermissionRequest: () => false,
 			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
 		});
 
-		expect(cmds.map((cmd) => cmd.name).sort()).toEqual(["clear", "exit", "help", "quit", "title"]);
+		expect(cmds.map((cmd) => cmd.name).sort()).toEqual(["clear", "exit", "help", "quit", "status", "title"]);
+	});
+
+	it("/status renders session state and next-step guidance", async () => {
+		const session = createMockSession({
+			planSummary: { stepCount: 5, completedSteps: 2 },
+			compactionSummary: { estimatedTokensSaved: 128, completedAt: Date.now() },
+			taskState: { status: "running", currentTaskId: "task-7", startedAt: Date.now() - 1_000 },
+		});
+		(session.context as SessionFacade["context"]) = {
+			workingDirectory: "/repo",
+		} as SessionFacade["context"];
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => "network timeout",
+			getChangedFileCount: () => 3,
+			getPendingPermissionCallId: () => null,
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "status")!.execute!(createContext(session, runtime, output));
+
+		expect(output.lines).toContain("Session: interactive-session-1");
+		expect(output.lines).toContain("  CWD: /repo");
+		expect(output.lines).toContain("  Agent dir: /agent");
+		expect(output.lines).toContain("  Model: GLM 5.1");
+		expect(output.lines).toContain("  Provider: zai");
+		expect(output.lines).toContain("  Phase: idle");
+		expect(output.lines).toContain("  Task: running (task-7)");
+		expect(output.lines).toContain("  Tools: read");
+		expect(output.lines).toContain("  Plan: 2/5");
+		expect(output.lines).toContain("  Last compaction: 128 tokens saved");
+		expect(output.lines).toContain("  Last error: network timeout");
+		expect(output.lines).toContain("  Changed files: 3");
+		expect(output.lines).toContain("Next:");
+		expect(output.lines).toContain("  /review to inspect changes, or /diff <file>");
 	});
 
 	it("/title updates the session title through injected state", async () => {
@@ -146,6 +197,11 @@ describe("createInteractiveLocalCommands", () => {
 			isInteractionBusy: () => false,
 			hasPendingPermissionRequest: () => false,
 			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -168,6 +224,11 @@ describe("createInteractiveLocalCommands", () => {
 			isInteractionBusy: () => false,
 			hasPendingPermissionRequest: () => false,
 			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -179,7 +240,7 @@ describe("createInteractiveLocalCommands", () => {
 		await cmds.find((cmd) => cmd.name === "help")!.execute!(createContext(session, runtime, output));
 
 		expect(output.lines).toContain("Commands:");
-		expect(output.lines).toContain("\nLocal (4):");
+		expect(output.lines).toContain("\nLocal (5):");
 		expect(output.lines).toContain("\nPrompt (1):");
 		expect(output.lines).toContain("\nUI (1):");
 		expect(output.lines).toContain("  /help — Show available commands");
@@ -200,6 +261,11 @@ describe("createInteractiveLocalCommands", () => {
 			isInteractionBusy: () => false,
 			hasPendingPermissionRequest: () => false,
 			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -226,6 +292,11 @@ describe("createInteractiveLocalCommands", () => {
 			isInteractionBusy: () => false,
 			hasPendingPermissionRequest: () => false,
 			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -248,6 +319,11 @@ describe("createInteractiveLocalCommands", () => {
 			isInteractionBusy: () => true,
 			hasPendingPermissionRequest: () => false,
 			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -274,6 +350,11 @@ describe("createInteractiveLocalCommands", () => {
 			isInteractionBusy: () => false,
 			hasPendingPermissionRequest: () => false,
 			replaceSession,
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
 		});
 		const output = createMockOutputSink();
 		const runtime = createMockRuntimeWithSessions([nextSession]);

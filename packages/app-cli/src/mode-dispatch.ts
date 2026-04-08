@@ -424,6 +424,11 @@ class InteractiveModeHandler implements ModeHandler {
 			replaceSession: (next) => {
 				switchInteractiveSession(next);
 			},
+			getAgentDir: () => resolveAgentDir(),
+			getInteractionPhase: () => interactionState.phase,
+			getLastError: () => handler._lastError,
+			getChangedFileCount: () => handler._changedPaths.size,
+			getPendingPermissionCallId: () => handler._pendingPermissionCallId,
 		})) {
 			register(cmd);
 		}
@@ -494,57 +499,6 @@ class InteractiveModeHandler implements ModeHandler {
 				ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
 				ctx.output.writeLine("  Use git manually if you want to discard changes");
 				ctx.output.writeLine("Next: inspect diffs, then continue chatting.");
-				return undefined;
-			},
-		});
-
-		register({
-			name: "status",
-			description: "Show status",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				const state = ctx.session.state;
-				ctx.output.writeLine(`Session: ${state.id.value}`);
-				ctx.output.writeLine(`  CWD: ${ctx.session.context.workingDirectory}`);
-				ctx.output.writeLine(`  Agent dir: ${resolveAgentDir()}`);
-				ctx.output.writeLine(`  Model: ${state.model.displayName ?? state.model.id}`);
-				ctx.output.writeLine(`  Provider: ${state.model.provider}`);
-				ctx.output.writeLine(`  Phase: ${interactionState.phase}`);
-				ctx.output.writeLine(
-					`  Task: ${state.taskState.status}${
-						state.taskState.currentTaskId ? ` (${state.taskState.currentTaskId})` : ""
-					}`,
-				);
-				ctx.output.writeLine(`  Tools: ${[...state.toolSet].join(", ") || "(none)"}`);
-				if (state.planSummary) {
-					ctx.output.writeLine(`  Plan: ${state.planSummary.completedSteps}/${state.planSummary.stepCount}`);
-				}
-				if (state.compactionSummary) {
-					ctx.output.writeLine(`  Last compaction: ${state.compactionSummary.estimatedTokensSaved} tokens saved`);
-				}
-				if (handler._lastError) {
-					ctx.output.writeLine(`  Last error: ${handler._lastError}`);
-				}
-				if (handler._changedPaths.size > 0) {
-					ctx.output.writeLine(`  Changed files: ${handler._changedPaths.size}`);
-				}
-				if (handler._pendingPermissionCallId) {
-					ctx.output.writeLine(`  Waiting permission: ${handler._pendingPermissionCallId}`);
-				}
-
-				ctx.output.writeLine("Next:");
-				if (handler._pendingPermissionCallId) {
-					ctx.output.writeLine("  Reply y (once), Y (session), n (deny), or Ctrl+C to deny");
-				} else if (handler.isInteractionBusy()) {
-					ctx.output.writeLine("  Wait for the active turn, or Ctrl+C to abort");
-				} else if (handler._changedPaths.size > 0) {
-					ctx.output.writeLine("  /review to inspect changes, or /diff <file>");
-				} else if (handler._lastError) {
-					ctx.output.writeLine("  /doctor to diagnose, or /help for commands");
-				} else {
-					ctx.output.writeLine("  Type a prompt, or /help for commands");
-				}
 				return undefined;
 			},
 		});
