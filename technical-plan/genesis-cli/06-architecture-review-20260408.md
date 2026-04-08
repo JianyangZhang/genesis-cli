@@ -700,6 +700,15 @@
   进行中说明：interactive 本地命令已大规模迁入 `app-ui` 命令工厂，但跨模式统一命令平台仍未完成。
 - [ ] P1-2：把 interactive 体验语义继续从 `app-cli` 回收到 `app-ui`
   进行中说明：`/title`、`/help`、`/exit`、`/quit`、`/clear`、`/status`、`/usage`、`/config`、`/changes`、`/review`、`/diff`、`/doctor` 已外提，`/resume` 的展示与选择逻辑也在继续下沉；剩余是宿主专属生命周期控制。
+  已完成子项：
+  - [x] P1-2.a：interactive 本地命令工厂迁到 `app-ui`
+  - [x] P1-2.b：`/resume` restored-context 预览渲染迁到 `app-ui`
+  - [x] P1-2.c：`/resume` direct-selection 解析迁到 `app-ui`
+  - [x] P1-2.d：`/resume` browser 选中索引恢复与调试摘要 helper 迁到 `app-ui`
+  - [x] P1-2.e：`/resume` browser 打开/搜索/预览切换状态变换迁到 `app-ui`
+  未完成子项：
+  - [ ] P1-2.f：`/resume` 宿主专属控制流进一步收口
+  - [ ] P1-2.g：其余 interactive 宿主专属能力与统一平台边界继续清理
 - [ ] P1-3：整理 bootstrap / config / session-init 契约
   进行中说明：相关配置与模型信息展示已部分收口，但 bootstrap / session-init 契约层还未系统整理。
 - [x] P1-4：建立 `pi-mono` 内化清单与 sync 策略

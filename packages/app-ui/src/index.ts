@@ -52,6 +52,9 @@ export {
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
+	beginResumeBrowserSearch,
+	completeResumeBrowserSearch,
+	createResumeBrowserState,
 	createRpcError,
 	createRpcResponse,
 	eventToJsonEnvelope,
@@ -73,6 +76,7 @@ export {
 	reduceInteractionState,
 	sanitizeForJson,
 	summarizeResumeBrowserHit,
+	toggleResumeBrowserPreviewState,
 } from "./services/index.js";
 // Types
 export type {

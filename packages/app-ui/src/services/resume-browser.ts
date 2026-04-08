@@ -65,6 +65,48 @@ export function buildResumeBrowserFooterHintLines(): readonly string[] {
 	return ["Type to search · Enter to open · ↑↓ to select · Ctrl+V preview · Esc cancel"];
 }
 
+export function createResumeBrowserState(initialQuery: string): ResumeBrowserState {
+	return {
+		query: initialQuery,
+		hits: [],
+		selectedIndex: 0,
+		previewExpanded: false,
+		loading: true,
+	};
+}
+
+export function beginResumeBrowserSearch(state: ResumeBrowserState, nextQuery: string): ResumeBrowserState {
+	return {
+		...state,
+		query: nextQuery,
+		loading: true,
+		selectedIndex: state.selectedIndex,
+	};
+}
+
+export function completeResumeBrowserSearch(
+	state: ResumeBrowserState,
+	nextQuery: string,
+	hits: readonly RecentSessionSearchHit[],
+	selectedSessionId: string | null,
+	fallbackIndex: number,
+): ResumeBrowserState {
+	return {
+		...state,
+		query: nextQuery,
+		hits,
+		loading: false,
+		selectedIndex: resolveResumeBrowserSelectedIndex(hits, selectedSessionId, fallbackIndex),
+	};
+}
+
+export function toggleResumeBrowserPreviewState(state: ResumeBrowserState): ResumeBrowserState {
+	return {
+		...state,
+		previewExpanded: !state.previewExpanded,
+	};
+}
+
 export function measureResumeBrowserSelectedLineOffset(state: ResumeBrowserState, now = Date.now()): number {
 	let offset = 4;
 	if (state.loading || state.hits.length === 0) {

@@ -9,12 +9,16 @@ export {
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
 	buildRestoredContextLines,
+	beginResumeBrowserSearch,
+	completeResumeBrowserSearch,
+	createResumeBrowserState,
 	formatResumeBrowserTranscriptBlocks,
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserSelectedIndex,
 	summarizeResumeBrowserHit,
+	toggleResumeBrowserPreviewState,
 } from "./resume-browser.js";
 export {
 	createRpcError,

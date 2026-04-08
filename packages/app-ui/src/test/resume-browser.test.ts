@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+	beginResumeBrowserSearch,
 	buildRestoredContextLines,
+	completeResumeBrowserSearch,
+	createResumeBrowserState,
 	formatResumeBrowserTranscriptBlocks,
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserSelectedIndex,
 	summarizeResumeBrowserHit,
+	toggleResumeBrowserPreviewState,
 } from "../services/resume-browser.js";
 
 describe("resume browser formatter", () => {
@@ -475,5 +479,75 @@ describe("resume browser formatter", () => {
 			summaryVersion: 2,
 		});
 		expect(summarizeResumeBrowserHit(null)).toBeNull();
+	});
+
+	it("builds resume-browser state transitions for open, search, result apply, and preview toggle", () => {
+		const opened = createResumeBrowserState("abc");
+		expect(opened).toEqual({
+			query: "abc",
+			hits: [],
+			selectedIndex: 0,
+			previewExpanded: false,
+			loading: true,
+		});
+
+		const searching = beginResumeBrowserSearch(
+			{ ...opened, loading: false, selectedIndex: 1, previewExpanded: true },
+			"abcd",
+		);
+		expect(searching).toEqual({
+			query: "abcd",
+			hits: [],
+			selectedIndex: 1,
+			previewExpanded: true,
+			loading: true,
+		});
+
+		const hits = [
+			{
+				entry: {
+					title: "first",
+					updatedAt: 1,
+					recoveryData: {
+						sessionId: { value: "session-a" },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+				},
+				headline: "first",
+				snippet: "first",
+				matchSource: "recent" as const,
+			},
+			{
+				entry: {
+					title: "second",
+					updatedAt: 2,
+					recoveryData: {
+						sessionId: { value: "session-b" },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+				},
+				headline: "second",
+				snippet: "second",
+				matchSource: "recent" as const,
+			},
+		];
+
+		const completed = completeResumeBrowserSearch(searching, "abcd", hits, "session-b", 0);
+		expect(completed.selectedIndex).toBe(1);
+		expect(completed.loading).toBe(false);
+		expect(completed.query).toBe("abcd");
+		expect(completed.hits).toEqual(hits);
+
+		expect(toggleResumeBrowserPreviewState(completed).previewExpanded).toBe(false);
 	});
 });

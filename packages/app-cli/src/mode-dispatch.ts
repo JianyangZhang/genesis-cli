@@ -66,7 +66,10 @@ import {
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
+	beginResumeBrowserSearch,
 	createBuiltinCommands,
+	completeResumeBrowserSearch,
+	createResumeBrowserState,
 	createInteractiveLocalCommands,
 	createSlashCommandRegistry,
 	eventToJsonEnvelope,
@@ -79,6 +82,7 @@ import {
 	resolveResumeBrowserSelectedIndex,
 	reduceInteractionState,
 	summarizeResumeBrowserHit,
+	toggleResumeBrowserPreviewState,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
@@ -1248,13 +1252,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private async openResumeBrowser(runtime: AppRuntime, initialQuery: string): Promise<void> {
-		this._resumeBrowser = {
-			query: initialQuery,
-			hits: [],
-			selectedIndex: 0,
-			previewExpanded: false,
-			loading: true,
-		};
+		this._resumeBrowser = createResumeBrowserState(initialQuery);
 		this._detailPanelExpanded = false;
 		this._detailPanelScroll = 0;
 		this._transcriptScrollOffset = 0;
@@ -1308,24 +1306,19 @@ class InteractiveModeHandler implements ModeHandler {
 		const selectedSessionId = browser.hits[browser.selectedIndex]?.entry.recoveryData.sessionId.value ?? null;
 		const requestId = ++this._resumeSearchRequestId;
 		const nextQuery = query;
-		this._resumeBrowser = {
-			...browser,
-			query: nextQuery,
-			loading: true,
-			selectedIndex: browser.selectedIndex,
-		};
+		this._resumeBrowser = beginResumeBrowserSearch(browser, nextQuery);
 		this.rerenderInteractiveRegions();
 		const hits = await runtime.searchRecentSessions(nextQuery);
 		if (this._resumeBrowser === null || requestId !== this._resumeSearchRequestId) {
 			return;
 		}
-		this._resumeBrowser = {
-			...this._resumeBrowser,
-			query: nextQuery,
+		this._resumeBrowser = completeResumeBrowserSearch(
+			this._resumeBrowser,
+			nextQuery,
 			hits,
-			loading: false,
-			selectedIndex: resolveResumeBrowserSelectedIndex(hits, selectedSessionId, browser.selectedIndex),
-		};
+			selectedSessionId,
+			browser.selectedIndex,
+		);
 		if (browser.query !== nextQuery) {
 			this._resumeBrowserScrollOffset = 0;
 		}
@@ -1372,10 +1365,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser === null) {
 			return;
 		}
-		this._resumeBrowser = {
-			...this._resumeBrowser,
-			previewExpanded: !this._resumeBrowser.previewExpanded,
-		};
+		this._resumeBrowser = toggleResumeBrowserPreviewState(this._resumeBrowser);
 		getActiveDebugLogger()?.debug("resume.browser.preview", "Toggled resume browser preview", {
 			previewExpanded: this._resumeBrowser.previewExpanded,
 			selectedIndex: this._resumeBrowser.selectedIndex,
