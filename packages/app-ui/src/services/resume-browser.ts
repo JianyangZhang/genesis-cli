@@ -1,4 +1,4 @@
-import type { RecentSessionMatchSource, RecentSessionSearchHit } from "@pickle-pee/runtime";
+import type { RecentSessionEntry, RecentSessionMatchSource, RecentSessionSearchHit } from "@pickle-pee/runtime";
 import type { ResumeBrowserState } from "../types/index.js";
 
 export function moveResumeBrowserSelection(currentIndex: number, delta: number, total: number): number {
@@ -97,6 +97,20 @@ export function buildResumeBrowserPreviewLines(hit: RecentSessionSearchHit, now 
 	for (const message of metadata?.recentMessages ?? []) {
 		const role = message.role === "user" ? "User" : "Assistant";
 		lines.push(`  ${role}: ${message.text}`);
+	}
+	return lines;
+}
+
+export function buildRestoredContextLines(source: RecentSessionEntry | RecentSessionSearchHit): readonly string[] {
+	const entry = "entry" in source ? source.entry : source;
+	const preview = entry.recoveryData.metadata?.recentMessages ?? [];
+	if (preview.length === 0) {
+		return [];
+	}
+	const lines = ["Restored context:"];
+	for (const item of preview) {
+		const label = item.role === "user" ? "User" : "Assistant";
+		lines.push(`  ${label}: ${truncateResumePreviewText(item.text, 88)}`);
 	}
 	return lines;
 }
@@ -278,4 +292,11 @@ function compactResumeBrowserLine(value: string | null | undefined, maxLength: n
 		return normalized;
 	}
 	return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function truncateResumePreviewText(text: string, maxLength: number): string {
+	if (text.length <= maxLength) {
+		return text;
+	}
+	return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }

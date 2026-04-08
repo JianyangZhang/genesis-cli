@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	buildRestoredContextLines,
 	formatResumeBrowserTranscriptBlocks,
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
@@ -319,5 +320,41 @@ describe("resume browser formatter", () => {
 		expect(moveResumeBrowserSelection(0, -1, 3)).toBe(0);
 		expect(moveResumeBrowserSelection(0, 1, 3)).toBe(1);
 		expect(moveResumeBrowserSelection(2, 1, 3)).toBe(2);
+	});
+
+	it("formats restored context lines from recent messages", () => {
+		const lines = buildRestoredContextLines({
+			entry: {
+				title: "resume target",
+				updatedAt: 1,
+				recoveryData: {
+					sessionId: { value: "session-a" },
+					model: { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" },
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						summary: "goal",
+						firstPrompt: "user prompt",
+						messageCount: 2,
+						fileSizeBytes: 64,
+						recentMessages: [
+							{ role: "user", text: "本地所有修改，commit & push" },
+							{ role: "assistant", text: "我会先检查工作区并整理提交内容。" },
+						],
+					},
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+			},
+			headline: "resume target",
+			snippet: "goal",
+			matchSource: "recent",
+		});
+
+		expect(lines).toEqual([
+			"Restored context:",
+			"  User: 本地所有修改，commit & push",
+			"  Assistant: 我会先检查工作区并整理提交内容。",
+		]);
 	});
 });

@@ -62,6 +62,7 @@ import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } f
 import {
 	ansiShowCursor,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
+	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
@@ -604,7 +605,9 @@ class InteractiveModeHandler implements ModeHandler {
 				const recovered = runtime.recoverSession(data);
 				switchInteractiveSession(recovered);
 				handler.closeResumeBrowser();
-				writeSessionTranscriptPreview(ctx.output, directMatch);
+				for (const line of buildRestoredContextLines(directMatch)) {
+					ctx.output.writeLine(line);
+				}
 				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
 				ctx.output.writeLine("Next: continue this session, or /resume to view history again.");
 				return undefined;
@@ -1412,7 +1415,9 @@ class InteractiveModeHandler implements ModeHandler {
 		await sessionRef.current.close();
 		const recovered = runtime.recoverSession(data);
 		switchInteractiveSession(recovered);
-		writeSessionTranscriptPreview(sink, hit.entry);
+		for (const line of buildRestoredContextLines(hit)) {
+			sink.writeLine(line);
+		}
 		sink.writeLine(`Resumed: ${data.sessionId.value}`);
 		sink.writeLine("Next: continue this session, or /resume to view history again.");
 		return true;
@@ -2807,16 +2812,6 @@ function resolveRecentSessionDirectSelection(
 	const prefixMatches = allRecentEntries.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
 	if (prefixMatches.length === 1) return prefixMatches[0]!;
 	return null;
-}
-
-function writeSessionTranscriptPreview(output: OutputSink, entry: RecentSessionEntry): void {
-	const preview = entry.recoveryData.metadata?.recentMessages ?? [];
-	if (preview.length === 0) return;
-	output.writeLine("Restored context:");
-	for (const item of preview) {
-		const label = item.role === "user" ? "User" : "Assistant";
-		output.writeLine(`  ${label}: ${truncatePlainTerminalText(item.text, 88)}`);
-	}
 }
 
 function resolveResumeBrowserSelectedIndex(

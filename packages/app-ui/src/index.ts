@@ -48,6 +48,7 @@ export {
 // Services (formatters + interaction state)
 export {
 	buildInteractiveFooterLeadingLines,
+	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
