@@ -66,6 +66,7 @@ import {
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
+	buildResumeBrowserResumedLines,
 	beginResumeBrowserSearch,
 	createBuiltinCommands,
 	completeResumeBrowserSearch,
@@ -80,6 +81,7 @@ import {
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserSelectedIndex,
+	resolveResumeBrowserSubmitHit,
 	reduceInteractionState,
 	summarizeResumeBrowserHit,
 	toggleResumeBrowserPreviewState,
@@ -1394,7 +1396,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser.loading) {
 			return true;
 		}
-		const hit = this._resumeBrowser.hits[this._resumeBrowser.selectedIndex] ?? this._resumeBrowser.hits[0] ?? null;
+		const hit = resolveResumeBrowserSubmitHit(this._resumeBrowser);
 		if (!hit) {
 			return true;
 		}
@@ -1408,11 +1410,9 @@ class InteractiveModeHandler implements ModeHandler {
 		await sessionRef.current.close();
 		const recovered = runtime.recoverSession(data);
 		switchInteractiveSession(recovered);
-		for (const line of buildRestoredContextLines(hit)) {
+		for (const line of buildResumeBrowserResumedLines(hit)) {
 			sink.writeLine(line);
 		}
-		sink.writeLine(`Resumed: ${data.sessionId.value}`);
-		sink.writeLine("Next: continue this session, or /resume to view history again.");
 		return true;
 	}
 

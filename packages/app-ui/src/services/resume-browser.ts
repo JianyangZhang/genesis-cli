@@ -208,6 +208,22 @@ export function summarizeResumeBrowserHit(hit: RecentSessionSearchHit | null | u
 	};
 }
 
+export function resolveResumeBrowserSubmitHit(state: ResumeBrowserState): RecentSessionSearchHit | null {
+	if (state.loading) {
+		return null;
+	}
+	return state.hits[state.selectedIndex] ?? state.hits[0] ?? null;
+}
+
+export function buildResumeBrowserResumedLines(hit: RecentSessionSearchHit): readonly string[] {
+	const data = hit.entry.recoveryData;
+	return [
+		...buildRestoredContextLines(hit),
+		`Resumed: ${data.sessionId.value}`,
+		"Next: continue this session, or /resume to view history again.",
+	];
+}
+
 function buildResumeBrowserHitLines(
 	hit: RecentSessionSearchHit,
 	options: { readonly selected: boolean; readonly now: number; readonly query: string },

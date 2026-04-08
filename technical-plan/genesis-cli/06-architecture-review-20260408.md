@@ -706,9 +706,10 @@
   - [x] P1-2.c：`/resume` direct-selection 解析迁到 `app-ui`
   - [x] P1-2.d：`/resume` browser 选中索引恢复与调试摘要 helper 迁到 `app-ui`
   - [x] P1-2.e：`/resume` browser 打开/搜索/预览切换状态变换迁到 `app-ui`
+  - [x] P1-2.f：`/resume` submit 命中解析与恢复后提示文案迁到 `app-ui`
   未完成子项：
-  - [ ] P1-2.f：`/resume` 宿主专属控制流进一步收口
-  - [ ] P1-2.g：其余 interactive 宿主专属能力与统一平台边界继续清理
+  - [ ] P1-2.g：`/resume` 宿主专属控制流进一步收口
+  - [ ] P1-2.h：其余 interactive 宿主专属能力与统一平台边界继续清理
 - [ ] P1-3：整理 bootstrap / config / session-init 契约
   进行中说明：相关配置与模型信息展示已部分收口，但 bootstrap / session-init 契约层还未系统整理。
 - [x] P1-4：建立 `pi-mono` 内化清单与 sync 策略

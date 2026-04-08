@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	beginResumeBrowserSearch,
 	buildRestoredContextLines,
+	buildResumeBrowserResumedLines,
 	completeResumeBrowserSearch,
 	createResumeBrowserState,
 	formatResumeBrowserTranscriptBlocks,
@@ -9,6 +10,7 @@ import {
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserSelectedIndex,
+	resolveResumeBrowserSubmitHit,
 	summarizeResumeBrowserHit,
 	toggleResumeBrowserPreviewState,
 } from "../services/resume-browser.js";
@@ -549,5 +551,58 @@ describe("resume browser formatter", () => {
 		expect(completed.hits).toEqual(hits);
 
 		expect(toggleResumeBrowserPreviewState(completed).previewExpanded).toBe(false);
+	});
+
+	it("resolves resume-browser submit hit and formats resumed output lines", () => {
+		const hit = {
+			entry: {
+				title: "resume target",
+				updatedAt: 1,
+				recoveryData: {
+					sessionId: { value: "session-resume" },
+					model: { id: "glm-5.1", provider: "zai" },
+					toolSet: [],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						messageCount: 2,
+						fileSizeBytes: 64,
+						recentMessages: [
+							{ role: "user", text: "继续推进 /resume" },
+							{ role: "assistant", text: "我会先恢复上下文。" },
+						],
+					},
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+			},
+			headline: "resume target",
+			snippet: "resume target",
+			matchSource: "recent" as const,
+		};
+		expect(
+			resolveResumeBrowserSubmitHit({
+				query: "",
+				hits: [hit],
+				selectedIndex: 0,
+				previewExpanded: false,
+				loading: true,
+			}),
+		).toBeNull();
+		expect(
+			resolveResumeBrowserSubmitHit({
+				query: "",
+				hits: [hit],
+				selectedIndex: 0,
+				previewExpanded: false,
+				loading: false,
+			}),
+		).toEqual(hit);
+		expect(buildResumeBrowserResumedLines(hit)).toEqual([
+			"Restored context:",
+			"  User: 继续推进 /resume",
+			"  Assistant: 我会先恢复上下文。",
+			"Resumed: session-resume",
+			"Next: continue this session, or /resume to view history again.",
+		]);
 	});
 });

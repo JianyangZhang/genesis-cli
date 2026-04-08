@@ -9,6 +9,7 @@ export {
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
 	buildRestoredContextLines,
+	buildResumeBrowserResumedLines,
 	beginResumeBrowserSearch,
 	completeResumeBrowserSearch,
 	createResumeBrowserState,
@@ -17,6 +18,7 @@ export {
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserSelectedIndex,
+	resolveResumeBrowserSubmitHit,
 	summarizeResumeBrowserHit,
 	toggleResumeBrowserPreviewState,
 } from "./resume-browser.js";
