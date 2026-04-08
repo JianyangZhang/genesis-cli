@@ -508,24 +508,14 @@ class InteractiveModeHandler implements ModeHandler {
 				snapshot: await inspectGitWorkingTree(sessionRef.current.context.workingDirectory),
 			}),
 			getGitDiff: async (target) => readGitDiff(sessionRef.current.context.workingDirectory, target),
-		})) {
-			register(cmd);
-		}
-
-		register({
-			name: "doctor",
-			description: "Diagnose OpenAI-compatible mainline",
-			type: "local",
-			visibility: "internal",
-			async execute(ctx) {
+			getDoctorSnapshot: async (ctx) => {
 				const agentDir = resolveAgentDir();
 				const modelsPath = join(agentDir, "models.json");
 				let raw = "";
 				try {
 					raw = await readFile(modelsPath, "utf8");
 				} catch {
-					ctx.output.writeError("models.json not found.");
-					return undefined;
+					return null;
 				}
 				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
 				const providerKey = ctx.session.state.model.provider;
@@ -534,15 +524,16 @@ class InteractiveModeHandler implements ModeHandler {
 				const api = typeof provider?.api === "string" ? provider.api : "";
 				const apiKeyEnv = typeof provider?.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
 				const apiKey = process.env[apiKeyEnv];
-
-				ctx.output.writeLine(`provider: ${providerKey}`);
-				ctx.output.writeLine(`  api: ${api || "(missing)"}`);
-				ctx.output.writeLine(`  baseUrl: ${baseUrl || "(missing)"}`);
-				ctx.output.writeLine(`  apiKey env: ${apiKeyEnv} (${apiKey ? "set" : "missing"})`);
+				const snapshot = {
+					providerKey,
+					api,
+					baseUrl,
+					apiKeyEnv,
+					apiKeyPresent: Boolean(apiKey),
+				};
 				if (!apiKey || !baseUrl || api !== "openai-completions") {
-					return undefined;
+					return snapshot;
 				}
-
 				const controller = new AbortController();
 				const timeout = setTimeout(() => controller.abort(), 3000);
 				try {
@@ -562,24 +553,25 @@ class InteractiveModeHandler implements ModeHandler {
 							signal: controller.signal,
 						},
 					);
-					ctx.output.writeLine(`  http: ${response.status}`);
 					if (!response.ok) {
-						ctx.output.writeError(await response.text());
-						return undefined;
+						return { ...snapshot, httpStatus: response.status, errorText: await response.text() };
 					}
 					const payload = (await response.json()) as any;
 					const text = payload?.choices?.[0]?.message?.content;
-					if (typeof text === "string") {
-						ctx.output.writeLine(`  response: ${text.trim()}`);
-					}
+					return {
+						...snapshot,
+						httpStatus: response.status,
+						responseText: typeof text === "string" ? text.trim() : null,
+					};
 				} catch (err) {
-					ctx.output.writeError(`  error: ${err instanceof Error ? err.message : String(err)}`);
+					return { ...snapshot, errorText: `  error: ${err instanceof Error ? err.message : String(err)}` };
 				} finally {
 					clearTimeout(timeout);
 				}
-				return undefined;
 			},
-		});
+		})) {
+			register(cmd);
+		}
 
 		register({
 			name: "resume",

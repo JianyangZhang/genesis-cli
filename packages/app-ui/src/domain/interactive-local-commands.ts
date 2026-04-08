@@ -57,6 +57,17 @@ export type InteractiveGitDiffSnapshot =
 			readonly type: "error";
 	  };
 
+export interface InteractiveDoctorSnapshot {
+	readonly providerKey: string;
+	readonly api: string;
+	readonly baseUrl: string;
+	readonly apiKeyEnv: string;
+	readonly apiKeyPresent: boolean;
+	readonly httpStatus?: number;
+	readonly responseText?: string | null;
+	readonly errorText?: string | null;
+}
+
 export interface InteractiveLocalCommandDeps {
 	readonly registry: SlashCommandRegistry;
 	readonly getCurrentSession: () => SessionFacade;
@@ -78,6 +89,7 @@ export interface InteractiveLocalCommandDeps {
 		readonly snapshot: InteractiveGitWorkingTreeSnapshot;
 	}>;
 	readonly getGitDiff: (target: string | null) => Promise<InteractiveGitDiffSnapshot>;
+	readonly getDoctorSnapshot: (ctx: SlashCommandContext) => Promise<InteractiveDoctorSnapshot | null>;
 }
 
 export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps): SlashCommand[] {
@@ -90,6 +102,7 @@ export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps
 		createChangesCommand(deps),
 		createReviewCommand(deps),
 		createDiffCommand(deps),
+		createDoctorCommand(deps),
 		createExitCommand("exit", "Exit the interactive session", deps),
 		createExitCommand("quit", "Exit the interactive session (alias of /exit)", deps),
 		createClearCommand(deps),
@@ -360,6 +373,40 @@ function createDiffCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 			}
 			ctx.output.writeLine(diff.stdout.trimEnd().length > 0 ? diff.stdout.trimEnd() : "(no diff)");
 			ctx.output.writeLine("Next: /review to see a summary, or keep iterating.");
+			return undefined;
+		},
+	};
+}
+
+function createDoctorCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
+	return {
+		name: "doctor",
+		description: "Diagnose OpenAI-compatible mainline",
+		type: "local",
+		visibility: "internal",
+		async execute(ctx: SlashCommandContext): Promise<undefined> {
+			const snapshot = await deps.getDoctorSnapshot(ctx);
+			if (!snapshot) {
+				ctx.output.writeError("models.json not found.");
+				return undefined;
+			}
+			ctx.output.writeLine(`provider: ${snapshot.providerKey}`);
+			ctx.output.writeLine(`  api: ${snapshot.api || "(missing)"}`);
+			ctx.output.writeLine(`  baseUrl: ${snapshot.baseUrl || "(missing)"}`);
+			ctx.output.writeLine(`  apiKey env: ${snapshot.apiKeyEnv} (${snapshot.apiKeyPresent ? "set" : "missing"})`);
+			if (!snapshot.apiKeyPresent || !snapshot.baseUrl || snapshot.api !== "openai-completions") {
+				return undefined;
+			}
+			if (typeof snapshot.httpStatus === "number") {
+				ctx.output.writeLine(`  http: ${snapshot.httpStatus}`);
+			}
+			if (snapshot.errorText) {
+				ctx.output.writeError(snapshot.errorText);
+				return undefined;
+			}
+			if (snapshot.responseText) {
+				ctx.output.writeLine(`  response: ${snapshot.responseText}`);
+			}
 			return undefined;
 		},
 	};

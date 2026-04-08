@@ -134,6 +134,7 @@ describe("createInteractiveLocalCommands", () => {
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 
 		expect(cmds.map((cmd) => cmd.name).sort()).toEqual([
@@ -141,6 +142,7 @@ describe("createInteractiveLocalCommands", () => {
 			"clear",
 			"config",
 			"diff",
+			"doctor",
 			"exit",
 			"help",
 			"quit",
@@ -180,6 +182,7 @@ describe("createInteractiveLocalCommands", () => {
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -229,6 +232,8 @@ describe("createInteractiveLocalCommands", () => {
 					diffStatLines: ["src/main.ts | 2 +-"],
 				},
 			}),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -272,6 +277,8 @@ describe("createInteractiveLocalCommands", () => {
 					diffStatLines: ["src/main.ts | 2 +-"],
 				},
 			}),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -312,6 +319,8 @@ describe("createInteractiveLocalCommands", () => {
 					diffStatLines: [],
 				},
 			}),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -348,6 +357,7 @@ describe("createInteractiveLocalCommands", () => {
 				type: "ok",
 				stdout: "--- a/notes.txt\n+++ b/notes.txt\n@@\n-hello\n+hello changed\n",
 			}),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -356,6 +366,50 @@ describe("createInteractiveLocalCommands", () => {
 		expect(output.lines).toContain("Diff: notes.txt");
 		expect(output.lines).toContain("--- a/notes.txt\n+++ b/notes.txt\n@@\n-hello\n+hello changed");
 		expect(output.lines).toContain("Next: /review to see a summary, or keep iterating.");
+	});
+
+	it("/doctor renders provider configuration and probe results", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 0,
+			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => ({
+				providerKey: "zai",
+				api: "openai-completions",
+				baseUrl: "https://api.example.com",
+				apiKeyEnv: "GENESIS_API_KEY",
+				apiKeyPresent: true,
+				httpStatus: 200,
+				responseText: "DOCTOR_OK",
+			}),
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "doctor")!.execute!(createContext(session, runtime, output));
+
+		expect(output.lines).toContain("provider: zai");
+		expect(output.lines).toContain("  api: openai-completions");
+		expect(output.lines).toContain("  baseUrl: https://api.example.com");
+		expect(output.lines).toContain("  apiKey env: GENESIS_API_KEY (set)");
+		expect(output.lines).toContain("  http: 200");
+		expect(output.lines).toContain("  response: DOCTOR_OK");
 	});
 
 	it("/usage renders audit summary and recent entries", async () => {
@@ -387,6 +441,9 @@ describe("createInteractiveLocalCommands", () => {
 				],
 			}),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -444,6 +501,9 @@ describe("createInteractiveLocalCommands", () => {
 					reasoning: true,
 				},
 			}),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -489,6 +549,7 @@ describe("createInteractiveLocalCommands", () => {
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -519,6 +580,8 @@ describe("createInteractiveLocalCommands", () => {
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -560,6 +623,7 @@ describe("createInteractiveLocalCommands", () => {
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -595,6 +659,7 @@ describe("createInteractiveLocalCommands", () => {
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -626,6 +691,7 @@ describe("createInteractiveLocalCommands", () => {
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 
@@ -661,6 +727,7 @@ describe("createInteractiveLocalCommands", () => {
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
+			getDoctorSnapshot: async () => null,
 		});
 		const output = createMockOutputSink();
 		const runtime = createMockRuntimeWithSessions([nextSession]);
