@@ -696,7 +696,7 @@
 - [ ] P1-1：统一命令平台
 - [ ] P1-2：把 interactive 体验语义继续从 `app-cli` 回收到 `app-ui`
 - [ ] P1-3：整理 bootstrap / config / session-init 契约
-- [ ] P1-4：建立 `pi-mono` 内化清单与 sync 策略
+- [x] P1-4：建立 `pi-mono` 内化清单与 sync 策略
 
 ### 9.3 P2
 

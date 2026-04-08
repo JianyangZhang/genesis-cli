@@ -133,12 +133,14 @@ describe("createInteractiveLocalCommands", () => {
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 		});
 
 		expect(cmds.map((cmd) => cmd.name).sort()).toEqual([
 			"changes",
 			"clear",
 			"config",
+			"diff",
 			"exit",
 			"help",
 			"quit",
@@ -177,6 +179,7 @@ describe("createInteractiveLocalCommands", () => {
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 		});
 		const output = createMockOutputSink();
 
@@ -320,6 +323,41 @@ describe("createInteractiveLocalCommands", () => {
 		]);
 	});
 
+	it("/diff renders a file-scoped patch and next step guidance", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 1,
+			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({
+				type: "ok",
+				stdout: "--- a/notes.txt\n+++ b/notes.txt\n@@\n-hello\n+hello changed\n",
+			}),
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "diff")!.execute!(createContext(session, runtime, output, "notes.txt"));
+
+		expect(output.lines).toContain("Diff: notes.txt");
+		expect(output.lines).toContain("--- a/notes.txt\n+++ b/notes.txt\n@@\n-hello\n+hello changed");
+		expect(output.lines).toContain("Next: /review to see a summary, or keep iterating.");
+	});
+
 	it("/usage renders audit summary and recent entries", async () => {
 		const session = createMockSession();
 		const runtime = createMockRuntime(session);
@@ -450,6 +488,7 @@ describe("createInteractiveLocalCommands", () => {
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 		});
 		const output = createMockOutputSink();
 
@@ -491,7 +530,7 @@ describe("createInteractiveLocalCommands", () => {
 		await cmds.find((cmd) => cmd.name === "help")!.execute!(createContext(session, runtime, output));
 
 		expect(output.lines).toContain("Commands:");
-		expect(output.lines).toContain("\nLocal (7):");
+		expect(output.lines).toContain("\nLocal (8):");
 		expect(output.lines).toContain("\nPrompt (1):");
 		expect(output.lines).toContain("\nUI (1):");
 		expect(output.lines).toContain("  /help — Show available commands");
@@ -520,6 +559,7 @@ describe("createInteractiveLocalCommands", () => {
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -554,6 +594,7 @@ describe("createInteractiveLocalCommands", () => {
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 		});
 		const output = createMockOutputSink();
 
@@ -584,6 +625,7 @@ describe("createInteractiveLocalCommands", () => {
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 		});
 		const output = createMockOutputSink();
 
@@ -618,6 +660,7 @@ describe("createInteractiveLocalCommands", () => {
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
 			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 		});
 		const output = createMockOutputSink();
 		const runtime = createMockRuntimeWithSessions([nextSession]);

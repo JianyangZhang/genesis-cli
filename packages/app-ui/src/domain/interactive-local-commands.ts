@@ -48,6 +48,15 @@ export interface InteractiveGitWorkingTreeSnapshot {
 	readonly diffStatLines: readonly string[];
 }
 
+export type InteractiveGitDiffSnapshot =
+	| {
+			readonly type: "ok";
+			readonly stdout: string;
+	  }
+	| {
+			readonly type: "error";
+	  };
+
 export interface InteractiveLocalCommandDeps {
 	readonly registry: SlashCommandRegistry;
 	readonly getCurrentSession: () => SessionFacade;
@@ -68,6 +77,7 @@ export interface InteractiveLocalCommandDeps {
 		readonly changedPaths: readonly string[];
 		readonly snapshot: InteractiveGitWorkingTreeSnapshot;
 	}>;
+	readonly getGitDiff: (target: string | null) => Promise<InteractiveGitDiffSnapshot>;
 }
 
 export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps): SlashCommand[] {
@@ -79,6 +89,7 @@ export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps
 		createConfigCommand(deps),
 		createChangesCommand(deps),
 		createReviewCommand(deps),
+		createDiffCommand(deps),
 		createExitCommand("exit", "Exit the interactive session", deps),
 		createExitCommand("quit", "Exit the interactive session (alias of /exit)", deps),
 		createClearCommand(deps),
@@ -328,6 +339,27 @@ function createReviewCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 			ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
 			ctx.output.writeLine("  Use git manually if you want to discard changes");
 			ctx.output.writeLine("Next: inspect diffs, then continue chatting.");
+			return undefined;
+		},
+	};
+}
+
+function createDiffCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
+	return {
+		name: "diff",
+		description: "Show git diff (optionally for a file)",
+		type: "local",
+		visibility: "public",
+		async execute(ctx: SlashCommandContext): Promise<undefined> {
+			const target = ctx.args.trim();
+			ctx.output.writeLine(target.length === 0 ? "Diff:" : `Diff: ${target}`);
+			const diff = await deps.getGitDiff(target.length > 0 ? target : null);
+			if (diff.type === "error") {
+				ctx.output.writeError("git not available in this working directory.");
+				return undefined;
+			}
+			ctx.output.writeLine(diff.stdout.trimEnd().length > 0 ? diff.stdout.trimEnd() : "(no diff)");
+			ctx.output.writeLine("Next: /review to see a summary, or keep iterating.");
 			return undefined;
 		},
 	};

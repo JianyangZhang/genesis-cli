@@ -507,33 +507,10 @@ class InteractiveModeHandler implements ModeHandler {
 				changedPaths: [...handler._changedPaths],
 				snapshot: await inspectGitWorkingTree(sessionRef.current.context.workingDirectory),
 			}),
+			getGitDiff: async (target) => readGitDiff(sessionRef.current.context.workingDirectory, target),
 		})) {
 			register(cmd);
 		}
-
-		register({
-			name: "diff",
-			description: "Show git diff (optionally for a file)",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				const cwd = ctx.session.context.workingDirectory;
-				const target = ctx.args.trim();
-				if (target.length === 0) {
-					ctx.output.writeLine("Diff:");
-				} else {
-					ctx.output.writeLine(`Diff: ${target}`);
-				}
-				const diff = await readGitDiff(cwd, target.length > 0 ? target : null);
-				if (diff.type === "error") {
-					ctx.output.writeError("git not available in this working directory.");
-					return undefined;
-				}
-				ctx.output.writeLine(diff.stdout.trimEnd().length > 0 ? diff.stdout.trimEnd() : "(no diff)");
-				ctx.output.writeLine("Next: /review to see a summary, or keep iterating.");
-				return undefined;
-			},
-		});
 
 		register({
 			name: "doctor",
