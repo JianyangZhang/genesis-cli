@@ -132,9 +132,11 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 		});
 
 		expect(cmds.map((cmd) => cmd.name).sort()).toEqual([
+			"changes",
 			"clear",
 			"config",
 			"exit",
@@ -173,6 +175,7 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 		});
 		const output = createMockOutputSink();
 
@@ -192,6 +195,49 @@ describe("createInteractiveLocalCommands", () => {
 		expect(output.lines).toContain("  Changed files: 3");
 		expect(output.lines).toContain("Next:");
 		expect(output.lines).toContain("  /review to inspect changes, or /diff <file>");
+	});
+
+	it("/changes renders the shared working-tree summary and next steps", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+			getAgentDir: () => "/agent",
+			getInteractionPhase: () => "idle",
+			getLastError: () => null,
+			getChangedFileCount: () => 1,
+			getPendingPermissionCallId: () => null,
+			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
+			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: ["src/main.ts"],
+				snapshot: {
+					available: true,
+					statusLines: ["M src/main.ts"],
+					diffStatLines: ["src/main.ts | 2 +-"],
+				},
+			}),
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "changes")!.execute!(createContext(session, runtime, output));
+
+		expect(output.lines).toContain("Working tree:");
+		expect(output.lines).toContain("Changed files (observed by tools):");
+		expect(output.lines).toContain("  src/main.ts");
+		expect(output.lines).toContain("git status --porcelain:");
+		expect(output.lines).toContain("  M src/main.ts");
+		expect(output.lines).toContain("git diff --stat:");
+		expect(output.lines).toContain("  src/main.ts | 2 +-");
+		expect(output.lines).toContain("Next: /review to inspect, or /diff [file] to see patches.");
 	});
 
 	it("/usage renders audit summary and recent entries", async () => {
@@ -323,6 +369,7 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 		});
 		const output = createMockOutputSink();
 
@@ -352,6 +399,7 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -363,7 +411,7 @@ describe("createInteractiveLocalCommands", () => {
 		await cmds.find((cmd) => cmd.name === "help")!.execute!(createContext(session, runtime, output));
 
 		expect(output.lines).toContain("Commands:");
-		expect(output.lines).toContain("\nLocal (5):");
+		expect(output.lines).toContain("\nLocal (6):");
 		expect(output.lines).toContain("\nPrompt (1):");
 		expect(output.lines).toContain("\nUI (1):");
 		expect(output.lines).toContain("  /help — Show available commands");
@@ -391,6 +439,7 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -424,6 +473,7 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 		});
 		const output = createMockOutputSink();
 
@@ -453,6 +503,7 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 		});
 		const output = createMockOutputSink();
 
@@ -486,6 +537,7 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
+			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
 		});
 		const output = createMockOutputSink();
 		const runtime = createMockRuntimeWithSessions([nextSession]);

@@ -42,6 +42,12 @@ export interface InteractiveConfigSnapshot {
 	readonly modelError?: string | null;
 }
 
+export interface InteractiveGitWorkingTreeSnapshot {
+	readonly available: boolean;
+	readonly statusLines: readonly string[];
+	readonly diffStatLines: readonly string[];
+}
+
 export interface InteractiveLocalCommandDeps {
 	readonly registry: SlashCommandRegistry;
 	readonly getCurrentSession: () => SessionFacade;
@@ -58,6 +64,10 @@ export interface InteractiveLocalCommandDeps {
 	readonly getPendingPermissionCallId: () => string | null;
 	readonly getToolUsageSummary: () => InteractiveToolUsageSummary;
 	readonly getConfigSnapshot: (ctx: SlashCommandContext) => Promise<InteractiveConfigSnapshot>;
+	readonly getWorkingTreeSummary: () => Promise<{
+		readonly changedPaths: readonly string[];
+		readonly snapshot: InteractiveGitWorkingTreeSnapshot;
+	}>;
 }
 
 export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps): SlashCommand[] {
@@ -67,6 +77,7 @@ export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps
 		createStatusCommand(deps),
 		createUsageCommand(deps),
 		createConfigCommand(deps),
+		createChangesCommand(deps),
 		createExitCommand("exit", "Exit the interactive session", deps),
 		createExitCommand("quit", "Exit the interactive session (alias of /exit)", deps),
 		createClearCommand(deps),
@@ -274,6 +285,25 @@ function createConfigCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 	};
 }
 
+function createChangesCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
+	return {
+		name: "changes",
+		description: "Show changed files and diff summary",
+		type: "local",
+		visibility: "public",
+		async execute(ctx: SlashCommandContext): Promise<undefined> {
+			const summary = await deps.getWorkingTreeSummary();
+			renderWorkingTreeSummary(ctx.output, summary.changedPaths, summary.snapshot);
+			if (summary.snapshot.available === false) {
+				ctx.output.writeError("git not available in this working directory.");
+				return undefined;
+			}
+			ctx.output.writeLine("Next: /review to inspect, or /diff [file] to see patches.");
+			return undefined;
+		},
+	};
+}
+
 function createClearCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 	return {
 		name: "clear",
@@ -300,6 +330,31 @@ function createClearCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 			return undefined;
 		},
 	};
+}
+
+export function renderWorkingTreeSummary(
+	output: SlashCommandContext["output"],
+	changedPaths: readonly string[],
+	snapshot: InteractiveGitWorkingTreeSnapshot,
+): void {
+	output.writeLine("Working tree:");
+	if (changedPaths.length > 0) {
+		output.writeLine("Changed files (observed by tools):");
+		for (const path of [...changedPaths].sort((a, b) => a.localeCompare(b))) {
+			output.writeLine(`  ${path}`);
+		}
+	} else {
+		output.writeLine("Changed files (observed by tools): none");
+	}
+	if (!snapshot.available) {
+		return;
+	}
+	output.writeLine("git status --porcelain:");
+	output.writeLine(snapshot.statusLines.length > 0 ? `  ${snapshot.statusLines.join("\n  ")}` : "  clean");
+	if (snapshot.diffStatLines.length > 0) {
+		output.writeLine("git diff --stat:");
+		output.writeLine(`  ${snapshot.diffStatLines.join("\n  ")}`);
+	}
 }
 
 function renderHelpGroup(ctx: SlashCommandContext, label: string, commands: readonly SlashCommand[]): void {

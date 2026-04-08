@@ -42,6 +42,7 @@ export type {
 export {
 	createBuiltinCommands,
 	createInteractiveLocalCommands,
+	renderWorkingTreeSummary,
 	createSlashCommandRegistry,
 } from "./domain/index.js";
 // Services (formatters + interaction state)

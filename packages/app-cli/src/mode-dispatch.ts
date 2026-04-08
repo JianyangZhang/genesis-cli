@@ -75,6 +75,7 @@ import {
 	initialInteractionState,
 	moveResumeBrowserSelection,
 	reduceInteractionState,
+	renderWorkingTreeSummary as renderWorkingTreeSummaryFromUi,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
@@ -503,28 +504,13 @@ class InteractiveModeHandler implements ModeHandler {
 					modelError: active ? null : `Model not configured: ${ctx.session.state.model.id}`,
 				};
 			},
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [...handler._changedPaths],
+				snapshot: await inspectGitWorkingTree(sessionRef.current.context.workingDirectory),
+			}),
 		})) {
 			register(cmd);
 		}
-
-		register({
-			name: "changes",
-			description: "Show changed files and diff summary",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				const cwd = ctx.session.context.workingDirectory;
-				const snapshot = await inspectGitWorkingTree(cwd);
-				renderWorkingTreeSummary(ctx.output, handler._changedPaths, snapshot);
-				if (snapshot.available === false) {
-					ctx.output.writeError("git not available in this working directory.");
-					ctx.output.writeLine("Next: use /review to inspect tool-observed changes.");
-					return undefined;
-				}
-				ctx.output.writeLine("Next: /review to inspect, or /diff [file] to see patches.");
-				return undefined;
-			},
-		});
 
 		register({
 			name: "diff",
@@ -563,7 +549,7 @@ class InteractiveModeHandler implements ModeHandler {
 					ctx.output.writeLine("Next: continue chatting, or /changes if you want a snapshot.");
 					return undefined;
 				}
-				renderWorkingTreeSummary(ctx.output, handler._changedPaths, snapshot);
+				renderWorkingTreeSummaryFromUi(ctx.output, [...handler._changedPaths], snapshot);
 				if (snapshot.available === false) {
 					ctx.output.writeError("git not available in this working directory.");
 					ctx.output.writeLine("Next: continue chatting, or inspect tool-observed changes manually.");
@@ -2376,31 +2362,6 @@ async function inspectGitWorkingTree(cwd: string): Promise<GitWorkingTreeSnapsho
 		statusLines: splitNonEmptyLines(status.stdout),
 		diffStatLines: splitNonEmptyLines(diffStat.stdout),
 	};
-}
-
-function renderWorkingTreeSummary(
-	output: OutputSink,
-	changedPaths: ReadonlySet<string>,
-	snapshot: GitWorkingTreeSnapshot,
-): void {
-	output.writeLine("Working tree:");
-	if (changedPaths.size > 0) {
-		output.writeLine("Changed files (observed by tools):");
-		for (const path of [...changedPaths].sort((a, b) => a.localeCompare(b))) {
-			output.writeLine(`  ${path}`);
-		}
-	} else {
-		output.writeLine("Changed files (observed by tools): none");
-	}
-	if (!snapshot.available) {
-		return;
-	}
-	output.writeLine("git status --porcelain:");
-	output.writeLine(snapshot.statusLines.length > 0 ? `  ${snapshot.statusLines.join("\n  ")}` : "  clean");
-	if (snapshot.diffStatLines.length > 0) {
-		output.writeLine("git diff --stat:");
-		output.writeLine(`  ${snapshot.diffStatLines.join("\n  ")}`);
-	}
 }
 
 function readGitDiff(

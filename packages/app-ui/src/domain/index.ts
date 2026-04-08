@@ -10,6 +10,6 @@ export type {
 } from "../types/index.js";
 export { createBuiltinCommands } from "./builtin-commands.js";
 export type { InteractiveLocalCommandDeps } from "./interactive-local-commands.js";
-export { createInteractiveLocalCommands } from "./interactive-local-commands.js";
+export { createInteractiveLocalCommands, renderWorkingTreeSummary } from "./interactive-local-commands.js";
 export type { SlashCommandRegistry, SlashCommandResolution } from "./slash-command-registry.js";
 export { createSlashCommandRegistry } from "./slash-command-registry.js";
