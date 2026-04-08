@@ -75,6 +75,7 @@ import {
 	formatTurnNotice as formatTurnNoticeFromUi,
 	initialInteractionState,
 	moveResumeBrowserSelection,
+	resolveRecentSessionDirectSelection,
 	reduceInteractionState,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
@@ -2793,25 +2794,6 @@ function transcriptScrollDeltaForKey(
 		default:
 			return 0;
 	}
-}
-
-function resolveRecentSessionDirectSelection(
-	selector: string,
-	displayedEntries: readonly RecentSessionEntry[],
-	allRecentEntries: readonly RecentSessionEntry[],
-): RecentSessionEntry | null {
-	const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
-	const idx = Number.parseInt(idxText, 10);
-	if (Number.isFinite(idx) && idx >= 1 && idx <= displayedEntries.length) {
-		return displayedEntries[idx - 1] ?? null;
-	}
-
-	const exact = allRecentEntries.find((entry) => entry.recoveryData.sessionId.value === selector) ?? null;
-	if (exact) return exact;
-
-	const prefixMatches = allRecentEntries.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
-	if (prefixMatches.length === 1) return prefixMatches[0]!;
-	return null;
 }
 
 function resolveResumeBrowserSelectedIndex(

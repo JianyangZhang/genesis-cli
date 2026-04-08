@@ -68,6 +68,7 @@ export {
 	parseRpcRequest,
 	RPC_ERRORS,
 	RPC_METHODS,
+	resolveRecentSessionDirectSelection,
 	reduceInteractionState,
 	sanitizeForJson,
 } from "./services/index.js";

@@ -115,6 +115,26 @@ export function buildRestoredContextLines(source: RecentSessionEntry | RecentSes
 	return lines;
 }
 
+export function resolveRecentSessionDirectSelection(
+	selector: string,
+	displayedEntries: readonly RecentSessionEntry[],
+	allRecentEntries: readonly RecentSessionEntry[],
+): RecentSessionEntry | null {
+	const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
+	const idx = Number.parseInt(idxText, 10);
+	if (Number.isFinite(idx) && idx >= 1 && idx <= displayedEntries.length) {
+		return displayedEntries[idx - 1] ?? null;
+	}
+
+	const exact = allRecentEntries.find((entry) => entry.recoveryData.sessionId.value === selector) ?? null;
+	if (exact) {
+		return exact;
+	}
+
+	const prefixMatches = allRecentEntries.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
+	return prefixMatches.length === 1 ? (prefixMatches[0] ?? null) : null;
+}
+
 function buildResumeBrowserHitLines(
 	hit: RecentSessionSearchHit,
 	options: { readonly selected: boolean; readonly now: number; readonly query: string },

@@ -4,6 +4,7 @@ import {
 	formatResumeBrowserTranscriptBlocks,
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
+	resolveRecentSessionDirectSelection,
 } from "../services/resume-browser.js";
 
 describe("resume browser formatter", () => {
@@ -356,5 +357,40 @@ describe("resume browser formatter", () => {
 			"  User: 本地所有修改，commit & push",
 			"  Assistant: 我会先检查工作区并整理提交内容。",
 		]);
+	});
+
+	it("resolves direct recent-session selections by index, exact id, and unique prefix", () => {
+		const first = {
+			title: "first",
+			updatedAt: 1,
+			recoveryData: {
+				sessionId: { value: "session-search-first" },
+				model: { id: "glm-5.1", provider: "zai" },
+				toolSet: [],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			},
+		};
+		const second = {
+			title: "second",
+			updatedAt: 2,
+			recoveryData: {
+				sessionId: { value: "session-search-second" },
+				model: { id: "glm-5.1", provider: "zai" },
+				toolSet: [],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			},
+		};
+		const displayed = [first, second];
+
+		expect(resolveRecentSessionDirectSelection("#1", displayed, displayed)).toBe(first);
+		expect(resolveRecentSessionDirectSelection("session-search-second", displayed, displayed)).toBe(second);
+		expect(resolveRecentSessionDirectSelection("session-search-sec", displayed, displayed)).toBe(second);
+		expect(resolveRecentSessionDirectSelection("session-search", displayed, displayed)).toBeNull();
 	});
 });
