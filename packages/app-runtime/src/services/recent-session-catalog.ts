@@ -358,9 +358,7 @@ async function persistRecentSessionRecoveryData(
 	const existing = await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value);
 	const mergedRecoveryData = mergeRecentSessionRecoveryData(existing, recoveryData);
 	const enrichedRecoveryData = await materializeRecentSessionRecoveryData(mergedRecoveryData, {
-		// When the caller does not provide runtime-owned metadata, refresh from sessionFile so
-		// the recent-session catalog remains a projection of the underlying session fact source.
-		reloadSessionFileMetadata: recoveryData.metadata == null,
+		reloadSessionFileMetadata: shouldReloadRecentSessionMetadataFromSessionFile(recoveryData),
 	});
 	await mkdir(storeDir, { recursive: true });
 	await mkdir(getRecentSessionEntriesDir(storeDir), { recursive: true });
@@ -371,6 +369,10 @@ async function persistRecentSessionRecoveryData(
 		"utf8",
 	);
 	await upsertRecentSession(storeDir, enrichedRecoveryData, options?.title);
+}
+
+export function shouldReloadRecentSessionMetadataFromSessionFile(recoveryData: SessionRecoveryData): boolean {
+	return recoveryData.metadata == null && typeof recoveryData.sessionFile === "string" && recoveryData.sessionFile.length > 0;
 }
 
 function mergeRecentSessionRecoveryData(

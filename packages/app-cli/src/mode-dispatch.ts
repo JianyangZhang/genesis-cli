@@ -410,6 +410,8 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		for (const cmd of createInteractiveLocalCommands({
 			registry,
+			getCurrentSession: () => sessionRef.current,
+			getSessionTitle: () => sessionTitle,
 			setSessionTitle: (next) => {
 				sessionTitle = next;
 			},
@@ -417,33 +419,14 @@ class InteractiveModeHandler implements ModeHandler {
 				exitRequested = true;
 				inputLoop?.close();
 			},
+			isInteractionBusy: () => handler.isInteractionBusy(),
+			hasPendingPermissionRequest: () => handler._pendingPermissionCallId !== null,
+			replaceSession: (next) => {
+				switchInteractiveSession(next);
+			},
 		})) {
 			register(cmd);
 		}
-
-		register({
-			name: "clear",
-			description: "Clear the transcript",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				if (handler.isInteractionBusy() || handler._pendingPermissionCallId) {
-					ctx.output.writeError("Session is busy.");
-					return undefined;
-				}
-
-				const previousSessionId = sessionRef.current.state.id.value;
-				const previousTitleSuffix = sessionTitle ? ` — ${sessionTitle}` : "";
-				await sessionRef.current.close();
-
-				const next = runtime.createSession();
-				switchInteractiveSession(next);
-				ctx.output.writeLine(`Started a new session: ${next.state.id.value}`);
-				ctx.output.writeLine(`Previous session saved: ${previousSessionId}${previousTitleSuffix}`);
-				ctx.output.writeLine("Next: type a prompt, or /resume <sessionId|#N|title> to return.");
-				return undefined;
-			},
-		});
 
 		register({
 			name: "changes",
@@ -879,6 +862,11 @@ class InteractiveModeHandler implements ModeHandler {
 				// Check for slash commands
 				const resolution = registry.resolve(trimmed);
 				if (resolution && resolution.type === "command") {
+					if (this.isInteractionBusy()) {
+						sink.writeError("Session is busy.");
+						line = await inputLoop.nextLine();
+						continue;
+					}
 					const executeCommand = async (): Promise<void> => {
 						await resolution.command.execute?.({
 							args: resolution.args,

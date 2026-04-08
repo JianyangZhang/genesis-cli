@@ -75,6 +75,35 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 	};
 }
 
+function createMockRuntimeWithSessions(sessions: readonly SessionFacade[]): AppRuntime {
+	let index = 0;
+	return {
+		createSession: () => {
+			const next = sessions[Math.min(index, sessions.length - 1)];
+			index += 1;
+			if (!next) {
+				throw new Error("No session configured");
+			}
+			return next;
+		},
+		recoverSession: () => sessions[0]!,
+		events: {} as AppRuntime["events"],
+		governor: {} as AppRuntime["governor"],
+		planEngine: {} as AppRuntime["planEngine"],
+		recordRecentSession: async () => {},
+		recordClosedRecentSession: async () => {},
+		recordRecentSessionInput: async () => {},
+		recordRecentSessionAssistantText: async () => {},
+		recordRecentSessionEvent: async () => {},
+		listRecentSessions: async () => [],
+		searchRecentSessions: async () => [],
+		pruneRecentSessions: async () => ({ before: 0, after: 0, removed: 0 }),
+		getDefaultModel: () => sessions[0]!.state.model,
+		setDefaultModel: () => {},
+		shutdown: async () => {},
+	};
+}
+
 function createContext(
 	session: SessionFacade,
 	runtime: AppRuntime,
@@ -89,26 +118,36 @@ describe("createInteractiveLocalCommands", () => {
 		const registry = createSlashCommandRegistry();
 		const cmds = createInteractiveLocalCommands({
 			registry,
+			getCurrentSession: () => createMockSession(),
+			getSessionTitle: () => undefined,
 			setSessionTitle: () => {},
 			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
 		});
 
-		expect(cmds.map((cmd) => cmd.name).sort()).toEqual(["exit", "help", "quit", "title"]);
+		expect(cmds.map((cmd) => cmd.name).sort()).toEqual(["clear", "exit", "help", "quit", "title"]);
 	});
 
 	it("/title updates the session title through injected state", async () => {
 		let title: string | undefined;
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
 		const registry = createSlashCommandRegistry();
 		const cmds = createInteractiveLocalCommands({
 			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
 			setSessionTitle: (next) => {
 				title = next;
 			},
 			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
 		});
 		const output = createMockOutputSink();
-		const session = createMockSession();
-		const runtime = createMockRuntime(session);
 
 		await cmds.find((cmd) => cmd.name === "title")!.execute!(createContext(session, runtime, output, "My Session"));
 
@@ -117,11 +156,18 @@ describe("createInteractiveLocalCommands", () => {
 	});
 
 	it("/help renders groups from the registry", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
 		const registry = createSlashCommandRegistry();
 		const cmds = createInteractiveLocalCommands({
 			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
 			setSessionTitle: () => {},
 			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
@@ -129,13 +175,11 @@ describe("createInteractiveLocalCommands", () => {
 		registry.register({ name: "ask", description: "Ask the model", type: "prompt", visibility: "public" });
 		registry.register({ name: "panel", description: "Open UI panel", type: "ui", visibility: "public" });
 		const output = createMockOutputSink();
-		const session = createMockSession();
-		const runtime = createMockRuntime(session);
 
 		await cmds.find((cmd) => cmd.name === "help")!.execute!(createContext(session, runtime, output));
 
 		expect(output.lines).toContain("Commands:");
-		expect(output.lines).toContain("\nLocal (3):");
+		expect(output.lines).toContain("\nLocal (4):");
 		expect(output.lines).toContain("\nPrompt (1):");
 		expect(output.lines).toContain("\nUI (1):");
 		expect(output.lines).toContain("  /help — Show available commands");
@@ -144,18 +188,23 @@ describe("createInteractiveLocalCommands", () => {
 	});
 
 	it("/help reports unknown commands with a suggestion to retry", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
 		const registry = createSlashCommandRegistry();
 		const cmds = createInteractiveLocalCommands({
 			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
 			setSessionTitle: () => {},
 			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
 		});
 		for (const cmd of cmds) {
 			registry.register(cmd);
 		}
 		const output = createMockOutputSink();
-		const session = createMockSession();
-		const runtime = createMockRuntime(session);
 
 		await cmds.find((cmd) => cmd.name === "help")!.execute!(createContext(session, runtime, output, "missing"));
 
@@ -165,19 +214,76 @@ describe("createInteractiveLocalCommands", () => {
 
 	it.each(["exit", "quit"] as const)("/%s requests an interactive exit", async (name) => {
 		const requestExit = vi.fn();
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
 		const registry = createSlashCommandRegistry();
 		const cmds = createInteractiveLocalCommands({
 			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => undefined,
 			setSessionTitle: () => {},
 			requestExit,
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
 		});
 		const output = createMockOutputSink();
-		const session = createMockSession();
-		const runtime = createMockRuntime(session);
 
 		await cmds.find((cmd) => cmd.name === name)!.execute!(createContext(session, runtime, output));
 
 		expect(requestExit).toHaveBeenCalledTimes(1);
 		expect(output.lines).toContain("Bye.");
+	});
+
+	it("/clear blocks when the interaction is busy", async () => {
+		const session = createMockSession();
+		const runtime = createMockRuntime(session);
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => session,
+			getSessionTitle: () => "Busy session",
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => true,
+			hasPendingPermissionRequest: () => false,
+			replaceSession: () => {},
+		});
+		const output = createMockOutputSink();
+
+		await cmds.find((cmd) => cmd.name === "clear")!.execute!(createContext(session, runtime, output));
+
+		expect(output.errors).toEqual(["Session is busy."]);
+	});
+
+	it("/clear starts a fresh session and reports the previous session title", async () => {
+		const replaceSession = vi.fn();
+		const close = vi.fn(async () => {});
+		const previousSession = {
+			...createMockSession({ id: { value: "session-before-clear" } as SessionId }),
+			close,
+		} as SessionFacade;
+		const nextSession = createMockSession({ id: { value: "session-after-clear" } as SessionId });
+		const registry = createSlashCommandRegistry();
+		const cmds = createInteractiveLocalCommands({
+			registry,
+			getCurrentSession: () => previousSession,
+			getSessionTitle: () => "Planning",
+			setSessionTitle: () => {},
+			requestExit: () => {},
+			isInteractionBusy: () => false,
+			hasPendingPermissionRequest: () => false,
+			replaceSession,
+		});
+		const output = createMockOutputSink();
+		const runtime = createMockRuntimeWithSessions([nextSession]);
+
+		await cmds.find((cmd) => cmd.name === "clear")!.execute!(createContext(previousSession, runtime, output));
+
+		expect(close).toHaveBeenCalledTimes(1);
+		expect(replaceSession).toHaveBeenCalledWith(nextSession);
+		expect(output.lines).toContain("Started a new session: session-after-clear");
+		expect(output.lines).toContain("Previous session saved: session-before-clear — Planning");
+		expect(output.lines).toContain("Next: type a prompt, or /resume <sessionId|#N|title> to return.");
 	});
 });

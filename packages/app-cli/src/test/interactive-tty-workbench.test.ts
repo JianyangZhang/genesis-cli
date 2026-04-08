@@ -1164,6 +1164,37 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForInteractiveIdle(screen: VirtualScreen, timeoutMs = 4000): Promise<void> {
+	await waitFor(() => {
+		const snapshot = screen.snapshot();
+		return !snapshot.includes("Thinking") && !snapshot.includes("Responding");
+	}, timeoutMs);
+	await sleep(50);
+}
+
+async function sendSlashCommandUntilVisible(
+	input: FakeTtyInput,
+	screen: VirtualScreen,
+	checkAccepted: () => boolean,
+	description: string,
+	command: string,
+	timeoutMs = 4000,
+): Promise<void> {
+	const start = Date.now();
+	while (Date.now() - start <= timeoutMs) {
+		await waitForInteractiveIdle(screen, timeoutMs);
+		input.write(`${command}\r`);
+		try {
+			await waitFor(checkAccepted, 300);
+			return;
+		} catch {
+			// The UI can still be in the final async turn cleanup even after the visual
+			// responding/thinking labels disappear. Retry until the command is accepted.
+		}
+	}
+	throw new Error(`Timed out waiting for slash command output: ${command} -> ${description}`);
+}
+
 async function withPatchedProcessTty<T>(
 	input: FakeTtyInput,
 	output: FakeTtyOutput,
@@ -1447,16 +1478,54 @@ describe("interactive workbench TTY", () => {
 
 			input.write("hello\r");
 			await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
+			await waitForInteractiveIdle(screen);
 
-			input.write("/clear\r");
-			await waitFor(() => screen.snapshot().includes("Started a new session: session-after-clear"));
+			await sendSlashCommandUntilVisible(
+				input,
+				screen,
+				() => stripAnsi(output.getRawOutput()).includes("Started a new session: session-after-clear"),
+				"Started a new session: session-after-clear",
+				"/clear",
+			);
 
 			const snapshot = screen.snapshot();
-			expect(snapshot).toContain("Previous session saved: session-before-clear");
+			expect(stripAnsi(output.getRawOutput())).toContain("Previous session saved: session-before-clear");
 			expect(snapshot).not.toContain("Hi from Genesis");
 			expect(snapshot).not.toContain("hello");
 			expect(snapshot).toContain("Genesis CLI");
 			expect(snapshot).toContain("❯");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("blocks all slash commands until the active turn has fully finished", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-slash-busy" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("slow respond\r");
+			await waitFor(() => screen.snapshot().includes("Responding."));
+
+			input.write("/help\r");
+			await waitFor(() => screen.snapshot().includes("Session is busy."));
+			expect(screen.snapshot()).not.toContain("Commands:");
+
+			await waitForInteractiveIdle(screen);
+
+			await sendSlashCommandUntilVisible(
+				input,
+				screen,
+				() => stripAnsi(output.getRawOutput()).includes("Commands:"),
+				"Commands:",
+				"/help",
+			);
 
 			input.write("/exit\r");
 			await startPromise;
@@ -2462,6 +2531,7 @@ describe("interactive workbench TTY", () => {
 
 				input.write("\x1b[<64;1;1M");
 				await waitFor(() => screen.snapshot().includes("History line 27"));
+				await waitForInteractiveIdle(screen);
 
 				input.write("/exit\r");
 				await startPromise;
@@ -2542,6 +2612,7 @@ describe("interactive workbench TTY", () => {
 			input.write("bash echo hello\r");
 			await waitFor(() => countOccurrences(screen.snapshot(), "Echo: hello") >= 2);
 			expect(screen.snapshot()).not.toContain("choice [Enter/1/2/3]>");
+			await waitForInteractiveIdle(screen);
 
 			input.write("/exit\r");
 			await startPromise;

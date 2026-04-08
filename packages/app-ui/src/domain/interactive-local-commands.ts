@@ -1,10 +1,16 @@
+import type { SessionFacade } from "@pickle-pee/runtime";
 import type { SlashCommand, SlashCommandContext } from "../types/index.js";
 import type { SlashCommandRegistry } from "./slash-command-registry.js";
 
 export interface InteractiveLocalCommandDeps {
 	readonly registry: SlashCommandRegistry;
+	readonly getCurrentSession: () => SessionFacade;
+	readonly getSessionTitle: () => string | undefined;
 	readonly setSessionTitle: (title: string) => void;
 	readonly requestExit: () => void;
+	readonly isInteractionBusy: () => boolean;
+	readonly hasPendingPermissionRequest: () => boolean;
+	readonly replaceSession: (session: SessionFacade) => void;
 }
 
 export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps): SlashCommand[] {
@@ -13,6 +19,7 @@ export function createInteractiveLocalCommands(deps: InteractiveLocalCommandDeps
 		createHelpCommand(deps.registry),
 		createExitCommand("exit", "Exit the interactive session", deps),
 		createExitCommand("quit", "Exit the interactive session (alias of /exit)", deps),
+		createClearCommand(deps),
 	];
 }
 
@@ -84,6 +91,34 @@ function createExitCommand(
 		async execute(ctx: SlashCommandContext): Promise<undefined> {
 			deps.requestExit();
 			ctx.output.writeLine("Bye.");
+			return undefined;
+		},
+	};
+}
+
+function createClearCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
+	return {
+		name: "clear",
+		description: "Clear the transcript",
+		type: "local",
+		visibility: "public",
+		async execute(ctx: SlashCommandContext): Promise<undefined> {
+			await Promise.resolve();
+			if (deps.isInteractionBusy() || deps.hasPendingPermissionRequest()) {
+				ctx.output.writeError("Session is busy.");
+				return undefined;
+			}
+
+			const currentSession = deps.getCurrentSession();
+			const previousSessionId = currentSession.state.id.value;
+			const previousTitleSuffix = deps.getSessionTitle() ? ` — ${deps.getSessionTitle()}` : "";
+			await currentSession.close();
+
+			const next = ctx.runtime.createSession();
+			deps.replaceSession(next);
+			ctx.output.writeLine(`Started a new session: ${next.state.id.value}`);
+			ctx.output.writeLine(`Previous session saved: ${previousSessionId}${previousTitleSuffix}`);
+			ctx.output.writeLine("Next: type a prompt, or /resume <sessionId|#N|title> to return.");
 			return undefined;
 		},
 	};
