@@ -66,6 +66,7 @@ import {
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
 	createBuiltinCommands,
+	createInteractiveLocalCommands,
 	createSlashCommandRegistry,
 	eventToJsonEnvelope,
 	formatEventAsText,
@@ -407,103 +408,18 @@ class InteractiveModeHandler implements ModeHandler {
 		for (const cmd of createBuiltinCommands()) {
 			register(cmd);
 		}
-
-		register({
-			name: "title",
-			description: "Set the current session title",
-			type: "local",
-			visibility: "internal",
-			async execute(ctx) {
-				const next = ctx.args.trim();
-				if (next.length === 0) {
-					ctx.output.writeError("Usage: /title <text>");
-					return undefined;
-				}
+		for (const cmd of createInteractiveLocalCommands({
+			registry,
+			setSessionTitle: (next) => {
 				sessionTitle = next;
-				ctx.output.writeLine(`Title: ${next}`);
-				return undefined;
 			},
-		});
-
-		register({
-			name: "help",
-			description: "Show available commands",
-			type: "local",
-			async execute(ctx) {
-				const query = ctx.args.trim().replace(/^\/+/, "");
-				const all = registry.listPublic().slice();
-
-				if (query.length > 0) {
-					const cmd = all.find((c) => c.name === query) ?? null;
-					if (!cmd) {
-						ctx.output.writeError(`Unknown command: /${query}`);
-						ctx.output.writeLine("Type /help to see all commands.");
-						return undefined;
-					}
-					ctx.output.writeLine(`/${cmd.name}`);
-					ctx.output.writeLine(`  ${cmd.description}`);
-					ctx.output.writeLine(`  Type: ${cmd.type}`);
-					return undefined;
-				}
-
-				all.sort((a, b) => a.name.localeCompare(b.name));
-				const local = registry
-					.listByType("local", "public")
-					.slice()
-					.sort((a, b) => a.name.localeCompare(b.name));
-				const prompt = registry
-					.listByType("prompt", "public")
-					.slice()
-					.sort((a, b) => a.name.localeCompare(b.name));
-				const ui = registry
-					.listByType("ui", "public")
-					.slice()
-					.sort((a, b) => a.name.localeCompare(b.name));
-
-				ctx.output.writeLine("Commands:");
-				const renderGroup = (label: string, items: readonly SlashCommand[]): void => {
-					if (items.length === 0) return;
-					ctx.output.writeLine(`\n${label} (${items.length}):`);
-					for (const cmd of items) {
-						ctx.output.writeLine(`  /${cmd.name} — ${cmd.description}`);
-					}
-				};
-				renderGroup("Local", local);
-				renderGroup("Prompt", prompt);
-				renderGroup("UI", ui);
-
-				ctx.output.writeLine("\nTips:");
-				ctx.output.writeLine("  /help <name>  Show details for a command");
-				ctx.output.writeLine("  Ctrl+C        Abort the current turn (or exit if idle)");
-				return undefined;
-			},
-		});
-
-		register({
-			name: "exit",
-			description: "Exit the interactive session",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
+			requestExit: () => {
 				exitRequested = true;
-				ctx.output.writeLine("Bye.");
 				inputLoop?.close();
-				return undefined;
 			},
-		});
-
-		register({
-			name: "quit",
-			description: "Exit the interactive session (alias of /exit)",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				exitRequested = true;
-				ctx.output.writeLine("Bye.");
-				inputLoop?.close();
-				return undefined;
-			},
-		});
+		})) {
+			register(cmd);
+		}
 
 		register({
 			name: "clear",

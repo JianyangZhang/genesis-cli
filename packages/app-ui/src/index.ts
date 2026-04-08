@@ -34,12 +34,14 @@ export {
 	renderStatusLine,
 } from "./adapters/index.js";
 export type {
+	InteractiveLocalCommandDeps,
 	SlashCommandRegistry,
 	SlashCommandResolution,
 } from "./domain/index.js";
 // Domain (slash commands)
 export {
 	createBuiltinCommands,
+	createInteractiveLocalCommands,
 	createSlashCommandRegistry,
 } from "./domain/index.js";
 // Services (formatters + interaction state)
