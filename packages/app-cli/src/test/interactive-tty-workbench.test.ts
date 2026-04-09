@@ -2052,6 +2052,16 @@ describe("interactive workbench TTY", () => {
 	it("runs /compact without crashing and keeps the prompt visible", async () => {
 		const session = new FakeInteractiveSession({ sessionId: "session-compact", compactDelayMs: 150 });
 		const runtime = createFakeRuntime(session);
+		let compactEventCalls = 0;
+		let lastCompactEventType: string | null = null;
+		const baseRecordRecentSessionEvent = runtime.recordRecentSessionEvent.bind(runtime);
+		runtime.recordRecentSessionEvent = async (targetSession, event) => {
+			if (targetSession.id.value === session.id.value && event.type === "compaction_completed") {
+				compactEventCalls += 1;
+				lastCompactEventType = event.type;
+			}
+			return baseRecordRecentSessionEvent(targetSession, event);
+		};
 		const input = new FakeTtyInput();
 		const output = new FakeTtyOutput();
 
@@ -2069,6 +2079,8 @@ describe("interactive workbench TTY", () => {
 			const snapshot = screen.snapshot();
 			expect(snapshot).toContain("Compaction completed.");
 			expect(snapshot).toContain("❯");
+			await waitFor(() => compactEventCalls === 1);
+			expect(lastCompactEventType).toBe("compaction_completed");
 
 			input.write("hello\r");
 			await waitFor(() => countOccurrences(screen.snapshot(), "Hi from Genesis") >= 2);
