@@ -10,5 +10,6 @@ export {
 export {
 	PiMonoSessionAdapter,
 	resolvePiMonoAuthReport,
+	type PiMonoResolvedAuthReport,
 	type PiMonoSessionAdapterOptions,
 } from "./pi-mono-session-adapter.js";
