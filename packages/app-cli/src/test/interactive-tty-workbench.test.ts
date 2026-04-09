@@ -2131,6 +2131,37 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
+	it("/usage does not persist recent-session input or events", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-usage" });
+		const runtime = createFakeRuntime(session);
+		let recentInputCalls = 0;
+		let recentEventCalls = 0;
+		const baseRecordRecentSessionInput = runtime.recordRecentSessionInput.bind(runtime);
+		const baseRecordRecentSessionEvent = runtime.recordRecentSessionEvent.bind(runtime);
+		runtime.recordRecentSessionInput = async (targetSession, input) => {
+			recentInputCalls += 1;
+			return baseRecordRecentSessionInput(targetSession, input);
+		};
+		runtime.recordRecentSessionEvent = async (targetSession, event) => {
+			recentEventCalls += 1;
+			return baseRecordRecentSessionEvent(targetSession, event);
+		};
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+			input.write("/usage\r");
+			await waitFor(() => screen.snapshot().includes("Tools: 0 total"));
+			expect(recentInputCalls).toBe(0);
+			expect(recentEventCalls).toBe(0);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
 	it("queues input entered during compacting and sends it after compaction completes", async () => {
 		const session = new FakeInteractiveSession({ sessionId: "session-compact-queue", compactDelayMs: 150 });
 		const runtime = createFakeRuntime(session);
