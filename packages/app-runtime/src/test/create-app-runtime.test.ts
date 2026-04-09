@@ -156,6 +156,47 @@ describe("createAppRuntime", () => {
 		expect(adapter.lastResumeData).toEqual(recoveryData);
 	});
 
+	it("supports recoverSession + compaction + close + search as a stable recent-session flow", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recover-flow-"));
+		const historyDir = join(agentDir, "history");
+		const adapter = new StubKernelSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter,
+		});
+		const recoveryData: SessionRecoveryData = {
+			sessionId: { value: "recovered-session" },
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		};
+		const recovered = runtime.recoverSession(recoveryData);
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await runtime.recordRecentSessionInput(recovered, "README 发布流程");
+		await runtime.recordRecentSessionEvent(recovered, {
+			category: "compaction",
+			type: "compaction_completed",
+			summary: { compactedSummary: "README 发布流程梳理完成" },
+		});
+		await recovered.close();
+		await runtime.recordClosedRecentSession(recovered, closedRecoveryData!);
+
+		const results = await runtime.searchRecentSessions("README 发布");
+		expect(results).toHaveLength(1);
+		expect(results[0]?.entry.recoveryData.sessionId.value).toBe("recovered-session");
+		expect(results[0]?.entry.recoveryData.metadata?.summary).toContain("README 发布流程梳理完成");
+	});
+
 	it("records and lists recent sessions via the runtime contract", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recent-"));
 		const historyDir = join(agentDir, "history");

@@ -708,8 +708,9 @@
   已完成子项：
   - [x] P0-3.a：补齐 `session_closed -> recordClosedRecentSession -> recent catalog` 的跨层验收护栏测试
   - [x] P0-3.b：补齐 `compaction event + session close + recent search` 组合场景验收护栏
+  - [x] P0-3.c：补齐 `recoverSession + compaction + session close + recent search` 组合场景验收护栏
   未完成子项：
-  - [ ] P0-3.c：补齐 recoverSession / recent search / compaction 组合场景的架构验收护栏
+  - [ ] P0-3.d：补齐 resume browser / recent catalog / recovery snapshot 的端到端验收护栏
 
 ### 9.2 P1
 
