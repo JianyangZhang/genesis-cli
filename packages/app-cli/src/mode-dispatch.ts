@@ -64,8 +64,6 @@ import {
 } from "@pickle-pee/tui-core";
 import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
 import {
-	appendAssistantTranscriptBlock as appendAssistantTranscriptBlockFromUi,
-	appendTranscriptBlockWithSpacer as appendTranscriptBlockWithSpacerFromUi,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
@@ -82,7 +80,7 @@ import {
 	formatTurnNotice as formatTurnNoticeFromUi,
 	initialInteractionState,
 	createInteractiveConversationState,
-	mergeStreamingText as mergeStreamingTextFromUi,
+	materializeAssistantTranscriptBlock,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
@@ -1625,10 +1623,10 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private currentDetailPanelContentLines(): readonly string[] {
 		if (this._thinkingBuffer.trim().length > 0) {
-			return wrapTranscriptContent(this._thinkingBuffer.trim(), this.terminalWidth());
+			return wrapTranscriptContentFromTuiCore(this._thinkingBuffer.trim(), this.terminalWidth());
 		}
 		if (this._compactionDetailText.trim().length > 0) {
-			return wrapTranscriptContent(this._compactionDetailText.trim(), this.terminalWidth());
+			return wrapTranscriptContentFromTuiCore(this._compactionDetailText.trim(), this.terminalWidth());
 		}
 		return [];
 	}
@@ -2044,7 +2042,7 @@ class InteractiveModeHandler implements ModeHandler {
 			return selectionColumns === null
 				? isTranscriptUserBlock(visibleLine)
 					? formatFullWidthTranscriptUserLine(plainLine, terminalWidth)
-					: fitTerminalLine(visibleLine, terminalWidth)
+					: fitTerminalLineFromTuiCore(visibleLine, terminalWidth)
 				: renderSelectedPlainLine(
 						plainLine,
 						selectionColumns.startColumn,
@@ -2058,7 +2056,7 @@ class InteractiveModeHandler implements ModeHandler {
 			height: terminalHeight,
 			bodyLines,
 			footer: {
-				lines: footerUi.lines.map((line: string) => fitTerminalLine(line ?? "", terminalWidth)),
+				lines: footerUi.lines.map((line: string) => fitTerminalLineFromTuiCore(line ?? "", terminalWidth)),
 				cursorLineIndex: footerUi.cursorLineIndex,
 				cursorColumn: footerUi.cursorColumn,
 			},
@@ -2079,7 +2077,7 @@ class InteractiveModeHandler implements ModeHandler {
 		const footerUi = this.buildResumeBrowserFooterUi();
 		const headerLines = this.currentResumeBrowserTopLines();
 		const topHeight = Math.min(headerLines.length, Math.max(0, terminalHeight - footerUi.lines.length));
-		const topVisibleLines = headerLines.slice(0, topHeight).map((line) => fitTerminalLine(line, terminalWidth));
+		const topVisibleLines = headerLines.slice(0, topHeight).map((line) => fitTerminalLineFromTuiCore(line, terminalWidth));
 		const availableBodyRows = Math.max(0, terminalHeight - topVisibleLines.length - footerUi.lines.length);
 		const totalBodyRows = this.currentResumeBrowserBodyDisplayRows();
 		const maxTopOffset = Math.max(0, totalBodyRows - availableBodyRows);
@@ -2090,7 +2088,7 @@ class InteractiveModeHandler implements ModeHandler {
 			availableBodyRows,
 			Math.max(0, maxTopOffset - topOffset),
 			0,
-		).map((line) => fitTerminalLine(line, terminalWidth));
+		).map((line) => fitTerminalLineFromTuiCore(line, terminalWidth));
 		this._renderedTranscriptViewportLines = bodyVisibleLines.map((line) => stripAnsiWelcome(line));
 		const footerStartRow = Math.max(1, terminalHeight - footerUi.lines.length + 1);
 		const screenLines = Array.from({ length: terminalHeight }, () => "");
@@ -2107,7 +2105,7 @@ class InteractiveModeHandler implements ModeHandler {
 		for (const [index, line] of footerUi.lines.entries()) {
 			const row = footerStartRow - 1 + index;
 			if (row >= 0 && row < screenLines.length) {
-				screenLines[row] = fitTerminalLine(line ?? "", terminalWidth);
+				screenLines[row] = fitTerminalLineFromTuiCore(line ?? "", terminalWidth);
 			}
 		}
 		return {
@@ -2430,10 +2428,6 @@ export function formatWelcomeCenteredLine(contentWidth: number, text: string): s
 	return `${applyWelcomeBorderColor("│")}${" ".repeat(left)}${text}${" ".repeat(right)}${applyWelcomeBorderColor("│")}`;
 }
 
-export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
-	return computePromptCursorColumnFromTuiCore(prompt, buffer, cursor);
-}
-
 export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boolean {
 	if (event.category === "session") return false;
 	if (event.category === "tool") return false;
@@ -2575,7 +2569,7 @@ export function formatInteractiveFooter(state: {
 	}
 	const hint = formatSlashSuggestionHint(
 		state.suggestions,
-		state.terminalWidth - computePromptCursorColumn(state.prompt, state.buffer, state.buffer.length),
+		state.terminalWidth - computePromptCursorColumnFromTuiCore(state.prompt, state.buffer, state.buffer.length),
 	);
 	const layout = composePromptBlock({
 		leadingLines,
@@ -3043,10 +3037,6 @@ export function computeInteractiveEphemeralRows(
 	return computeEphemeralRows(streaming, footer);
 }
 
-export function fitTerminalLine(line: string, width: number): string {
-	return fitTerminalLineFromTuiCore(line, width);
-}
-
 function truncatePlainTerminalText(text: string, width: number): string {
 	return truncatePlainTextFromTuiCore(text, width);
 }
@@ -3096,14 +3086,6 @@ function hasUsageSnapshot(usage: UsageSnapshot | null | undefined): usage is Usa
 	return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0 || usage.totalTokens > 0;
 }
 
-export function mergeStreamingText(existing: string, incoming: string): string {
-	return mergeStreamingTextFromUi(existing, incoming);
-}
-
-export function wrapTranscriptContent(content: string, width: number): readonly string[] {
-	return wrapTranscriptContentFromTuiCore(content, width);
-}
-
 export function computeVisibleTranscriptLines(
 	blocks: readonly string[],
 	width: number,
@@ -3117,7 +3099,7 @@ export function computeVisibleTranscriptLines(
 		maxRows,
 		offsetFromBottom,
 		unwrappedLeadingBlockCount,
-		wrapLine: wrapTranscriptContent,
+		wrapLine: wrapTranscriptContentFromTuiCore,
 	});
 }
 
@@ -3157,21 +3139,6 @@ export function computeTranscriptDisplayRows(
 	unwrappedLeadingBlockCount = 0,
 ): number {
 	return computeTranscriptDisplayRowsFromTuiCore(blocks, width, unwrappedLeadingBlockCount);
-}
-
-export function materializeAssistantTranscriptBlock(buffer: string): string | null {
-	if (buffer.length === 0) {
-		return null;
-	}
-	return formatTranscriptAssistantLine(buffer);
-}
-
-export function appendAssistantTranscriptBlock(blocks: readonly string[], assistantBlock: string): readonly string[] {
-	return appendAssistantTranscriptBlockFromUi(blocks, assistantBlock);
-}
-
-export function appendTranscriptBlockWithSpacer(blocks: readonly string[], block: string): readonly string[] {
-	return appendTranscriptBlockWithSpacerFromUi(blocks, block);
 }
 
 function isTranscriptUserBlock(block: string): boolean {

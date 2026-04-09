@@ -3,8 +3,6 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
-	appendAssistantTranscriptBlock,
-	appendTranscriptBlockWithSpacer,
 	buildInteractiveFooterLeadingLines,
 	buildWelcomeLines,
 	computeFooterCursorColumn,
@@ -20,7 +18,6 @@ import {
 	countRenderedTerminalRows,
 	createDebouncedCallback,
 	extractPlainTextSelection,
-	fitTerminalLine,
 	formatFullWidthTranscriptUserLine,
 	formatInteractiveErrorDetailLine,
 	formatInteractiveErrorLine,
@@ -41,16 +38,20 @@ import {
 	formatWelcomeCenteredLine,
 	formatWelcomeFilledLine,
 	formatWelcomeTopBorder,
-	materializeAssistantTranscriptBlock,
-	mergeStreamingText,
 	movePermissionSelection,
 	permissionDecisionFromSelection,
 	pickWelcomeGreeting,
 	readInteractiveCliPackageVersion,
 	shouldRenderInteractiveTranscriptEvent,
 	WELCOME_BIBLE_GREETINGS,
-	wrapTranscriptContent,
 } from "../mode-dispatch.js";
+import {
+	appendAssistantTranscriptBlock,
+	appendTranscriptBlockWithSpacer,
+	materializeAssistantTranscriptBlock,
+	mergeStreamingText,
+} from "@pickle-pee/ui";
+import { fitTerminalLine, wrapTranscriptContent } from "@pickle-pee/tui-core";
 import { INTERACTIVE_THEME } from "../theme.js";
 
 function formatLocalTraceTimestamp(value: Date): string {
@@ -543,7 +544,7 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("materializes the final assistant transcript block before redraw clears the buffer", () => {
-		expect(materializeAssistantTranscriptBlock("hello")).toBe(formatTranscriptAssistantLine("hello"));
+		expect(materializeAssistantTranscriptBlock("hello")).toBe("⏺ hello");
 		expect(materializeAssistantTranscriptBlock("")).toBeNull();
 	});
 
