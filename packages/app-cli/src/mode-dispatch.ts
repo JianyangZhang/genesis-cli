@@ -60,6 +60,8 @@ import {
 } from "@pickle-pee/tui-core";
 import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
 import {
+	appendAssistantTranscriptBlock as appendAssistantTranscriptBlockFromUi,
+	appendTranscriptBlockWithSpacer as appendTranscriptBlockWithSpacerFromUi,
 	ansiShowCursor,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	buildRestoredContextLines,
@@ -76,6 +78,8 @@ import {
 	formatResumeBrowserTranscriptBlocks,
 	formatTurnNotice as formatTurnNoticeFromUi,
 	initialInteractionState,
+	createInteractiveConversationState,
+	mergeStreamingText as mergeStreamingTextFromUi,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
@@ -163,8 +167,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _historyIndex: number | null = null;
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
-	private readonly _transcriptBlocks: string[] = [];
-	private _assistantBuffer = "";
+	private readonly _conversation = createInteractiveConversationState();
 	private _turnNotice: "thinking" | "responding" | "compacting" | null = null;
 	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
@@ -286,8 +289,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._historyIndex = null;
 			this._lastError = null;
 			this._changedPaths.clear();
-			this._transcriptBlocks.length = 0;
-			this._assistantBuffer = "";
+			this._conversation.clear();
 			this.stopTurnNoticeAnimation();
 			this._turnNotice = null;
 			this._turnNoticeAnimationFrame = 0;
@@ -1105,7 +1107,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this.startTurnNoticeAnimation();
 			}
 			const previousRows = this.currentTranscriptDisplayRows();
-			this._assistantBuffer = mergeStreamingText(this._assistantBuffer, event.content);
+			this._conversation.mergeAssistantDelta(event.content);
 			this.adjustTranscriptScrollForGrowth(previousRows, this.currentTranscriptDisplayRows());
 			this.fullRedrawInteractiveScreen();
 			return;
@@ -1120,14 +1122,14 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private flushAssistantBuffer(redrawPrompt: boolean): void {
-		if (this._assistantBuffer.length === 0) {
+		if (!this._conversation.hasAssistantBuffer()) {
 			if (redrawPrompt) {
 				this.renderPromptLine();
 			}
 			return;
 		}
-		const assistantText = this._assistantBuffer;
-		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
+		const assistantText = this._conversation.consumeAssistantBuffer();
+		const assistantBlock = materializeAssistantTranscriptBlock(assistantText);
 		if (assistantBlock !== null) {
 			const previousRows = this.currentTranscriptDisplayRows();
 			this.rememberAssistantTranscriptBlock(assistantBlock);
@@ -1136,7 +1138,6 @@ class InteractiveModeHandler implements ModeHandler {
 				void this._runtime.recordRecentSessionAssistantText(this._sessionRef.current, assistantText);
 			}
 		}
-		this._assistantBuffer = "";
 		if (redrawPrompt) {
 			this.renderPromptLine();
 		}
@@ -1638,17 +1639,16 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private shouldShowPendingOutputIndicator(activeToolLabel: string | null): boolean {
-		if (this._assistantBuffer.length > 0) {
+		if (this._conversation.hasAssistantBuffer()) {
 			return true;
 		}
 		if (activeToolLabel === null) {
 			return false;
 		}
-		const lastNonEmptyIndex = findLastNonEmptyBlockIndex(this._transcriptBlocks);
-		if (lastNonEmptyIndex === -1) {
+		const lastBlock = this._conversation.getLatestTranscriptBlock();
+		if (lastBlock === null) {
 			return false;
 		}
-		const lastBlock = this._transcriptBlocks[lastNonEmptyIndex] ?? "";
 		return !isTranscriptUserBlock(lastBlock) && !lastBlock.startsWith("⏺ ") && !lastBlock.startsWith("  ⎿ ");
 	}
 
@@ -1895,15 +1895,11 @@ class InteractiveModeHandler implements ModeHandler {
 		if (block.length === 0) {
 			return;
 		}
-		const nextBlocks = appendTranscriptBlockWithSpacer(this._transcriptBlocks, block);
-		this._transcriptBlocks.length = 0;
-		this._transcriptBlocks.push(...nextBlocks);
+		this._conversation.rememberTranscriptBlock(block, true);
 	}
 
 	private rememberAssistantTranscriptBlock(block: string): void {
-		const nextBlocks = appendAssistantTranscriptBlock(this._transcriptBlocks, block);
-		this._transcriptBlocks.length = 0;
-		this._transcriptBlocks.push(...nextBlocks);
+		this._conversation.rememberAssistantTranscriptBlock(block);
 	}
 
 	private fullRedrawInteractiveScreen(): void {
@@ -2105,15 +2101,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser !== null) {
 			return formatResumeBrowserTranscriptBlocks(this._resumeBrowser);
 		}
-		const welcomeBlocks = this._welcomeLines;
-		if (this._assistantBuffer.length === 0) {
-			return [...welcomeBlocks, ...this._transcriptBlocks];
-		}
-		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
-		if (assistantBlock === null) {
-			return [...welcomeBlocks, ...this._transcriptBlocks];
-		}
-		return appendAssistantTranscriptBlock([...welcomeBlocks, ...this._transcriptBlocks], assistantBlock);
+		return this._conversation.renderedTranscriptBlocks(this._welcomeLines);
 	}
 
 	private currentWelcomeLineCount(): number {
@@ -3049,31 +3037,7 @@ function hasUsageSnapshot(usage: UsageSnapshot | null | undefined): usage is Usa
 }
 
 export function mergeStreamingText(existing: string, incoming: string): string {
-	if (incoming.length === 0) return existing;
-	if (existing.length === 0) return incoming;
-	if (incoming.startsWith(existing)) return incoming;
-	const embeddedExistingIndex = incoming.indexOf(existing);
-	if (embeddedExistingIndex >= 0 && embeddedExistingIndex <= 8) {
-		return incoming.slice(embeddedExistingIndex);
-	}
-	if (existing.endsWith(incoming)) return existing;
-
-	const trimmedIncoming = incoming.trimStart();
-	if (trimmedIncoming.startsWith(existing)) return trimmedIncoming;
-
-	const maxOverlap = Math.min(existing.length, incoming.length);
-	for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
-		if (existing.endsWith(incoming.slice(0, overlap))) {
-			return `${existing}${incoming.slice(overlap)}`;
-		}
-	}
-	const trimmedMaxOverlap = Math.min(existing.length, trimmedIncoming.length);
-	for (let overlap = trimmedMaxOverlap; overlap > 0; overlap -= 1) {
-		if (existing.endsWith(trimmedIncoming.slice(0, overlap))) {
-			return `${existing}${trimmedIncoming.slice(overlap)}`;
-		}
-	}
-	return `${existing}${incoming}`;
+	return mergeStreamingTextFromUi(existing, incoming);
 }
 
 export function wrapTranscriptContent(content: string, width: number): readonly string[] {
@@ -3143,28 +3107,11 @@ export function materializeAssistantTranscriptBlock(buffer: string): string | nu
 }
 
 export function appendAssistantTranscriptBlock(blocks: readonly string[], assistantBlock: string): readonly string[] {
-	return appendTranscriptBlockWithSpacer(blocks, assistantBlock);
+	return appendAssistantTranscriptBlockFromUi(blocks, assistantBlock);
 }
 
 export function appendTranscriptBlockWithSpacer(blocks: readonly string[], block: string): readonly string[] {
-	if (block.length === 0) {
-		return [...blocks];
-	}
-	const lastNonEmptyIndex = findLastNonEmptyBlockIndex(blocks);
-	if (lastNonEmptyIndex === -1) {
-		return [block];
-	}
-	const normalized = blocks.slice(0, lastNonEmptyIndex + 1);
-	return [...normalized, "", block];
-}
-
-function findLastNonEmptyBlockIndex(blocks: readonly string[]): number {
-	for (let index = blocks.length - 1; index >= 0; index -= 1) {
-		if ((blocks[index] ?? "").length > 0) {
-			return index;
-		}
-	}
-	return -1;
+	return appendTranscriptBlockWithSpacerFromUi(blocks, block);
 }
 
 function isTranscriptUserBlock(block: string): boolean {
