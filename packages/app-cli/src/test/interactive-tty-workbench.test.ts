@@ -1907,6 +1907,14 @@ describe("interactive workbench TTY", () => {
 				},
 				[{ recoveryData: recoveredData, updatedAt: Date.now() }],
 			);
+			let closedRecentSessionCalls = 0;
+			let lastClosedSessionId: string | null = null;
+			const baseRecordClosedRecentSession = runtime.recordClosedRecentSession.bind(runtime);
+			runtime.recordClosedRecentSession = async (session, recoveryData, options) => {
+				closedRecentSessionCalls += 1;
+				lastClosedSessionId = session.id.value;
+				return baseRecordClosedRecentSession(session, recoveryData, options);
+			};
 			const input = new FakeTtyInput();
 			const output = new FakeTtyOutput();
 
@@ -1942,6 +1950,8 @@ describe("interactive workbench TTY", () => {
 				expect(snapshot).toContain("Assistant: 我会先检查工作区并整理提交内容。");
 				expect(snapshot).toContain("User: 继续推进 /resume 的体验对齐");
 				expect(snapshot).toContain("❯");
+				expect(closedRecentSessionCalls).toBe(1);
+				expect(lastClosedSessionId).toBe("session-before-resume");
 
 				input.write("/exit\r");
 				await startPromise;

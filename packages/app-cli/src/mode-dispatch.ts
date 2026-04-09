@@ -608,7 +608,6 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				const data = directMatch.recoveryData;
 
-				handler._suppressPersistOnce = true;
 				await sessionRef.current.close();
 
 				const recovered = runtime.recoverSession(data);
@@ -1406,7 +1405,6 @@ class InteractiveModeHandler implements ModeHandler {
 			selectedHit: summarizeResumeBrowserHit(hit),
 		});
 		this.closeResumeBrowser();
-		this._suppressPersistOnce = true;
 		await sessionRef.current.close();
 		const recovered = runtime.recoverSession(data);
 		switchInteractiveSession(recovered);

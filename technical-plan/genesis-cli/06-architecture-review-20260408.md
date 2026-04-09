@@ -713,8 +713,9 @@
   - [x] P0-3.d：补齐 `resume browser list/search + recovery snapshot transition` 端到端验收护栏
   - [x] P0-3.e：补齐 `clear/new session transition + recent-session catalog` 端到端验收护栏
   - [x] P0-3.f：补齐 interactive `/clear` 与 runtime recent-session 记录协作的端到端验收护栏
+  - [x] P0-3.g：补齐 interactive `/resume`（browser submit）与 runtime recent-session 记录协作的端到端验收护栏
   未完成子项：
-  - [ ] P0-3.g：补齐 interactive `/resume`（browser submit）与 runtime recent-session 记录协作的端到端验收护栏
+  - [ ] P0-3.h：补齐 interactive `/compact` 与 recent-session summary 更新协作的端到端验收护栏
 
 ### 9.2 P1
 
