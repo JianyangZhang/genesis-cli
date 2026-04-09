@@ -80,9 +80,10 @@ export async function listRecentSessions(historyDir: string | undefined): Promis
 		if (!Array.isArray(parsed)) {
 			return [];
 		}
-		return Promise.all(
+		const materialized = await Promise.all(
 			(parsed as RecentSessionEntry[]).map((entry) => materializeRecentSessionEntry(storeDir, entry)),
 		);
+		return dedupeRecentSessionEntriesBySessionId(materialized);
 	} catch {
 		return [];
 	}
@@ -97,7 +98,9 @@ export async function pruneRecentSessions(
 	}
 	const storeDir = getRecentSessionCatalogDir(historyDir);
 	const existing = await readRecentSessionsByDir(storeDir);
-	const normalized = await Promise.all(existing.map((entry) => materializeRecentSessionEntry(storeDir, entry)));
+	const normalized = dedupeRecentSessionEntriesBySessionId(
+		await Promise.all(existing.map((entry) => materializeRecentSessionEntry(storeDir, entry))),
+	);
 	const compacted = normalized.slice(0, Math.max(0, maxEntries));
 	const before = existing.length;
 	const after = compacted.length;
@@ -212,6 +215,22 @@ async function materializeRecentSessionRecoveryDataFromEntry(
 	recoveryData: SessionRecoveryData,
 ): Promise<SessionRecoveryData> {
 	return (await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value)) ?? recoveryData;
+}
+
+function dedupeRecentSessionEntriesBySessionId(
+	entries: readonly RecentSessionEntry[],
+): readonly RecentSessionEntry[] {
+	const seen = new Set<string>();
+	const deduped: RecentSessionEntry[] = [];
+	for (const entry of entries) {
+		const sessionId = entry.recoveryData.sessionId.value;
+		if (seen.has(sessionId)) {
+			continue;
+		}
+		seen.add(sessionId);
+		deduped.push(entry);
+	}
+	return deduped;
 }
 
 function getRecentSessionEntriesDir(storeDir: string): string {

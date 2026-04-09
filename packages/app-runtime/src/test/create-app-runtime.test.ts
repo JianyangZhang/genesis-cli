@@ -978,6 +978,97 @@ describe("createAppRuntime", () => {
 		]);
 	});
 
+	it("deduplicates duplicate recent-session projections by sessionId when listing sessions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-dedupe-recent-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		await mkdir(join(historyDir, "entries"), { recursive: true });
+		await writeFile(
+			join(historyDir, "recent.json"),
+			`${JSON.stringify(
+				[
+					{
+						recoveryData: {
+							sessionId: { value: "session-duplicate" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "new projection",
+								firstPrompt: "new projection",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "new projection" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "New projection",
+						updatedAt: 200,
+					},
+					{
+						recoveryData: {
+							sessionId: { value: "session-duplicate" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "old projection",
+								firstPrompt: "old projection",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "old projection" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "Old projection",
+						updatedAt: 100,
+					},
+					{
+						recoveryData: {
+							sessionId: { value: "session-other" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "other projection",
+								firstPrompt: "other projection",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "other projection" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "Other projection",
+						updatedAt: 50,
+					},
+				],
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		const recent = await runtime.listRecentSessions();
+
+		expect(recent).toHaveLength(2);
+		expect(recent[0]?.recoveryData.sessionId.value).toBe("session-duplicate");
+		expect(recent[0]?.title).toBe("New projection");
+		expect(recent[1]?.recoveryData.sessionId.value).toBe("session-other");
+	});
+
 	it("prunes recent sessions down to the latest 10 entries", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-prune-"));
 		const historyDir = join(agentDir, "history");
