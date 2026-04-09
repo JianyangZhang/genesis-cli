@@ -1,3 +1,4 @@
+/# technical-plan：本地用于模型临时生成与缓存的工作区，已刻意忽略，避免误入版本库
 /technical-plan/
 .DS_Store
 node_modules/
