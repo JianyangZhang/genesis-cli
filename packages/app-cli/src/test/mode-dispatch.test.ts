@@ -266,6 +266,13 @@ describe("interactive transcript formatting", () => {
 		expect(readInteractiveCliPackageVersion(packageJsonPath)).toBe(expectedVersion.version);
 	});
 
+	it("keeps interactive host detached from legacy app-ui ANSI compatibility exports", () => {
+		const sourcePath = resolve(__dirname, "../mode-dispatch.ts");
+		const source = readFileSync(sourcePath, "utf8");
+		expect(source).not.toContain("legacyTuiCompat");
+		expect(source).not.toContain("ansiShowCursor,");
+	});
+
 	it("keeps welcome lines within narrow terminal widths after fitting", () => {
 		const lines = buildWelcomeLines({
 			terminalWidth: 40,
