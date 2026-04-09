@@ -560,6 +560,38 @@ describe("createAppRuntime", () => {
 		});
 	});
 
+	it("keeps recent search stable after session close and compaction event updates", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-combo-guard-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await runtime.recordRecentSessionEvent(session, {
+			category: "compaction",
+			type: "compaction_completed",
+			summary: { compactedSummary: "README 发布流程梳理完成" },
+		});
+		await session.close();
+		await runtime.recordClosedRecentSession(session, closedRecoveryData!);
+
+		const results = await runtime.searchRecentSessions("README 发布");
+		expect(results).toHaveLength(1);
+		expect(results[0]?.entry.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(results[0]?.entry.recoveryData.metadata?.summary).toContain("README 发布流程梳理完成");
+		expect(results[0]?.matchSource).toBe("title");
+	});
+
 	it("loads metadata from sessionFile before persisting session history", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-session-file-"));
 		const historyDir = join(agentDir, "history");
