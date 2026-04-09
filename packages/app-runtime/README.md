@@ -4,6 +4,26 @@
 
 产品层运行时。围绕 `pi-coding-agent` 构建 facade，管理会话（SessionFacade）、运行时上下文（RuntimeContext）、计划执行协议和事件标准化。所有 CLI 模式共享此 runtime。
 
+## Session Core 权威边界（冻结）
+
+以下边界用于冻结 `session core` 的权威事实源，避免会话语义在 `app-cli` / `app-ui` / `app-runtime` / `kernel` 之间漂移：
+
+| 领域对象 | 权威层 | 说明 |
+| --- | --- | --- |
+| `sessionId` | `kernel` | 会话身份由 `SessionManager` 创建/打开并持有，`runtime` 只消费。 |
+| `sessionFile` | `kernel` | 会话文件路径和生命周期归 `kernel`；上层不得自行生成。 |
+| `transcript` | `kernel` | 持久化 transcript 由 `kernel` 写入，`runtime/ui/cli` 仅做展示与派生。 |
+| `metadata` | `kernel` | `summary/firstPrompt/messageCount/recentMessages` 的权威快照来自 `sessionFile`。 |
+| `resume` | `kernel + runtime` | `kernel` 负责恢复语义与基础快照；`runtime` 负责 catalog 索引与搜索。 |
+| `compact` | `kernel` | compaction 的执行、结果和持久化由 `kernel` 会话主链负责。 |
+| `recoveryData` | `runtime` | `runtime` 聚合模型、工具集、taskState 与 `kernel` 快照，作为跨模式恢复载荷。 |
+
+约束：
+
+- `app-cli` 只做宿主生命周期与输入输出接线，不成为会话事实源。
+- `app-ui` 只负责展示与交互语义，不持久化会话权威数据。
+- `app-runtime` 只能在 `recoveryData` 中聚合派生信息，不覆盖 `kernel` 会话事实。
+
 ## 导出
 
 ### 入口
