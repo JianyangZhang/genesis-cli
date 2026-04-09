@@ -2,7 +2,10 @@
  * Translates raw upstream events into standardized product-layer RuntimeEvents.
  *
  * This is the single point of translation. Unrecognized raw events return `null`
- * and are silently dropped — they are never leaked to consumers.
+ * and are never forwarded to consumers.
+ *
+ * For observability, unknown event types are reported once per type via
+ * `onUnknownEvent`, and emit a debug warning when `GENESIS_DEBUG` is enabled.
  *
  * The mapping table is a P2 skeleton. It will be refined when pi-mono is
  * integrated and the actual upstream event types are known.
