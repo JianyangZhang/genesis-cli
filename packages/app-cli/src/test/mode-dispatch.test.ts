@@ -18,14 +18,8 @@ import {
 	countRenderedTerminalRows,
 	createDebouncedCallback,
 	extractPlainTextSelection,
-	formatFullWidthTranscriptUserLine,
-	formatInteractiveErrorDetailLine,
-	formatInteractiveErrorLine,
 	formatInteractiveFooter,
-	formatInteractiveInfoLine,
-	formatInteractiveInputSeparator,
 	formatInteractivePermissionBlock,
-	formatInteractivePromptBuffer,
 	formatInteractiveToolEvent,
 	formatInteractiveToolResult,
 	formatInteractiveToolTitle,
@@ -48,11 +42,21 @@ import {
 import {
 	appendAssistantTranscriptBlock,
 	appendTranscriptBlockWithSpacer,
+	computeInteractiveFooterSeparatorWidth,
+	formatFullWidthTranscriptUserLine,
+	formatInteractiveErrorDetailLine,
+	formatInteractiveErrorLine,
+	formatInteractiveInfoLine,
+	formatInteractiveInputSeparator,
+	formatInteractivePromptBuffer,
+	formatTranscriptAssistantLine,
+	formatTranscriptUserBlocks,
+	formatTranscriptUserLine,
+	INTERACTIVE_THEME,
 	materializeAssistantTranscriptBlock,
 	mergeStreamingText,
 } from "@pickle-pee/ui";
 import { fitTerminalLine, wrapTranscriptContent } from "@pickle-pee/tui-core";
-import { INTERACTIVE_THEME } from "../theme.js";
 
 function formatLocalTraceTimestamp(value: Date): string {
 	const padTwo = (part: number): string => String(part).padStart(2, "0");
