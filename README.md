@@ -101,7 +101,9 @@ Genesis 采用“终端宿主 / 内容语义 / 运行时契约 / 仓库自持内
 - 当前主线：
   - 继续把 interactive 渲染规则沉到 `app-tui-core`
   - 继续把内容语义从 `app-cli` 回收到 `app-ui`
+  - 明确 `recent-session` 的 metadata 权威源：`kernel/session file` 优先，`app-runtime` 只负责 catalog 聚合与 fallback
   - 继续把 `/resume` 收敛为 `app-runtime` 提供结构化摘要、`app-ui` 负责展示语义、`app-cli` 只负责 TTY 接线的稳定主链
+  - 旧 ANSI/TUI 导出已收口到兼容命名空间，仅用于过渡兼容，不再作为主链能力入口
   - 保持 `app-runtime` 与 `app-tools` 的稳定契约，并为复杂链路同步补齐 `--debug` 可观测性
 
 ---

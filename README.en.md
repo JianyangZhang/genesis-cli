@@ -101,7 +101,9 @@ Genesis follows a layered "terminal host / content semantics / runtime contracts
 - Current direction:
   - keep moving interactive rendering rules into `app-tui-core`
   - keep moving content semantics out of `app-cli` and back into `app-ui`
+  - keep `recent-session` metadata authority explicit: `kernel/session file` stays primary, while `app-runtime` provides catalog aggregation and fallback
   - keep refining `/resume` into a stable chain where `app-runtime` provides structured summaries, `app-ui` owns presentation semantics, and `app-cli` stays focused on TTY wiring
+  - keep legacy ANSI/TUI exports behind a compatibility namespace only, not as a mainline entrypoint
   - keep `app-runtime` and `app-tools` contracts stable, and add `--debug` observability alongside every complex workflow
 
 ---
