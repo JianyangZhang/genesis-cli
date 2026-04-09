@@ -1821,6 +1821,12 @@ describe("interactive workbench TTY", () => {
 		const { agentDir, settingsPath } = await createModelFixture();
 		const session = new FakeInteractiveSession({ sessionId: "session-model", agentDir });
 		const runtime = createFakeRuntime(session);
+		let persistedModelId: string | null = null;
+		const baseRecordRecentSessionInput = runtime.recordRecentSessionInput.bind(runtime);
+		runtime.recordRecentSessionInput = async (targetSession, input) => {
+			persistedModelId = targetSession.state.model.id;
+			return baseRecordRecentSessionInput(targetSession, input);
+		};
 		const input = new FakeTtyInput();
 		const output = new FakeTtyOutput();
 
@@ -1850,6 +1856,10 @@ describe("interactive workbench TTY", () => {
 				input.write("/model\r");
 				await waitFor(() => output.getRawOutput().includes("Available models:"));
 				expect(output.getRawOutput()).toContain("glm-5.2 (current)");
+
+				input.write("hello\r");
+				await waitFor(() => screen.snapshot().includes("Hi from Genesis"));
+				expect(persistedModelId).toBe("glm-5.2");
 
 				input.write("/exit\r");
 				await startPromise;
