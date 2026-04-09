@@ -9,6 +9,8 @@ describe("interactive-conversation", () => {
 	it("merges streaming text deltas without duplication", () => {
 		expect(mergeStreamingText("你好", "好吗")).toBe("你好吗");
 		expect(mergeStreamingText("hello", "hello world")).toBe("hello world");
+		expect(mergeStreamingText("Hello", " world")).toBe("Hello world");
+		expect(mergeStreamingText("", " hello")).toBe(" hello");
 	});
 
 	it("materializes assistant transcript blocks", () => {
@@ -23,7 +25,7 @@ describe("interactive-conversation", () => {
 		state.mergeAssistantDelta(" reply");
 		expect(state.hasAssistantBuffer()).toBe(true);
 		expect(state.renderedTranscriptBlocks(["Welcome"])).toHaveLength(4);
-		expect(state.consumeAssistantBuffer()).toBe("Assistantreply");
+		expect(state.consumeAssistantBuffer()).toBe("Assistant reply");
 		expect(state.hasAssistantBuffer()).toBe(false);
 	});
 });

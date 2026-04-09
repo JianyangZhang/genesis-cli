@@ -64,23 +64,31 @@ export function createInteractiveConversationState(): InteractiveConversationSta
 }
 
 export function mergeStreamingText(existing: string, incoming: string): string {
-	const normalizedIncoming = incoming.replace(/^\s+/, "");
 	if (existing.length === 0) {
-		return normalizedIncoming;
+		return incoming;
 	}
-	if (normalizedIncoming.length === 0) {
+	if (incoming.length === 0) {
 		return existing;
 	}
-	if (normalizedIncoming.startsWith(existing)) {
-		return normalizedIncoming;
+	if (incoming.startsWith(existing)) {
+		return incoming;
 	}
-	const maxOverlap = Math.min(existing.length, normalizedIncoming.length);
+	if (existing.endsWith(incoming)) {
+		return existing;
+	}
+	const trimmedIncoming = incoming.trimStart();
+	// Some providers occasionally resend the whole sentence with accidental leading whitespace.
+	// Only trim in that snapshot-style case; otherwise preserve real token spaces.
+	if (trimmedIncoming.startsWith(existing)) {
+		return trimmedIncoming;
+	}
+	const maxOverlap = Math.min(existing.length, incoming.length);
 	for (let size = maxOverlap; size > 0; size -= 1) {
-		if (existing.endsWith(normalizedIncoming.slice(0, size))) {
-			return `${existing}${normalizedIncoming.slice(size)}`;
+		if (existing.endsWith(incoming.slice(0, size))) {
+			return `${existing}${incoming.slice(size)}`;
 		}
 	}
-	return `${existing}${normalizedIncoming}`;
+	return `${existing}${incoming}`;
 }
 
 export function materializeAssistantTranscriptBlock(buffer: string): string | null {

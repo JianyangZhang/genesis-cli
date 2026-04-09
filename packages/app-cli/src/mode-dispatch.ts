@@ -145,6 +145,7 @@ interface UsageSnapshot {
 }
 
 const RESIZE_REDRAW_DEBOUNCE_MS = 120;
+const RENDER_DEBUG_SAME_FRAME_THROTTLE_MS = 250;
 
 // ---------------------------------------------------------------------------
 // Interactive mode
@@ -211,6 +212,9 @@ class InteractiveModeHandler implements ModeHandler {
 	private _runtime: AppRuntime | null = null;
 	private _recentSessionPersistTimer: ReturnType<typeof setTimeout> | null = null;
 	private _startupCheckScreenActive = false;
+	private _lastRenderDebugKey: string | null = null;
+	private _lastRenderDebugLoggedAt = 0;
+	private _suppressedRenderDebugCount = 0;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -1917,15 +1921,19 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		const next = this.buildInteractiveScreenFrame();
 		const patches = diffScreenFrames(this._lastScreenFrame, next.frame);
-		getActiveDebugLogger()?.debug("tui.render", "Rendered interactive screen frame", {
+		const patchSummary = summarizeFramePatches(patches);
+		const renderDebug = this.prepareRenderDebugRecord({
 			resetScrollRegion: options.resetScrollRegion ?? false,
 			footerStartRow: next.footerStartRow,
 			pinFooterToBottom: next.pinFooterToBottom,
 			footerLineCount: next.footerUi.lines.length,
 			transcriptViewportLineCount: this._renderedTranscriptViewportLines.length,
 			frame: summarizeScreenFrame(next.frame),
-			patches: summarizeFramePatches(patches),
+			patches: patchSummary,
 		});
+		if (renderDebug !== null) {
+			getActiveDebugLogger()?.debug("tui.render", "Rendered interactive screen frame", renderDebug);
+		}
 		if (this._resumeBrowser !== null) {
 			getActiveDebugLogger()?.debug("resume.browser.layout", "Rendered resume browser layout", {
 				headerLineCount: this.currentResumeBrowserTopLines().length,
@@ -1953,6 +1961,59 @@ class InteractiveModeHandler implements ModeHandler {
 		this._renderedFooterUi = next.footerUi;
 		this._renderedFooterStartRow = next.footerStartRow;
 		this._lastScreenFrame = next.frame;
+	}
+
+	private prepareRenderDebugRecord(record: {
+		readonly resetScrollRegion: boolean;
+		readonly footerStartRow: number;
+		readonly pinFooterToBottom: boolean;
+		readonly footerLineCount: number;
+		readonly transcriptViewportLineCount: number;
+		readonly frame: ReturnType<typeof summarizeScreenFrame>;
+		readonly patches: ReturnType<typeof summarizeFramePatches>;
+	}):
+		| (typeof record & {
+				readonly suppressedSinceLast?: number;
+		  })
+		| null {
+		if (record.resetScrollRegion) {
+			const next = {
+				...record,
+				...(this._suppressedRenderDebugCount > 0
+					? { suppressedSinceLast: this._suppressedRenderDebugCount }
+					: {}),
+			};
+			this._suppressedRenderDebugCount = 0;
+			this._lastRenderDebugKey = null;
+			this._lastRenderDebugLoggedAt = Date.now();
+			return next;
+		}
+
+		const key = JSON.stringify({
+			footerStartRow: record.footerStartRow,
+			pinFooterToBottom: record.pinFooterToBottom,
+			footerLineCount: record.footerLineCount,
+			transcriptViewportLineCount: record.transcriptViewportLineCount,
+			nonEmptyRows: record.frame.nonEmptyRows,
+			writeLineCount: record.patches.writeLineCount,
+			clearLineCount: record.patches.clearLineCount,
+			moveCursorCount: record.patches.moveCursorCount,
+		});
+		const now = Date.now();
+		if (this._lastRenderDebugKey === key && now - this._lastRenderDebugLoggedAt < RENDER_DEBUG_SAME_FRAME_THROTTLE_MS) {
+			this._suppressedRenderDebugCount += 1;
+			return null;
+		}
+		const next = {
+			...record,
+			...(this._suppressedRenderDebugCount > 0
+				? { suppressedSinceLast: this._suppressedRenderDebugCount }
+				: {}),
+		};
+		this._suppressedRenderDebugCount = 0;
+		this._lastRenderDebugKey = key;
+		this._lastRenderDebugLoggedAt = now;
+		return next;
 	}
 
 	private buildInteractiveScreenFrame(): {
