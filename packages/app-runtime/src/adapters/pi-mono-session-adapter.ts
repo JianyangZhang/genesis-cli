@@ -1,9 +1,18 @@
-import { existsSync } from "node:fs";
-import { join, resolve as resolvePath } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
 import type { KernelSessionAdapter, RawUpstreamEvent, ToolExecutionGate } from "./kernel-session-adapter.js";
 import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";
+import {
+	createToolsForSet,
+	defaultCreateSession,
+	defaultToolSet,
+	extractTargetPath,
+	loadPiMonoSdk as loadPiMonoSdkFromSdk,
+	type CreateAgentSessionOptions,
+	type LoadPiMonoSdkOptions,
+	type PiMonoSdk,
+	type PiMonoTool,
+} from "./pi-mono-sdk.js";
 
 type PermissionDecision = "allow" | "allow_for_session" | "allow_once" | "deny";
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -16,27 +25,6 @@ export interface PiMonoResolvedAuthReport {
 	readonly sourceDetail?: string;
 	readonly placeholder: boolean;
 	readonly authorized: boolean;
-}
-
-interface PiMonoTool {
-	readonly name: string;
-	execute(
-		toolCallId: string,
-		params: unknown,
-		signal?: AbortSignal,
-		onUpdate?: ((partialResult: unknown) => void) | undefined,
-	): Promise<unknown>;
-}
-
-interface CreateAgentSessionOptions {
-	readonly cwd: string;
-	readonly agentDir?: string;
-	readonly model?: PiMonoModel;
-	readonly thinkingLevel?: ThinkingLevel;
-	readonly tools?: readonly PiMonoTool[];
-	readonly authStorage?: unknown;
-	readonly modelRegistry?: unknown;
-	readonly sessionManager?: unknown;
 }
 
 // Mirrors @pickle-pee/kernel KernelSessionContract/KernelSessionSnapshot.
@@ -54,62 +42,13 @@ interface KernelSessionContract {
 interface KernelSessionSnapshot {
 	readonly sessionId: string;
 	readonly sessionFile?: string;
-	readonly metadata: SessionRecoveryData["metadata"];
-}
-
-interface PiMonoSdk {
-	AuthStorage: {
-		create(filePath?: string): unknown;
-	};
-	ModelRegistry: {
-		create(
-			authStorage: unknown,
-			modelsPath?: string,
-		): {
-			find(provider: string, modelId: string): PiMonoModel | undefined;
-			getRequestAuth?(model: PiMonoModel):
-				| {
-						ok: true;
-						source?: {
-							kind: PiMonoResolvedAuthReport["sourceKind"];
-							detail?: string;
-							placeholder?: boolean;
-						};
-				  }
-				| {
-						ok: false;
-						error: string;
-						source?: {
-							kind: PiMonoResolvedAuthReport["sourceKind"];
-							detail?: string;
-							placeholder?: boolean;
-						};
-				  };
-		};
-	};
-	SessionManager: {
-		create(cwd: string): unknown;
-		open(sessionPath: string): unknown;
-	};
-	createAgentSession(options: CreateAgentSessionOptions): Promise<{ session: KernelSessionContract }>;
-	createBashTool(cwd: string): PiMonoTool;
-	createEditTool(cwd: string): PiMonoTool;
-	createFindTool(cwd: string): PiMonoTool;
-	createGrepTool(cwd: string): PiMonoTool;
-	createLsTool(cwd: string): PiMonoTool;
-	createReadTool(cwd: string): PiMonoTool;
-	createWriteTool(cwd: string): PiMonoTool;
+	readonly metadata: unknown;
 }
 
 interface Deferred<T> {
 	resolve(value: T): void;
 	reject(reason?: unknown): void;
 	promise: Promise<T>;
-}
-
-interface LoadPiMonoSdkOptions {
-	readonly importModule?: (specifier: string) => Promise<unknown>;
-	readonly fileCandidates?: readonly string[];
 }
 
 interface ExtendedRecoveryData extends SessionRecoveryData {
@@ -203,7 +142,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 			toolSet: [...this.bridgeState.toolSet],
 			planSummary: null,
 			compactionSummary: null,
-			metadata: snapshot?.metadata ?? null,
+			metadata: (snapshot?.metadata as SessionRecoveryData["metadata"]) ?? null,
 			taskState: { status: "idle", currentTaskId: null, startedAt: null },
 			workingDirectory: this.pendingRecoveryData?.workingDirectory ?? this.options.workingDirectory,
 			sessionFile: this.pendingRecoveryData?.sessionFile ?? snapshot?.sessionFile,
@@ -504,7 +443,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 			return session;
 		}
 
-		const sdk = await loadPiMonoSdk();
+		const sdk = await loadPiMonoSdkFromSdk();
 		const authStorage = sdk.AuthStorage.create(agentDir ? join(agentDir, "auth.json") : undefined);
 		const modelRegistry = sdk.ModelRegistry.create(authStorage, agentDir ? join(agentDir, "models.json") : undefined);
 		const model = modelRegistry.find(this.currentModel.provider, this.currentModel.id) as PiMonoModel | undefined;
@@ -640,48 +579,6 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 	}
 }
 
-async function defaultCreateSession(options: CreateAgentSessionOptions): Promise<KernelSessionContract> {
-	const sdk = await loadPiMonoSdk();
-	const result = await sdk.createAgentSession(options);
-	return result.session;
-}
-
-function createToolsForSet(cwd: string, toolSet: readonly string[], sdk: PiMonoSdk): PiMonoTool[] {
-	const tools: PiMonoTool[] = [];
-	for (const toolName of toolSet) {
-		switch (toolName) {
-			case "read":
-				tools.push(sdk.createReadTool(cwd));
-				break;
-			case "bash":
-				tools.push(sdk.createBashTool(cwd));
-				break;
-			case "edit":
-				tools.push(sdk.createEditTool(cwd));
-				break;
-			case "write":
-				tools.push(sdk.createWriteTool(cwd));
-				break;
-			case "grep":
-				tools.push(sdk.createGrepTool(cwd));
-				break;
-			case "find":
-				tools.push(sdk.createFindTool(cwd));
-				break;
-			case "ls":
-				tools.push(sdk.createLsTool(cwd));
-				break;
-			default:
-				break;
-		}
-	}
-	return tools.length > 0 ? tools : createToolsForSet(cwd, defaultToolSet(), sdk);
-}
-
-function defaultToolSet(): readonly string[] {
-	return ["read", "bash", "edit", "write"];
-}
-
 function getToolCallId(rawEvent: RawUpstreamEvent): string | undefined {
 	return typeof rawEvent.payload?.toolCallId === "string" ? rawEvent.payload.toolCallId : undefined;
 }
@@ -696,32 +593,11 @@ function createDeferred<T>(): Deferred<T> {
 	return { resolve, reject, promise };
 }
 
-function extractTargetPath(parameters: Readonly<Record<string, unknown>> | undefined): string | undefined {
-	if (!parameters) {
-		return undefined;
-	}
-
-	if (typeof parameters.file_path === "string") {
-		return parameters.file_path;
-	}
-
-	if (typeof parameters.path === "string") {
-		return parameters.path;
-	}
-
-	if (Array.isArray(parameters.file_paths)) {
-		const first = parameters.file_paths.find((p) => typeof p === "string" && p.length > 0);
-		return typeof first === "string" ? first : undefined;
-	}
-
-	return undefined;
-}
-
 export async function resolvePiMonoAuthReport(options: {
 	readonly agentDir?: string;
 	readonly model: ModelDescriptor;
 }): Promise<PiMonoResolvedAuthReport> {
-	const sdk = await loadPiMonoSdk();
+	const sdk = await loadPiMonoSdkFromSdk();
 	const authStorage = sdk.AuthStorage.create(options.agentDir ? join(options.agentDir, "auth.json") : undefined);
 	const modelRegistry = sdk.ModelRegistry.create(
 		authStorage,
@@ -747,31 +623,7 @@ export async function resolvePiMonoAuthReport(options: {
 }
 
 export async function loadPiMonoSdk(options: LoadPiMonoSdkOptions = {}): Promise<PiMonoSdk> {
-	const importModule = options.importModule ?? defaultImportModule;
-	try {
-		return (await importModule("@pickle-pee/kernel")) as PiMonoSdk;
-	} catch {}
-
-	const candidates = options.fileCandidates ?? resolvePiMonoSdkCandidates();
-	for (const candidate of candidates) {
-		if (existsSync(candidate)) {
-			return (await importModule(pathToFileURL(candidate).href)) as PiMonoSdk;
-		}
-	}
-	throw new Error("Unable to resolve the vendored Genesis kernel module");
-}
-
-async function defaultImportModule(specifier: string): Promise<unknown> {
-	return await import(specifier);
-}
-
-function resolvePiMonoSdkCandidates(): readonly string[] {
-	return [
-		resolvePath(__dirname, "../../../kernel/dist/index.js"),
-		resolvePath(__dirname, "../../../kernel/src/index.ts"),
-		resolvePath(process.cwd(), "packages/kernel/dist/index.js"),
-		resolvePath(process.cwd(), "packages/kernel/src/index.ts"),
-	];
+	return await loadPiMonoSdkFromSdk(options);
 }
 
 class AsyncPushQueue<T> {
