@@ -477,16 +477,6 @@ export class SessionFacadeImpl implements SessionFacade {
 			return normalized;
 		}
 
-		if (normalized.type === "tool_completed") {
-			this._governor.afterExecution({
-				toolName: normalized.toolName,
-				toolCallId: normalized.toolCallId,
-				status: normalized.status,
-				durationMs: normalized.durationMs,
-			});
-			return normalized;
-		}
-
 		// tool_update, tool_denied, etc. — pass through
 		return normalized;
 	}

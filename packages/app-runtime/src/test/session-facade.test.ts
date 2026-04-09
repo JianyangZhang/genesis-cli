@@ -73,6 +73,70 @@ describe("SessionFacade", () => {
 		expect(globalEvents[1]!.type).toBe("tool_completed");
 	});
 
+	it("records tool completion exactly once in fallback governance mode", async () => {
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+		const governor = createToolGovernor();
+		governor.catalog.register({
+			identity: { name: "read", category: "file-read" },
+			contract: {
+				parameterSchema: { type: "object", properties: {} },
+				output: { type: "text" },
+				errorTypes: [],
+			},
+			policy: {
+				riskLevel: "L0",
+				readOnly: true,
+				concurrency: "unlimited",
+				confirmation: "never",
+				subAgentAllowed: true,
+				timeoutMs: 30_000,
+			},
+			executorTag: "read",
+		});
+
+		const adapterWithoutHook: KernelSessionAdapter = {
+			async *sendPrompt() {
+				yield {
+					type: "tool_execution_start",
+					timestamp: 1000,
+					payload: { toolName: "read", toolCallId: "read_1", parameters: { path: "/tmp/a.txt" } },
+				};
+				yield {
+					type: "tool_execution_end",
+					timestamp: 1100,
+					payload: { toolName: "read", toolCallId: "read_1", status: "success", durationMs: 100 },
+				};
+			},
+			async *sendContinue() {},
+			abort() {},
+			async close() {},
+			async getRecoveryData() {
+				return {
+					sessionId: stubId,
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				};
+			},
+			resume() {},
+		};
+
+		const facade = new SessionFacadeImpl(adapterWithoutHook, state, context, globalBus, governor);
+		await facade.prompt("read file");
+
+		expect(governor.audit.size).toBe(1);
+	});
+
 	it("updates task state during prompt", async () => {
 		const { facade, adapter } = createFacade();
 
