@@ -716,8 +716,9 @@
   - [x] P0-3.g：补齐 interactive `/resume`（browser submit）与 runtime recent-session 记录协作的端到端验收护栏
   - [x] P0-3.h：补齐 interactive `/compact` 与 recent-session summary 更新协作的端到端验收护栏
   - [x] P0-3.i：补齐 interactive `/model` 切换与 recent-session 持久化协作的端到端验收护栏
+  - [x] P0-3.j：补齐 interactive `/doctor` 与 runtime recent-session 持久化协作边界验收护栏
   未完成子项：
-  - [ ] P0-3.j：补齐 interactive `/doctor` 与 runtime recent-session 持久化协作边界验收护栏
+  - [ ] P0-3.k：补齐 interactive `/usage` 与 recent-session 持久化协作边界验收护栏
 
 ### 9.2 P1
 
