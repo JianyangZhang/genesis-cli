@@ -715,7 +715,22 @@ class FakeInteractiveSession implements SessionFacade {
 		};
 	}
 
-	async close(): Promise<void> {}
+	async close(): Promise<void> {
+		if (this.state.status === "closed") {
+			return;
+		}
+		const recoveryData = await this.snapshotRecoveryData();
+		(this.state as { status: SessionFacade["state"]["status"]; updatedAt: number }).status = "closed";
+		(this.state as { status: SessionFacade["state"]["status"]; updatedAt: number }).updatedAt = Date.now();
+		this.emit({
+			id: "session-closed",
+			timestamp: Date.now(),
+			sessionId: this.id,
+			category: "session",
+			type: "session_closed",
+			recoveryData,
+		} as RuntimeEvent);
+	}
 
 	async switchModel(model: SessionFacade["state"]["model"]): Promise<void> {
 		(this.state as { model: SessionFacade["state"]["model"]; updatedAt: number }).model = model;
@@ -1469,6 +1484,14 @@ describe("interactive workbench TTY", () => {
 		const firstSession = new FakeInteractiveSession({ sessionId: "session-before-clear" });
 		const secondSession = new FakeInteractiveSession({ sessionId: "session-after-clear" });
 		const runtime = createSequencedRuntime([firstSession, secondSession]);
+		let closedRecentSessionCalls = 0;
+		let lastClosedSessionId: string | null = null;
+		const baseRecordClosedRecentSession = runtime.recordClosedRecentSession.bind(runtime);
+		runtime.recordClosedRecentSession = async (session, recoveryData, options) => {
+			closedRecentSessionCalls += 1;
+			lastClosedSessionId = session.id.value;
+			return baseRecordClosedRecentSession(session, recoveryData, options);
+		};
 		const input = new FakeTtyInput();
 		const output = new FakeTtyOutput();
 
@@ -1494,6 +1517,8 @@ describe("interactive workbench TTY", () => {
 			expect(snapshot).not.toContain("hello");
 			expect(snapshot).toContain("Genesis CLI");
 			expect(snapshot).toContain("❯");
+			expect(closedRecentSessionCalls).toBe(1);
+			expect(lastClosedSessionId).toBe("session-before-clear");
 
 			input.write("/exit\r");
 			await startPromise;
