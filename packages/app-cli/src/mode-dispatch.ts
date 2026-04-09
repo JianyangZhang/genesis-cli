@@ -21,14 +21,17 @@ import type {
 } from "@pickle-pee/runtime";
 import {
 	type ComposedScreen,
+	clampScrollOffset,
 	composePromptBlock,
 	composeScreenWithFooter,
 	composeSectionBlock,
+	computeBodyViewportRows,
 	computeEphemeralRows,
 	computeFooterCursorColumn as computeFooterCursorColumnFromTuiCore,
 	computeFooterCursorRowsFromEnd as computeFooterCursorRowsFromEndFromTuiCore,
 	computeFooterCursorRowsUp as computeFooterCursorRowsUpFromTuiCore,
 	computeFooterStartRow as computeFooterStartRowFromTuiCore,
+	computeMaxScrollOffset,
 	computePromptCursorColumn as computePromptCursorColumnFromTuiCore,
 	computePromptCursorRowsUp as computePromptCursorRowsUpFromTuiCore,
 	computeSelectionColumnsForRow,
@@ -42,6 +45,7 @@ import {
 	encodeFramePatches,
 	encodeResetScrollRegion,
 	encodeSetScrollRegion,
+	ensureVisibleSelectionOffset,
 	extractPlainTextSelection as extractPlainTextSelectionFromTuiCore,
 	fitTerminalLine as fitTerminalLineFromTuiCore,
 	materializeComposerBlock,
@@ -1537,16 +1541,11 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser === null) {
 			return;
 		}
-		const viewportRows = Math.max(1, this.currentResumeBrowserBodyViewportRows());
-		const selectedRange = this.currentResumeBrowserSelectedRowRange();
-		if (selectedRange === null) {
-			return;
-		}
-		if (selectedRange.start < this._resumeBrowserScrollOffset) {
-			this._resumeBrowserScrollOffset = selectedRange.start;
-		} else if (selectedRange.end >= this._resumeBrowserScrollOffset + viewportRows) {
-			this._resumeBrowserScrollOffset = selectedRange.end - viewportRows + 1;
-		}
+		this._resumeBrowserScrollOffset = ensureVisibleSelectionOffset({
+			currentOffset: this._resumeBrowserScrollOffset,
+			viewportRows: this.currentResumeBrowserBodyViewportRows(),
+			selectedRange: this.currentResumeBrowserSelectedRowRange(),
+		});
 		this.clampResumeBrowserScrollOffset();
 	}
 
@@ -1779,7 +1778,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.currentResumeBrowserTopLines().length,
 			Math.max(0, this.terminalHeight() - footerHeight),
 		);
-		return Math.max(0, this.terminalHeight() - topHeight - footerHeight);
+		return computeBodyViewportRows(this.terminalHeight(), topHeight, footerHeight);
 	}
 
 	private currentResumeBrowserBodyDisplayRows(): number {
@@ -1790,13 +1789,13 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentResumeBrowserBodyMaxScroll(): number {
-		return Math.max(0, this.currentResumeBrowserBodyDisplayRows() - this.currentResumeBrowserBodyViewportRows());
+		return computeMaxScrollOffset(this.currentResumeBrowserBodyDisplayRows(), this.currentResumeBrowserBodyViewportRows());
 	}
 
 	private clampResumeBrowserScrollOffset(): void {
-		this._resumeBrowserScrollOffset = Math.max(
-			0,
-			Math.min(this._resumeBrowserScrollOffset, this.currentResumeBrowserBodyMaxScroll()),
+		this._resumeBrowserScrollOffset = clampScrollOffset(
+			this._resumeBrowserScrollOffset,
+			this.currentResumeBrowserBodyMaxScroll(),
 		);
 	}
 
@@ -1825,14 +1824,11 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentTranscriptMaxScroll(): number {
-		return Math.max(0, this.currentTranscriptDisplayRows() - this.currentTranscriptViewportRows());
+		return computeMaxScrollOffset(this.currentTranscriptDisplayRows(), this.currentTranscriptViewportRows());
 	}
 
 	private clampTranscriptScrollOffset(): void {
-		this._transcriptScrollOffset = Math.max(
-			0,
-			Math.min(this._transcriptScrollOffset, this.currentTranscriptMaxScroll()),
-		);
+		this._transcriptScrollOffset = clampScrollOffset(this._transcriptScrollOffset, this.currentTranscriptMaxScroll());
 	}
 
 	private isTranscriptMouseRow(row: number): boolean {
