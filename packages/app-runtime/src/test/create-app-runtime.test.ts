@@ -418,6 +418,61 @@ describe("createAppRuntime", () => {
 		expect(entryFiles).toEqual([`${canonicalSessionId}.json`]);
 	});
 
+	it("keeps resume-browser list and search stable across unknown-to-real recovery transitions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-resume-browser-flow-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new SequencedRecoveryAdapter([
+				{
+					sessionId: { value: "unknown-session" },
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+				{
+					sessionId: { value: "real-session-id" },
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+				{
+					sessionId: { value: "real-session-id" },
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+			]),
+		});
+		const session = runtime.createSession();
+
+		await runtime.recordRecentSessionInput(session, "README 发布流程");
+		await runtime.recordRecentSessionAssistantText(session, "我先整理发布步骤。");
+		await runtime.recordRecentSessionInput(session, "继续");
+
+		const browserResults = await runtime.searchRecentSessions("");
+		const searchResults = await runtime.searchRecentSessions("README 发布");
+		expect(browserResults).toHaveLength(1);
+		expect(searchResults).toHaveLength(1);
+		expect(browserResults[0]?.entry.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(searchResults[0]?.entry.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(browserResults[0]?.entry.recoveryData.metadata?.firstPrompt).toBe("README 发布流程");
+		expect(searchResults[0]?.snippet).toContain("README 发布流程");
+	});
+
 	it("preserves the earliest firstPrompt and deduplicates overlapping recent messages", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-history-overlap-"));
 		const historyDir = join(agentDir, "history");
