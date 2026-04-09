@@ -62,18 +62,28 @@ import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } f
 import {
 	ansiShowCursor,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
+	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
-	createBuiltinCommands,
-	createSlashCommandRegistry,
+	buildResumeBrowserResumedLines,
+	beginResumeBrowserSearch,
+	createInteractiveCommandRegistry,
+	completeResumeBrowserSearch,
+	createResumeBrowserState,
 	eventToJsonEnvelope,
 	formatEventAsText,
 	formatResumeBrowserTranscriptBlocks,
 	formatTurnNotice as formatTurnNoticeFromUi,
 	initialInteractionState,
 	moveResumeBrowserSelection,
+	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserKeyAction,
+	resolveResumeBrowserSelectedIndex,
+	resolveResumeBrowserSubmitHit,
 	reduceInteractionState,
+	summarizeResumeBrowserHit,
+	toggleResumeBrowserPreviewState,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
@@ -151,7 +161,6 @@ class InteractiveModeHandler implements ModeHandler {
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
 	private readonly _history: string[] = [];
 	private _historyIndex: number | null = null;
-	private _suppressPersistOnce = false;
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private readonly _transcriptBlocks: string[] = [];
@@ -218,12 +227,6 @@ class InteractiveModeHandler implements ModeHandler {
 		this._sessionRef = sessionRef;
 		this._sink = sink;
 		this._runtime = runtime;
-
-		// Slash command registry
-		const registry = createSlashCommandRegistry();
-		for (const cmd of createBuiltinCommands()) {
-			registry.register(cmd);
-		}
 
 		let interactionState: InteractionState = initialInteractionState();
 		let sessionTitle: string | undefined;
@@ -318,10 +321,6 @@ class InteractiveModeHandler implements ModeHandler {
 			interactionState = initialInteractionState();
 
 			sessionRef.current.events.on("session_closed", (event) => {
-				if (this._suppressPersistOnce) {
-					this._suppressPersistOnce = false;
-					return;
-				}
 				try {
 					void runtime.recordClosedRecentSession(sessionRef.current, (event as SessionClosedEvent).recoveryData, {
 						title: sessionTitle,
@@ -400,343 +399,113 @@ class InteractiveModeHandler implements ModeHandler {
 			this.fullRedrawInteractiveScreen();
 		};
 
-		const register = (command: SlashCommand): void => {
-			registry.register(command);
-		};
-
-		for (const cmd of createBuiltinCommands()) {
-			register(cmd);
-		}
-
-		register({
-			name: "title",
-			description: "Set the current session title",
-			type: "local",
-			visibility: "internal",
-			async execute(ctx) {
-				const next = ctx.args.trim();
-				if (next.length === 0) {
-					ctx.output.writeError("Usage: /title <text>");
-					return undefined;
-				}
+		const registry = createInteractiveCommandRegistry({
+			getCurrentSession: () => sessionRef.current,
+			getSessionTitle: () => sessionTitle,
+			setSessionTitle: (next) => {
 				sessionTitle = next;
-				ctx.output.writeLine(`Title: ${next}`);
-				return undefined;
 			},
-		});
-
-		register({
-			name: "help",
-			description: "Show available commands",
-			type: "local",
-			async execute(ctx) {
-				const query = ctx.args.trim().replace(/^\/+/, "");
-				const all = registry.listPublic().slice();
-
-				if (query.length > 0) {
-					const cmd = all.find((c) => c.name === query) ?? null;
-					if (!cmd) {
-						ctx.output.writeError(`Unknown command: /${query}`);
-						ctx.output.writeLine("Type /help to see all commands.");
-						return undefined;
-					}
-					ctx.output.writeLine(`/${cmd.name}`);
-					ctx.output.writeLine(`  ${cmd.description}`);
-					ctx.output.writeLine(`  Type: ${cmd.type}`);
-					return undefined;
-				}
-
-				all.sort((a, b) => a.name.localeCompare(b.name));
-				const local = all.filter((c) => c.type === "local");
-				const prompt = all.filter((c) => c.type === "prompt");
-				const ui = all.filter((c) => c.type === "ui");
-
-				ctx.output.writeLine("Commands:");
-				const renderGroup = (label: string, items: readonly SlashCommand[]): void => {
-					if (items.length === 0) return;
-					ctx.output.writeLine(`\n${label} (${items.length}):`);
-					for (const cmd of items) {
-						ctx.output.writeLine(`  /${cmd.name} — ${cmd.description}`);
-					}
-				};
-				renderGroup("Local", local);
-				renderGroup("Prompt", prompt);
-				renderGroup("UI", ui);
-
-				ctx.output.writeLine("\nTips:");
-				ctx.output.writeLine("  /help <name>  Show details for a command");
-				ctx.output.writeLine("  Ctrl+C        Abort the current turn (or exit if idle)");
-				return undefined;
-			},
-		});
-
-		register({
-			name: "exit",
-			description: "Exit the interactive session",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
+			requestExit: () => {
 				exitRequested = true;
-				ctx.output.writeLine("Bye.");
 				inputLoop?.close();
-				return undefined;
 			},
-		});
-
-		register({
-			name: "quit",
-			description: "Exit the interactive session (alias of /exit)",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				exitRequested = true;
-				ctx.output.writeLine("Bye.");
-				inputLoop?.close();
-				return undefined;
-			},
-		});
-
-		register({
-			name: "clear",
-			description: "Clear the transcript",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				if (handler.isInteractionBusy() || handler._pendingPermissionCallId) {
-					ctx.output.writeError("Session is busy.");
-					return undefined;
-				}
-
-				const previousSessionId = sessionRef.current.state.id.value;
-				const previousTitleSuffix = sessionTitle ? ` — ${sessionTitle}` : "";
-				await sessionRef.current.close();
-
-				const next = runtime.createSession();
+			isInteractionBusy: () => handler.isInteractionBusy(),
+			hasPendingPermissionRequest: () => handler._pendingPermissionCallId !== null,
+			replaceSession: (next) => {
 				switchInteractiveSession(next);
-				ctx.output.writeLine(`Started a new session: ${next.state.id.value}`);
-				ctx.output.writeLine(`Previous session saved: ${previousSessionId}${previousTitleSuffix}`);
-				ctx.output.writeLine("Next: type a prompt, or /resume <sessionId|#N|title> to return.");
-				return undefined;
 			},
-		});
-
-		register({
-			name: "changes",
-			description: "Show changed files and diff summary",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				const cwd = ctx.session.context.workingDirectory;
-				const snapshot = await inspectGitWorkingTree(cwd);
-				renderWorkingTreeSummary(ctx.output, handler._changedPaths, snapshot);
-				if (snapshot.available === false) {
-					ctx.output.writeError("git not available in this working directory.");
-					ctx.output.writeLine("Next: use /review to inspect tool-observed changes.");
-					return undefined;
-				}
-				ctx.output.writeLine("Next: /review to inspect, or /diff [file] to see patches.");
-				return undefined;
+			getAgentDir: () => resolveAgentDir(),
+			getInteractionPhase: () => interactionState.phase,
+			getLastError: () => handler._lastError,
+			getChangedFileCount: () => handler._changedPaths.size,
+			getPendingPermissionCallId: () => handler._pendingPermissionCallId,
+			getToolUsageSummary: () => {
+				const entries = runtime.governor.audit.getAll();
+				return {
+					total: entries.length,
+					success: entries.filter((e) => e.status === "success").length,
+					failure: entries.filter((e) => e.status === "failure").length,
+					denied: entries.filter((e) => e.status === "denied").length,
+					recent: entries.slice(-10).map((entry) => ({
+						status: entry.status,
+						toolName: entry.toolName,
+						riskLevel: entry.riskLevel,
+						targetPath: entry.targetPath,
+						durationMs: entry.durationMs,
+					})),
+				};
 			},
-		});
-
-		register({
-			name: "diff",
-			description: "Show git diff (optionally for a file)",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				const cwd = ctx.session.context.workingDirectory;
-				const target = ctx.args.trim();
-				if (target.length === 0) {
-					ctx.output.writeLine("Diff:");
-				} else {
-					ctx.output.writeLine(`Diff: ${target}`);
-				}
-				const diff = await readGitDiff(cwd, target.length > 0 ? target : null);
-				if (diff.type === "error") {
-					ctx.output.writeError("git not available in this working directory.");
-					return undefined;
-				}
-				ctx.output.writeLine(diff.stdout.trimEnd().length > 0 ? diff.stdout.trimEnd() : "(no diff)");
-				ctx.output.writeLine("Next: /review to see a summary, or keep iterating.");
-				return undefined;
-			},
-		});
-
-		register({
-			name: "review",
-			description: "Review changes and decide next steps",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				const cwd = ctx.session.context.workingDirectory;
-				const snapshot = await inspectGitWorkingTree(cwd);
-				if (snapshot.available && snapshot.statusLines.length === 0 && handler._changedPaths.size === 0) {
-					ctx.output.writeLine("Review: clean working tree.");
-					ctx.output.writeLine("Next: continue chatting, or /changes if you want a snapshot.");
-					return undefined;
-				}
-				renderWorkingTreeSummary(ctx.output, handler._changedPaths, snapshot);
-				if (snapshot.available === false) {
-					ctx.output.writeError("git not available in this working directory.");
-					ctx.output.writeLine("Next: continue chatting, or inspect tool-observed changes manually.");
-					return undefined;
-				}
-				ctx.output.writeLine("Review tips:");
-				ctx.output.writeLine("  /diff <file>   Inspect a specific patch");
-				ctx.output.writeLine("  Use git manually if you want to discard changes");
-				ctx.output.writeLine("Next: inspect diffs, then continue chatting.");
-				return undefined;
-			},
-		});
-
-		register({
-			name: "status",
-			description: "Show status",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				const state = ctx.session.state;
-				ctx.output.writeLine(`Session: ${state.id.value}`);
-				ctx.output.writeLine(`  CWD: ${ctx.session.context.workingDirectory}`);
-				ctx.output.writeLine(`  Agent dir: ${resolveAgentDir()}`);
-				ctx.output.writeLine(`  Model: ${state.model.displayName ?? state.model.id}`);
-				ctx.output.writeLine(`  Provider: ${state.model.provider}`);
-				ctx.output.writeLine(`  Phase: ${interactionState.phase}`);
-				ctx.output.writeLine(
-					`  Task: ${state.taskState.status}${
-						state.taskState.currentTaskId ? ` (${state.taskState.currentTaskId})` : ""
-					}`,
-				);
-				ctx.output.writeLine(`  Tools: ${[...state.toolSet].join(", ") || "(none)"}`);
-				if (state.planSummary) {
-					ctx.output.writeLine(`  Plan: ${state.planSummary.completedSteps}/${state.planSummary.stepCount}`);
-				}
-				if (state.compactionSummary) {
-					ctx.output.writeLine(`  Last compaction: ${state.compactionSummary.estimatedTokensSaved} tokens saved`);
-				}
-				if (handler._lastError) {
-					ctx.output.writeLine(`  Last error: ${handler._lastError}`);
-				}
-				if (handler._changedPaths.size > 0) {
-					ctx.output.writeLine(`  Changed files: ${handler._changedPaths.size}`);
-				}
-				if (handler._pendingPermissionCallId) {
-					ctx.output.writeLine(`  Waiting permission: ${handler._pendingPermissionCallId}`);
-				}
-
-				ctx.output.writeLine("Next:");
-				if (handler._pendingPermissionCallId) {
-					ctx.output.writeLine("  Reply y (once), Y (session), n (deny), or Ctrl+C to deny");
-				} else if (handler.isInteractionBusy()) {
-					ctx.output.writeLine("  Wait for the active turn, or Ctrl+C to abort");
-				} else if (handler._changedPaths.size > 0) {
-					ctx.output.writeLine("  /review to inspect changes, or /diff <file>");
-				} else if (handler._lastError) {
-					ctx.output.writeLine("  /doctor to diagnose, or /help for commands");
-				} else {
-					ctx.output.writeLine("  Type a prompt, or /help for commands");
-				}
-				return undefined;
-			},
-		});
-
-		register({
-			name: "usage",
-			description: "Show tool usage and governance summary",
-			type: "local",
-			visibility: "internal",
-			async execute(ctx) {
-				const entries = ctx.runtime.governor.audit.getAll();
-				const total = entries.length;
-				const success = entries.filter((e) => e.status === "success").length;
-				const failure = entries.filter((e) => e.status === "failure").length;
-				const denied = entries.filter((e) => e.status === "denied").length;
-				ctx.output.writeLine(`Tools: ${total} total — ${success} success, ${failure} failure, ${denied} denied`);
-				const tail = entries.slice(-10);
-				if (tail.length > 0) {
-					ctx.output.writeLine("Recent:");
-					for (const entry of tail) {
-						const path = entry.targetPath ? ` ${entry.targetPath}` : "";
-						ctx.output.writeLine(
-							`  ${entry.status} ${entry.toolName} (${entry.riskLevel})${path} ${entry.durationMs}ms`,
-						);
-					}
-				}
-				return undefined;
-			},
-		});
-
-		register({
-			name: "config",
-			description: "Show effective config",
-			type: "local",
-			visibility: "internal",
-			async execute(ctx) {
+			getConfigSnapshot: async (ctx) => {
 				const sources = ctx.session.context.configSources ?? {};
-				ctx.output.writeLine("Precedence: default < agent < project < env < cli");
-				const keys = Object.keys(sources).sort((a, b) => a.localeCompare(b));
-				if (keys.length > 0) {
-					ctx.output.writeLine("Sources:");
-					for (const key of keys) {
-						const source = sources[key]!;
-						ctx.output.writeLine(`  ${key}: ${source.layer} (${source.detail})`);
-					}
-				}
-
 				const agentDir = resolveAgentDir();
 				const modelsPath = join(agentDir, "models.json");
-				ctx.output.writeLine(`agentDir: ${agentDir}`);
-				ctx.output.writeLine(`models.json: ${modelsPath}`);
 				let raw = "";
 				try {
 					raw = await readFile(modelsPath, "utf8");
 				} catch {
-					ctx.output.writeError("models.json not found. Run Genesis once or pass --agent-dir.");
-					return undefined;
+					return {
+						sources: Object.keys(sources)
+							.sort((a, b) => a.localeCompare(b))
+							.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
+						agentDir,
+						modelsPath,
+						error: "models.json not found. Run Genesis once or pass --agent-dir.",
+					};
 				}
 
 				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
 				const providerKey = ctx.session.state.model.provider;
 				const provider = parsed.providers?.[providerKey];
 				if (!provider) {
-					ctx.output.writeError(`Provider not configured: ${providerKey}`);
-					return undefined;
+					return {
+						sources: Object.keys(sources)
+							.sort((a, b) => a.localeCompare(b))
+							.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
+						agentDir,
+						modelsPath,
+						providerKey,
+					};
 				}
-
-				ctx.output.writeLine(`provider: ${providerKey}`);
-				ctx.output.writeLine(`  api: ${provider.api ?? "(missing)"}`);
-				ctx.output.writeLine(`  baseUrl: ${provider.baseUrl ?? "(missing)"}`);
-				const apiKeyEnv = typeof provider.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
-				ctx.output.writeLine(`  apiKey env: ${apiKeyEnv} (${process.env[apiKeyEnv] ? "set" : "missing"})`);
 
 				const models = Array.isArray(provider.models) ? provider.models : [];
 				const active = models.find((m: any) => m?.id === ctx.session.state.model.id);
-				if (active) {
-					ctx.output.writeLine(`model: ${active.name ?? active.id}`);
-					ctx.output.writeLine(`  id: ${active.id}`);
-					ctx.output.writeLine(`  reasoning: ${Boolean(active.reasoning)}`);
-				} else {
-					ctx.output.writeError(`Model not configured: ${ctx.session.state.model.id}`);
-				}
-				return undefined;
+				const apiKeyEnv = typeof provider.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
+				return {
+					sources: Object.keys(sources)
+						.sort((a, b) => a.localeCompare(b))
+						.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
+					agentDir,
+					modelsPath,
+					providerKey,
+					provider: {
+						api: provider.api ?? "(missing)",
+						baseUrl: provider.baseUrl ?? "(missing)",
+						apiKeyEnv,
+						apiKeyPresent: Boolean(process.env[apiKeyEnv]),
+					},
+					activeModel: active
+						? {
+								name: active.name ?? active.id,
+								id: active.id,
+								reasoning: Boolean(active.reasoning),
+						  }
+						: null,
+					modelError: active ? null : `Model not configured: ${ctx.session.state.model.id}`,
+				};
 			},
-		});
-
-		register({
-			name: "doctor",
-			description: "Diagnose OpenAI-compatible mainline",
-			type: "local",
-			visibility: "internal",
-			async execute(ctx) {
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [...handler._changedPaths],
+				snapshot: await inspectGitWorkingTree(sessionRef.current.context.workingDirectory),
+			}),
+			getGitDiff: async (target) => readGitDiff(sessionRef.current.context.workingDirectory, target),
+			getDoctorSnapshot: async (ctx) => {
 				const agentDir = resolveAgentDir();
 				const modelsPath = join(agentDir, "models.json");
 				let raw = "";
 				try {
 					raw = await readFile(modelsPath, "utf8");
 				} catch {
-					ctx.output.writeError("models.json not found.");
-					return undefined;
+					return null;
 				}
 				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
 				const providerKey = ctx.session.state.model.provider;
@@ -745,15 +514,16 @@ class InteractiveModeHandler implements ModeHandler {
 				const api = typeof provider?.api === "string" ? provider.api : "";
 				const apiKeyEnv = typeof provider?.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
 				const apiKey = process.env[apiKeyEnv];
-
-				ctx.output.writeLine(`provider: ${providerKey}`);
-				ctx.output.writeLine(`  api: ${api || "(missing)"}`);
-				ctx.output.writeLine(`  baseUrl: ${baseUrl || "(missing)"}`);
-				ctx.output.writeLine(`  apiKey env: ${apiKeyEnv} (${apiKey ? "set" : "missing"})`);
+				const snapshot = {
+					providerKey,
+					api,
+					baseUrl,
+					apiKeyEnv,
+					apiKeyPresent: Boolean(apiKey),
+				};
 				if (!apiKey || !baseUrl || api !== "openai-completions") {
-					return undefined;
+					return snapshot;
 				}
-
 				const controller = new AbortController();
 				const timeout = setTimeout(() => controller.abort(), 3000);
 				try {
@@ -773,26 +543,25 @@ class InteractiveModeHandler implements ModeHandler {
 							signal: controller.signal,
 						},
 					);
-					ctx.output.writeLine(`  http: ${response.status}`);
 					if (!response.ok) {
-						ctx.output.writeError(await response.text());
-						return undefined;
+						return { ...snapshot, httpStatus: response.status, errorText: await response.text() };
 					}
 					const payload = (await response.json()) as any;
 					const text = payload?.choices?.[0]?.message?.content;
-					if (typeof text === "string") {
-						ctx.output.writeLine(`  response: ${text.trim()}`);
-					}
+					return {
+						...snapshot,
+						httpStatus: response.status,
+						responseText: typeof text === "string" ? text.trim() : null,
+					};
 				} catch (err) {
-					ctx.output.writeError(`  error: ${err instanceof Error ? err.message : String(err)}`);
+					return { ...snapshot, errorText: `  error: ${err instanceof Error ? err.message : String(err)}` };
 				} finally {
 					clearTimeout(timeout);
 				}
-				return undefined;
 			},
 		});
 
-		register({
+		registry.register({
 			name: "resume",
 			description: "Show recent sessions or resume one",
 			type: "local",
@@ -817,13 +586,14 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				const data = directMatch.recoveryData;
 
-				handler._suppressPersistOnce = true;
 				await sessionRef.current.close();
 
 				const recovered = runtime.recoverSession(data);
 				switchInteractiveSession(recovered);
 				handler.closeResumeBrowser();
-				writeSessionTranscriptPreview(ctx.output, directMatch);
+				for (const line of buildRestoredContextLines(directMatch)) {
+					ctx.output.writeLine(line);
+				}
 				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
 				ctx.output.writeLine("Next: continue this session, or /resume to view history again.");
 				return undefined;
@@ -954,6 +724,11 @@ class InteractiveModeHandler implements ModeHandler {
 				// Check for slash commands
 				const resolution = registry.resolve(trimmed);
 				if (resolution && resolution.type === "command") {
+					if (this.isInteractionBusy()) {
+						sink.writeError("Session is busy.");
+						line = await inputLoop.nextLine();
+						continue;
+					}
 					const executeCommand = async (): Promise<void> => {
 						await resolution.command.execute?.({
 							args: resolution.args,
@@ -1182,36 +957,17 @@ class InteractiveModeHandler implements ModeHandler {
 			| "ctrlv",
 	): void {
 		if (this._resumeBrowser !== null) {
-			if (key === "esc") {
+			const action = resolveResumeBrowserKeyAction(key, this.currentResumeBrowserBodyViewportRows());
+			if (action?.type === "close") {
 				this.closeResumeBrowser();
 				return;
 			}
-			if (key === "ctrlv") {
+			if (action?.type === "toggle_preview") {
 				this.toggleResumeBrowserPreview();
 				return;
 			}
-			if (key === "up" || key === "shifttab") {
-				this.moveResumeBrowserSelection(-1);
-				return;
-			}
-			if (key === "down" || key === "tab") {
-				this.moveResumeBrowserSelection(1);
-				return;
-			}
-			if (key === "pageup") {
-				this.moveResumeBrowserSelection(-Math.max(1, this.currentResumeBrowserBodyViewportRows() - 1));
-				return;
-			}
-			if (key === "pagedown") {
-				this.moveResumeBrowserSelection(Math.max(1, this.currentResumeBrowserBodyViewportRows() - 1));
-				return;
-			}
-			if (key === "wheelup") {
-				this.moveResumeBrowserSelection(-1);
-				return;
-			}
-			if (key === "wheeldown") {
-				this.moveResumeBrowserSelection(1);
+			if (action?.type === "move_selection") {
+				this.moveResumeBrowserSelection(action.delta);
 				return;
 			}
 		}
@@ -1456,13 +1212,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private async openResumeBrowser(runtime: AppRuntime, initialQuery: string): Promise<void> {
-		this._resumeBrowser = {
-			query: initialQuery,
-			hits: [],
-			selectedIndex: 0,
-			previewExpanded: false,
-			loading: true,
-		};
+		this._resumeBrowser = createResumeBrowserState(initialQuery);
 		this._detailPanelExpanded = false;
 		this._detailPanelScroll = 0;
 		this._transcriptScrollOffset = 0;
@@ -1516,24 +1266,19 @@ class InteractiveModeHandler implements ModeHandler {
 		const selectedSessionId = browser.hits[browser.selectedIndex]?.entry.recoveryData.sessionId.value ?? null;
 		const requestId = ++this._resumeSearchRequestId;
 		const nextQuery = query;
-		this._resumeBrowser = {
-			...browser,
-			query: nextQuery,
-			loading: true,
-			selectedIndex: browser.selectedIndex,
-		};
+		this._resumeBrowser = beginResumeBrowserSearch(browser, nextQuery);
 		this.rerenderInteractiveRegions();
 		const hits = await runtime.searchRecentSessions(nextQuery);
 		if (this._resumeBrowser === null || requestId !== this._resumeSearchRequestId) {
 			return;
 		}
-		this._resumeBrowser = {
-			...this._resumeBrowser,
-			query: nextQuery,
+		this._resumeBrowser = completeResumeBrowserSearch(
+			this._resumeBrowser,
+			nextQuery,
 			hits,
-			loading: false,
-			selectedIndex: resolveResumeBrowserSelectedIndex(hits, selectedSessionId, browser.selectedIndex),
-		};
+			selectedSessionId,
+			browser.selectedIndex,
+		);
 		if (browser.query !== nextQuery) {
 			this._resumeBrowserScrollOffset = 0;
 		}
@@ -1580,10 +1325,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser === null) {
 			return;
 		}
-		this._resumeBrowser = {
-			...this._resumeBrowser,
-			previewExpanded: !this._resumeBrowser.previewExpanded,
-		};
+		this._resumeBrowser = toggleResumeBrowserPreviewState(this._resumeBrowser);
 		getActiveDebugLogger()?.debug("resume.browser.preview", "Toggled resume browser preview", {
 			previewExpanded: this._resumeBrowser.previewExpanded,
 			selectedIndex: this._resumeBrowser.selectedIndex,
@@ -1612,7 +1354,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser.loading) {
 			return true;
 		}
-		const hit = this._resumeBrowser.hits[this._resumeBrowser.selectedIndex] ?? this._resumeBrowser.hits[0] ?? null;
+		const hit = resolveResumeBrowserSubmitHit(this._resumeBrowser);
 		if (!hit) {
 			return true;
 		}
@@ -1622,13 +1364,12 @@ class InteractiveModeHandler implements ModeHandler {
 			selectedHit: summarizeResumeBrowserHit(hit),
 		});
 		this.closeResumeBrowser();
-		this._suppressPersistOnce = true;
 		await sessionRef.current.close();
 		const recovered = runtime.recoverSession(data);
 		switchInteractiveSession(recovered);
-		writeSessionTranscriptPreview(sink, hit.entry);
-		sink.writeLine(`Resumed: ${data.sessionId.value}`);
-		sink.writeLine("Next: continue this session, or /resume to view history again.");
+		for (const line of buildResumeBrowserResumedLines(hit)) {
+			sink.writeLine(line);
+		}
 		return true;
 	}
 
@@ -1755,9 +1496,6 @@ class InteractiveModeHandler implements ModeHandler {
 		event: RuntimeEvent,
 		title?: string,
 	): void {
-		if (this._suppressPersistOnce) {
-			return;
-		}
 		if (this._recentSessionPersistTimer !== null) {
 			clearTimeout(this._recentSessionPersistTimer);
 		}
@@ -2519,31 +2257,6 @@ async function inspectGitWorkingTree(cwd: string): Promise<GitWorkingTreeSnapsho
 	};
 }
 
-function renderWorkingTreeSummary(
-	output: OutputSink,
-	changedPaths: ReadonlySet<string>,
-	snapshot: GitWorkingTreeSnapshot,
-): void {
-	output.writeLine("Working tree:");
-	if (changedPaths.size > 0) {
-		output.writeLine("Changed files (observed by tools):");
-		for (const path of [...changedPaths].sort((a, b) => a.localeCompare(b))) {
-			output.writeLine(`  ${path}`);
-		}
-	} else {
-		output.writeLine("Changed files (observed by tools): none");
-	}
-	if (!snapshot.available) {
-		return;
-	}
-	output.writeLine("git status --porcelain:");
-	output.writeLine(snapshot.statusLines.length > 0 ? `  ${snapshot.statusLines.join("\n  ")}` : "  clean");
-	if (snapshot.diffStatLines.length > 0) {
-		output.writeLine("git diff --stat:");
-		output.writeLine(`  ${snapshot.diffStatLines.join("\n  ")}`);
-	}
-}
-
 function readGitDiff(
 	cwd: string,
 	target: string | null,
@@ -3027,66 +2740,6 @@ function transcriptScrollDeltaForKey(
 		default:
 			return 0;
 	}
-}
-
-function resolveRecentSessionDirectSelection(
-	selector: string,
-	displayedEntries: readonly RecentSessionEntry[],
-	allRecentEntries: readonly RecentSessionEntry[],
-): RecentSessionEntry | null {
-	const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
-	const idx = Number.parseInt(idxText, 10);
-	if (Number.isFinite(idx) && idx >= 1 && idx <= displayedEntries.length) {
-		return displayedEntries[idx - 1] ?? null;
-	}
-
-	const exact = allRecentEntries.find((entry) => entry.recoveryData.sessionId.value === selector) ?? null;
-	if (exact) return exact;
-
-	const prefixMatches = allRecentEntries.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
-	if (prefixMatches.length === 1) return prefixMatches[0]!;
-	return null;
-}
-
-function writeSessionTranscriptPreview(output: OutputSink, entry: RecentSessionEntry): void {
-	const preview = entry.recoveryData.metadata?.recentMessages ?? [];
-	if (preview.length === 0) return;
-	output.writeLine("Restored context:");
-	for (const item of preview) {
-		const label = item.role === "user" ? "User" : "Assistant";
-		output.writeLine(`  ${label}: ${truncatePlainTerminalText(item.text, 88)}`);
-	}
-}
-
-function resolveResumeBrowserSelectedIndex(
-	hits: readonly RecentSessionSearchHit[],
-	selectedSessionId: string | null,
-	fallbackIndex: number,
-): number {
-	if (hits.length === 0) {
-		return 0;
-	}
-	if (selectedSessionId) {
-		const matchedIndex = hits.findIndex((hit) => hit.entry.recoveryData.sessionId.value === selectedSessionId);
-		if (matchedIndex >= 0) {
-			return matchedIndex;
-		}
-	}
-	return moveResumeBrowserSelection(fallbackIndex, 0, hits.length);
-}
-
-function summarizeResumeBrowserHit(hit: RecentSessionSearchHit | null | undefined): Record<string, unknown> | null {
-	if (!hit) {
-		return null;
-	}
-	return {
-		sessionId: hit.entry.recoveryData.sessionId.value,
-		matchSource: hit.matchSource,
-		headline: hit.headline,
-		title: hit.entry.title,
-		summarySource: hit.entry.recoveryData.metadata?.resumeSummary?.source ?? "legacy",
-		summaryVersion: hit.entry.recoveryData.metadata?.resumeSummary?.version ?? null,
-	};
 }
 
 function shouldPersistRecentSessionForEvent(event: RuntimeEvent): boolean {

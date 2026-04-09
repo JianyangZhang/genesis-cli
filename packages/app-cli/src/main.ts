@@ -139,29 +139,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 		});
 		logger.debug("cli.bootstrap", "Agent directory bootstrapped");
 
-		const runtime = createAppRuntime({
-			workingDirectory: options.workingDirectory,
-			agentDir: options.agentDir,
-			historyDir: options.historyDir,
-			configSources: options.configSources,
-			mode: options.mode,
-			model: options.model,
-			toolSet: options.toolSet,
-			createAdapter: (model) =>
-				new PiMonoSessionAdapter({
-					workingDirectory: options.workingDirectory,
-					agentDir: options.agentDir,
-					historyDir: options.historyDir,
-					model,
-					toolSet: options.toolSet,
-					thinkingLevel: options.thinkingLevel,
-					onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "session_init" }),
-					onUpstreamEvent: (event) => logRawUpstreamEvent(logger, { phase: "session_init", event }),
-					onSessionRecovered: (report) => logSessionRecovery(logger, { ...report, phase: "session_init" }),
-				}),
-		});
-		const recentSessionPrune = await runtime.pruneRecentSessions();
-		logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
+		const runtime = await createRuntimeForCliOptions(options, logger);
 
 		const handler = createModeHandler(options.mode, {
 			modelHost: {
@@ -308,6 +286,14 @@ async function prepareInteractiveLaunch(
 		auth: startupAuth,
 	});
 
+	const runtime = await createRuntimeForCliOptions(options, logger);
+	return { options, runtime };
+}
+
+async function createRuntimeForCliOptions(
+	options: CliOptions,
+	logger: Awaited<ReturnType<typeof initializeDebugLogger>>,
+): Promise<AppRuntime> {
 	const runtime = createAppRuntime({
 		workingDirectory: options.workingDirectory,
 		agentDir: options.agentDir,
@@ -331,7 +317,7 @@ async function prepareInteractiveLaunch(
 	});
 	const recentSessionPrune = await runtime.pruneRecentSessions();
 	logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
-	return { options, runtime };
+	return runtime;
 }
 
 export function validateInteractiveModelConfiguration(options: CliOptions, env: NodeJS.ProcessEnv = process.env): void {

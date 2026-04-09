@@ -56,6 +56,19 @@ describe("createSlashCommandRegistry", () => {
 		reg.register({ name: "internal", description: "hidden", type: "local", visibility: "internal" });
 		expect(reg.listPublic().map((cmd) => cmd.name)).toEqual(["hello"]);
 	});
+
+	it("lists commands by type with optional visibility filtering", () => {
+		const reg = createSlashCommandRegistry();
+		reg.register(cmdHello);
+		reg.register(cmdWorld);
+		reg.register({ name: "secret-ui", description: "hidden ui", type: "ui", visibility: "internal" });
+		reg.register({ name: "public-ui", description: "visible ui", type: "ui" });
+
+		expect(reg.listByType("local").map((cmd) => cmd.name)).toEqual(["hello"]);
+		expect(reg.listByType("ui").map((cmd) => cmd.name)).toEqual(["secret-ui", "public-ui"]);
+		expect(reg.listByType("ui", "public").map((cmd) => cmd.name)).toEqual(["public-ui"]);
+		expect(reg.listByType("ui", "internal").map((cmd) => cmd.name)).toEqual(["secret-ui"]);
+	});
 });
 
 describe("resolve", () => {

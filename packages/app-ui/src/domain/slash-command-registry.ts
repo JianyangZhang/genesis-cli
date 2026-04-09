@@ -5,7 +5,7 @@
  * from raw user input (e.g. "/model sonnet" → command "model" + args "sonnet").
  */
 
-import type { SlashCommand } from "../types/index.js";
+import type { SlashCommand, SlashCommandType, SlashCommandVisibility } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Resolution result
@@ -31,6 +31,9 @@ export interface SlashCommandRegistry {
 
 	/** List commands that are safe to show in user-facing help and suggestions. */
 	listPublic(): readonly SlashCommand[];
+
+	/** List commands of a given type, optionally filtered by visibility. */
+	listByType(type: SlashCommandType, visibility?: SlashCommandVisibility): readonly SlashCommand[];
 
 	/**
 	 * Resolve raw user input to a command.
@@ -62,6 +65,15 @@ export function createSlashCommandRegistry(): SlashCommandRegistry {
 
 		listPublic(): readonly SlashCommand[] {
 			return [...commands.values()].filter((command) => (command.visibility ?? "public") === "public");
+		},
+
+		listByType(type: SlashCommandType, visibility?: SlashCommandVisibility): readonly SlashCommand[] {
+			return [...commands.values()].filter((command) => {
+				if (command.type !== type) {
+					return false;
+				}
+				return visibility == null || (command.visibility ?? "public") === visibility;
+			});
 		},
 
 		resolve(input: string): SlashCommandResolution | null {

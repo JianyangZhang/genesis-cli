@@ -105,6 +105,7 @@ describe("createAppRuntime", () => {
 			toolSet: ["read", "edit"],
 			planSummary: null,
 			compactionSummary: null,
+			workingDirectory: "/tmp/recovered-workdir",
 			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
 		};
 
@@ -124,6 +125,7 @@ describe("createAppRuntime", () => {
 
 		expect(recovered.state.status).toBe("active");
 		expect(recovered.id).toEqual(session.id);
+		expect(recovered.context.workingDirectory).toBe("/tmp/recovered-workdir");
 		expect(events).toHaveLength(1);
 		if (events[0]!.type === "session_resumed") {
 			expect(events[0]!.recoveryData.model).toEqual(stubModel);
@@ -154,6 +156,77 @@ describe("createAppRuntime", () => {
 
 		expect(adapter.resumeCalled).toBe(true);
 		expect(adapter.lastResumeData).toEqual(recoveryData);
+	});
+
+	it("persists recovered session facts into recent catalog after follow-up input", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recover-facts-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/fallback",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const recovered = runtime.recoverSession({
+			sessionId: { value: "recovered-facts-session" },
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			workingDirectory: "/tmp/recovered-workdir",
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		});
+
+		await runtime.recordRecentSessionInput(recovered, "恢复后继续推进");
+		const recent = await runtime.listRecentSessions();
+
+		expect(recent[0]?.recoveryData.sessionId.value).toBe("recovered-facts-session");
+		expect(recent[0]?.recoveryData.workingDirectory).toBe("/tmp/recovered-workdir");
+		expect(recent[0]?.recoveryData.toolSet).toEqual(["read", "edit"]);
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("恢复后继续推进");
+	});
+
+	it("supports recoverSession + compaction + close + search as a stable recent-session flow", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recover-flow-"));
+		const historyDir = join(agentDir, "history");
+		const adapter = new StubKernelSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter,
+		});
+		const recoveryData: SessionRecoveryData = {
+			sessionId: { value: "recovered-session" },
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		};
+		const recovered = runtime.recoverSession(recoveryData);
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await runtime.recordRecentSessionInput(recovered, "README 发布流程");
+		await runtime.recordRecentSessionEvent(recovered, {
+			category: "compaction",
+			type: "compaction_completed",
+			summary: { compactedSummary: "README 发布流程梳理完成" },
+		});
+		await recovered.close();
+		await runtime.recordClosedRecentSession(recovered, closedRecoveryData!);
+
+		const results = await runtime.searchRecentSessions("README 发布");
+		expect(results).toHaveLength(1);
+		expect(results[0]?.entry.recoveryData.sessionId.value).toBe("recovered-session");
+		expect(results[0]?.entry.recoveryData.metadata?.summary).toContain("README 发布流程梳理完成");
 	});
 
 	it("records and lists recent sessions via the runtime contract", async () => {
@@ -235,6 +308,41 @@ describe("createAppRuntime", () => {
 			title: "resume this task",
 			source: "rule",
 		});
+	});
+
+	it("persists canonicalized recovery data from session_closed into recent catalog", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-session-closed-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await session.close();
+		expect(closedRecoveryData).not.toBeNull();
+		await runtime.recordClosedRecentSession(session, closedRecoveryData!);
+
+		let recent = await runtime.listRecentSessions();
+		for (let attempt = 0; attempt < 20 && recent.length === 0; attempt += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			recent = await runtime.listRecentSessions();
+		}
+
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(recent[0]?.recoveryData.model).toMatchObject({ id: "stub-model", provider: "stub" });
+		expect(recent[0]?.recoveryData.toolSet).toEqual(["read", "edit"]);
+		expect(recent[0]?.recoveryData.workingDirectory).toBe("/tmp/workspace");
+		expect(recent[0]?.recoveryData.agentDir).toBe(agentDir);
 	});
 
 	it("builds runtime-owned session history from user and assistant turns", async () => {
@@ -340,6 +448,61 @@ describe("createAppRuntime", () => {
 			{ role: "user", text: "哈哈" },
 		]);
 		expect(entryFiles).toEqual([`${canonicalSessionId}.json`]);
+	});
+
+	it("keeps resume-browser list and search stable across unknown-to-real recovery transitions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-resume-browser-flow-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new SequencedRecoveryAdapter([
+				{
+					sessionId: { value: "unknown-session" },
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+				{
+					sessionId: { value: "real-session-id" },
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+				{
+					sessionId: { value: "real-session-id" },
+					model: stubModel,
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+			]),
+		});
+		const session = runtime.createSession();
+
+		await runtime.recordRecentSessionInput(session, "README 发布流程");
+		await runtime.recordRecentSessionAssistantText(session, "我先整理发布步骤。");
+		await runtime.recordRecentSessionInput(session, "继续");
+
+		const browserResults = await runtime.searchRecentSessions("");
+		const searchResults = await runtime.searchRecentSessions("README 发布");
+		expect(browserResults).toHaveLength(1);
+		expect(searchResults).toHaveLength(1);
+		expect(browserResults[0]?.entry.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(searchResults[0]?.entry.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(browserResults[0]?.entry.recoveryData.metadata?.firstPrompt).toBe("README 发布流程");
+		expect(searchResults[0]?.snippet).toContain("README 发布流程");
 	});
 
 	it("preserves the earliest firstPrompt and deduplicates overlapping recent messages", async () => {
@@ -525,6 +688,78 @@ describe("createAppRuntime", () => {
 		});
 	});
 
+	it("keeps recent search stable after session close and compaction event updates", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-combo-guard-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await runtime.recordRecentSessionEvent(session, {
+			category: "compaction",
+			type: "compaction_completed",
+			summary: { compactedSummary: "README 发布流程梳理完成" },
+		});
+		await session.close();
+		await runtime.recordClosedRecentSession(session, closedRecoveryData!);
+
+		const results = await runtime.searchRecentSessions("README 发布");
+		expect(results).toHaveLength(1);
+		expect(results[0]?.entry.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(results[0]?.entry.recoveryData.metadata?.summary).toContain("README 发布流程梳理完成");
+		expect(results[0]?.matchSource).toBe("title");
+	});
+
+	it("keeps recent catalog consistent across close-and-new-session transitions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-clear-new-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const previous = runtime.createSession();
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await runtime.recordRecentSessionInput(previous, "旧会话：整理 README");
+		await previous.close();
+		await runtime.recordClosedRecentSession(previous, closedRecoveryData!);
+
+		const next = runtime.createSession();
+		await runtime.recordRecentSessionInput(next, "新会话：修复测试");
+
+		const browserResults = await runtime.searchRecentSessions("");
+		const oldResults = await runtime.searchRecentSessions("旧会话");
+		const newResults = await runtime.searchRecentSessions("新会话");
+		const recent = await runtime.listRecentSessions();
+
+		expect(recent).toHaveLength(2);
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(next.id.value);
+		expect(recent[1]?.recoveryData.sessionId.value).toBe(previous.id.value);
+		expect(newResults[0]?.entry.recoveryData.sessionId.value).toBe(next.id.value);
+		expect(oldResults[0]?.entry.recoveryData.sessionId.value).toBe(previous.id.value);
+		expect(browserResults.map((hit) => hit.entry.recoveryData.sessionId.value)).toEqual([
+			next.id.value,
+			previous.id.value,
+		]);
+	});
+
 	it("loads metadata from sessionFile before persisting session history", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-session-file-"));
 		const historyDir = join(agentDir, "history");
@@ -584,6 +819,254 @@ describe("createAppRuntime", () => {
 			{ role: "user", text: "帮我整理桌游清单" },
 			{ role: "assistant", text: "我先列候选项。" },
 		]);
+	});
+
+	it("refreshes cached recent-session metadata from sessionFile when runtime metadata is absent", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-session-refresh-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const sessionFile = join(agentDir, "session.jsonl");
+		const writeSessionFile = async (title: string, prompt: string, assistant: string) =>
+			writeFile(
+				sessionFile,
+				`${[
+					JSON.stringify({ type: "session_info", name: title }),
+					JSON.stringify({ type: "message", message: { role: "user", content: prompt } }),
+					JSON.stringify({ type: "message", message: { role: "assistant", content: assistant } }),
+				].join("\n")}\n`,
+				"utf8",
+			);
+
+		await writeSessionFile("旧标题", "旧问题", "旧回答");
+		await runtime.recordRecentSession({
+			sessionId: { value: "session-refresh" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: null,
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+			sessionFile,
+		});
+
+		await writeSessionFile("新标题", "新问题", "新回答");
+		await runtime.recordRecentSession({
+			sessionId: { value: "session-refresh" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: null,
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+			sessionFile,
+		});
+
+		const recent = await runtime.listRecentSessions();
+		const storedEntry = JSON.parse(await readFile(join(historyDir, "entries", "session-refresh.json"), "utf8")) as {
+			metadata?: {
+				summary?: string;
+				firstPrompt?: string;
+				recentMessages?: Array<{ role: string; text: string }>;
+				resumeSummary?: { title?: string };
+			};
+		};
+
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "新标题",
+			firstPrompt: "新问题",
+		});
+		expect(recent[0]?.recoveryData.metadata?.resumeSummary).toMatchObject({
+			title: "新标题",
+		});
+		expect(storedEntry.metadata).toMatchObject({
+			summary: "新标题",
+			firstPrompt: "新问题",
+		});
+		expect(storedEntry.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "新问题" },
+			{ role: "assistant", text: "新回答" },
+		]);
+	});
+
+	it("prefers entry-file recovery data over recent.json projections when listing sessions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-fact-source-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		await mkdir(join(historyDir, "entries"), { recursive: true });
+
+		await writeFile(
+			join(historyDir, "recent.json"),
+			`${JSON.stringify(
+				[
+					{
+						recoveryData: {
+							sessionId: { value: "session-fact-source" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "projection summary",
+								firstPrompt: "projection prompt",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "projection prompt" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "Projection Title",
+						updatedAt: 123,
+					},
+				],
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await writeFile(
+			join(historyDir, "entries", "session-fact-source.json"),
+			`${JSON.stringify({
+				sessionId: { value: "session-fact-source" },
+				model: stubModel,
+				toolSet: ["read"],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: {
+					summary: "entry summary",
+					firstPrompt: "entry prompt",
+					messageCount: 2,
+					fileSizeBytes: 96,
+					recentMessages: [
+						{ role: "user", text: "entry prompt" },
+						{ role: "assistant", text: "entry answer" },
+					],
+				},
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				agentDir,
+			})}\n`,
+			"utf8",
+		);
+
+		const recent = await runtime.listRecentSessions();
+
+		expect(recent[0]?.title).toBe("Projection Title");
+		expect(recent[0]?.updatedAt).toBe(123);
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "entry summary",
+			firstPrompt: "entry prompt",
+		});
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "entry prompt" },
+			{ role: "assistant", text: "entry answer" },
+		]);
+	});
+
+	it("deduplicates duplicate recent-session projections by sessionId when listing sessions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-dedupe-recent-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		await mkdir(join(historyDir, "entries"), { recursive: true });
+		await writeFile(
+			join(historyDir, "recent.json"),
+			`${JSON.stringify(
+				[
+					{
+						recoveryData: {
+							sessionId: { value: "session-duplicate" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "new projection",
+								firstPrompt: "new projection",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "new projection" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "New projection",
+						updatedAt: 200,
+					},
+					{
+						recoveryData: {
+							sessionId: { value: "session-duplicate" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "old projection",
+								firstPrompt: "old projection",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "old projection" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "Old projection",
+						updatedAt: 100,
+					},
+					{
+						recoveryData: {
+							sessionId: { value: "session-other" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "other projection",
+								firstPrompt: "other projection",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "other projection" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "Other projection",
+						updatedAt: 50,
+					},
+				],
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+
+		const recent = await runtime.listRecentSessions();
+
+		expect(recent).toHaveLength(2);
+		expect(recent[0]?.recoveryData.sessionId.value).toBe("session-duplicate");
+		expect(recent[0]?.title).toBe("New projection");
+		expect(recent[1]?.recoveryData.sessionId.value).toBe("session-other");
 	});
 
 	it("prunes recent sessions down to the latest 10 entries", async () => {
@@ -707,6 +1190,112 @@ describe("createAppRuntime", () => {
 		expect(rewritten[0]?.recoveryData.metadata).toBeUndefined();
 		expect(rewrittenLast.model).toEqual({ id: "", provider: "" });
 		expect(rewrittenLast.metadata).toBeUndefined();
+	});
+
+	it("rewrites recent and last projections from entry facts while pruning", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-prune-fact-source-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const sessionsDir = historyDir;
+		await mkdir(join(sessionsDir, "entries"), { recursive: true });
+		await writeFile(
+			join(sessionsDir, "recent.json"),
+			`${JSON.stringify(
+				[
+					{
+						recoveryData: {
+							sessionId: { value: "projection-session" },
+							model: stubModel,
+							toolSet: ["read"],
+							planSummary: null,
+							compactionSummary: null,
+							metadata: {
+								summary: "projection summary",
+								firstPrompt: "projection prompt",
+								messageCount: 1,
+								fileSizeBytes: 64,
+								recentMessages: [{ role: "user", text: "projection prompt" }],
+							},
+							taskState: { status: "idle", currentTaskId: null, startedAt: null },
+							agentDir,
+						},
+						title: "Projection Title",
+						updatedAt: 1000,
+					},
+				],
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await writeFile(
+			join(sessionsDir, "last.json"),
+			`${JSON.stringify({
+				sessionId: { value: "projection-session" },
+				model: stubModel,
+				toolSet: ["read"],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: {
+					summary: "projection summary",
+					firstPrompt: "projection prompt",
+					messageCount: 1,
+					fileSizeBytes: 64,
+					recentMessages: [{ role: "user", text: "projection prompt" }],
+				},
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				agentDir,
+			})}\n`,
+			"utf8",
+		);
+		await writeFile(
+			join(sessionsDir, "entries", "projection-session.json"),
+			`${JSON.stringify({
+				sessionId: { value: "projection-session" },
+				model: stubModel,
+				toolSet: ["read"],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: {
+					summary: "entry summary",
+					firstPrompt: "entry prompt",
+					messageCount: 2,
+					fileSizeBytes: 96,
+					recentMessages: [
+						{ role: "user", text: "entry prompt" },
+						{ role: "assistant", text: "entry answer" },
+					],
+				},
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				agentDir,
+			})}\n`,
+			"utf8",
+		);
+
+		const prune = await runtime.pruneRecentSessions(10);
+		const rewritten = JSON.parse(await readFile(join(sessionsDir, "recent.json"), "utf8")) as Array<{
+			recoveryData: { metadata?: { summary?: string; firstPrompt?: string } };
+		}>;
+		const rewrittenLast = JSON.parse(await readFile(join(sessionsDir, "last.json"), "utf8")) as {
+			metadata?: { summary?: string; firstPrompt?: string };
+		};
+
+		expect(prune).toEqual({ before: 1, after: 1, removed: 0 });
+		expect(rewritten[0]?.recoveryData.metadata).toMatchObject({
+			summary: "entry summary",
+			firstPrompt: "entry prompt",
+		});
+		expect(rewrittenLast.metadata).toMatchObject({
+			summary: "entry summary",
+			firstPrompt: "entry prompt",
+		});
 	});
 
 	it("uses the configured recent-session max entries by default", async () => {

@@ -34,20 +34,30 @@ export {
 	renderStatusLine,
 } from "./adapters/index.js";
 export type {
+	InteractiveLocalCommandDeps,
 	SlashCommandRegistry,
 	SlashCommandResolution,
 } from "./domain/index.js";
 // Domain (slash commands)
 export {
 	createBuiltinCommands,
+	createBuiltinCommandRegistry,
+	createInteractiveCommandRegistry,
+	createInteractiveLocalCommands,
+	renderWorkingTreeSummary,
 	createSlashCommandRegistry,
 } from "./domain/index.js";
 // Services (formatters + interaction state)
 export {
 	buildInteractiveFooterLeadingLines,
+	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
+	buildResumeBrowserResumedLines,
+	beginResumeBrowserSearch,
+	completeResumeBrowserSearch,
+	createResumeBrowserState,
 	createRpcError,
 	createRpcResponse,
 	eventToJsonEnvelope,
@@ -64,8 +74,14 @@ export {
 	parseRpcRequest,
 	RPC_ERRORS,
 	RPC_METHODS,
+	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserKeyAction,
+	resolveResumeBrowserSelectedIndex,
+	resolveResumeBrowserSubmitHit,
 	reduceInteractionState,
 	sanitizeForJson,
+	summarizeResumeBrowserHit,
+	toggleResumeBrowserPreviewState,
 } from "./services/index.js";
 // Types
 export type {

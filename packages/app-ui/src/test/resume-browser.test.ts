@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+	beginResumeBrowserSearch,
+	buildRestoredContextLines,
+	buildResumeBrowserResumedLines,
+	completeResumeBrowserSearch,
+	createResumeBrowserState,
 	formatResumeBrowserTranscriptBlocks,
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
+	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserKeyAction,
+	resolveResumeBrowserSelectedIndex,
+	resolveResumeBrowserSubmitHit,
+	summarizeResumeBrowserHit,
+	toggleResumeBrowserPreviewState,
 } from "../services/resume-browser.js";
 
 describe("resume browser formatter", () => {
@@ -319,5 +330,289 @@ describe("resume browser formatter", () => {
 		expect(moveResumeBrowserSelection(0, -1, 3)).toBe(0);
 		expect(moveResumeBrowserSelection(0, 1, 3)).toBe(1);
 		expect(moveResumeBrowserSelection(2, 1, 3)).toBe(2);
+	});
+
+	it("formats restored context lines from recent messages", () => {
+		const lines = buildRestoredContextLines({
+			entry: {
+				title: "resume target",
+				updatedAt: 1,
+				recoveryData: {
+					sessionId: { value: "session-a" },
+					model: { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" },
+					toolSet: ["read"],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						summary: "goal",
+						firstPrompt: "user prompt",
+						messageCount: 2,
+						fileSizeBytes: 64,
+						recentMessages: [
+							{ role: "user", text: "本地所有修改，commit & push" },
+							{ role: "assistant", text: "我会先检查工作区并整理提交内容。" },
+						],
+					},
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+			},
+			headline: "resume target",
+			snippet: "goal",
+			matchSource: "recent",
+		});
+
+		expect(lines).toEqual([
+			"Restored context:",
+			"  User: 本地所有修改，commit & push",
+			"  Assistant: 我会先检查工作区并整理提交内容。",
+		]);
+	});
+
+	it("resolves direct recent-session selections by index, exact id, and unique prefix", () => {
+		const first = {
+			title: "first",
+			updatedAt: 1,
+			recoveryData: {
+				sessionId: { value: "session-search-first" },
+				model: { id: "glm-5.1", provider: "zai" },
+				toolSet: [],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			},
+		};
+		const second = {
+			title: "second",
+			updatedAt: 2,
+			recoveryData: {
+				sessionId: { value: "session-search-second" },
+				model: { id: "glm-5.1", provider: "zai" },
+				toolSet: [],
+				planSummary: null,
+				compactionSummary: null,
+				metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			},
+		};
+		const displayed = [first, second];
+
+		expect(resolveRecentSessionDirectSelection("#1", displayed, displayed)).toBe(first);
+		expect(resolveRecentSessionDirectSelection("session-search-second", displayed, displayed)).toBe(second);
+		expect(resolveRecentSessionDirectSelection("session-search-sec", displayed, displayed)).toBe(second);
+		expect(resolveRecentSessionDirectSelection("session-search", displayed, displayed)).toBeNull();
+	});
+
+	it("restores selected resume-browser index by session id and clamps fallback", () => {
+		const hits = [
+			{
+				entry: {
+					title: "first",
+					updatedAt: 1,
+					recoveryData: {
+						sessionId: { value: "session-a" },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+				},
+				headline: "first",
+				snippet: "first",
+				matchSource: "recent" as const,
+			},
+			{
+				entry: {
+					title: "second",
+					updatedAt: 2,
+					recoveryData: {
+						sessionId: { value: "session-b" },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+				},
+				headline: "second",
+				snippet: "second",
+				matchSource: "recent" as const,
+			},
+		];
+
+		expect(resolveResumeBrowserSelectedIndex(hits, "session-b", 0)).toBe(1);
+		expect(resolveResumeBrowserSelectedIndex(hits, "missing", 99)).toBe(1);
+		expect(resolveResumeBrowserSelectedIndex([], null, 5)).toBe(0);
+	});
+
+	it("summarizes resume-browser hits for debug logging", () => {
+		const summary = summarizeResumeBrowserHit({
+			entry: {
+				title: "resume target",
+				updatedAt: 1,
+				recoveryData: {
+					sessionId: { value: "session-debug" },
+					model: { id: "glm-5.1", provider: "zai" },
+					toolSet: [],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						messageCount: 0,
+						fileSizeBytes: 0,
+						recentMessages: [],
+						resumeSummary: { source: "rule", version: 2 } as never,
+					},
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+			},
+			headline: "resume headline",
+			snippet: "resume snippet",
+			matchSource: "summary",
+		});
+
+		expect(summary).toEqual({
+			sessionId: "session-debug",
+			matchSource: "summary",
+			headline: "resume headline",
+			title: "resume target",
+			summarySource: "rule",
+			summaryVersion: 2,
+		});
+		expect(summarizeResumeBrowserHit(null)).toBeNull();
+	});
+
+	it("builds resume-browser state transitions for open, search, result apply, and preview toggle", () => {
+		const opened = createResumeBrowserState("abc");
+		expect(opened).toEqual({
+			query: "abc",
+			hits: [],
+			selectedIndex: 0,
+			previewExpanded: false,
+			loading: true,
+		});
+
+		const searching = beginResumeBrowserSearch(
+			{ ...opened, loading: false, selectedIndex: 1, previewExpanded: true },
+			"abcd",
+		);
+		expect(searching).toEqual({
+			query: "abcd",
+			hits: [],
+			selectedIndex: 1,
+			previewExpanded: true,
+			loading: true,
+		});
+
+		const hits = [
+			{
+				entry: {
+					title: "first",
+					updatedAt: 1,
+					recoveryData: {
+						sessionId: { value: "session-a" },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+				},
+				headline: "first",
+				snippet: "first",
+				matchSource: "recent" as const,
+			},
+			{
+				entry: {
+					title: "second",
+					updatedAt: 2,
+					recoveryData: {
+						sessionId: { value: "session-b" },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: [],
+						planSummary: null,
+						compactionSummary: null,
+						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+				},
+				headline: "second",
+				snippet: "second",
+				matchSource: "recent" as const,
+			},
+		];
+
+		const completed = completeResumeBrowserSearch(searching, "abcd", hits, "session-b", 0);
+		expect(completed.selectedIndex).toBe(1);
+		expect(completed.loading).toBe(false);
+		expect(completed.query).toBe("abcd");
+		expect(completed.hits).toEqual(hits);
+
+		expect(toggleResumeBrowserPreviewState(completed).previewExpanded).toBe(false);
+	});
+
+	it("resolves resume-browser submit hit and formats resumed output lines", () => {
+		const hit = {
+			entry: {
+				title: "resume target",
+				updatedAt: 1,
+				recoveryData: {
+					sessionId: { value: "session-resume" },
+					model: { id: "glm-5.1", provider: "zai" },
+					toolSet: [],
+					planSummary: null,
+					compactionSummary: null,
+					metadata: {
+						messageCount: 2,
+						fileSizeBytes: 64,
+						recentMessages: [
+							{ role: "user", text: "继续推进 /resume" },
+							{ role: "assistant", text: "我会先恢复上下文。" },
+						],
+					},
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				},
+			},
+			headline: "resume target",
+			snippet: "resume target",
+			matchSource: "recent" as const,
+		};
+		expect(
+			resolveResumeBrowserSubmitHit({
+				query: "",
+				hits: [hit],
+				selectedIndex: 0,
+				previewExpanded: false,
+				loading: true,
+			}),
+		).toBeNull();
+		expect(
+			resolveResumeBrowserSubmitHit({
+				query: "",
+				hits: [hit],
+				selectedIndex: 0,
+				previewExpanded: false,
+				loading: false,
+			}),
+		).toEqual(hit);
+		expect(buildResumeBrowserResumedLines(hit)).toEqual([
+			"Restored context:",
+			"  User: 继续推进 /resume",
+			"  Assistant: 我会先恢复上下文。",
+			"Resumed: session-resume",
+			"Next: continue this session, or /resume to view history again.",
+		]);
+	});
+
+	it("maps resume-browser special keys into pure key actions", () => {
+		expect(resolveResumeBrowserKeyAction("esc", 10)).toEqual({ type: "close" });
+		expect(resolveResumeBrowserKeyAction("ctrlv", 10)).toEqual({ type: "toggle_preview" });
+		expect(resolveResumeBrowserKeyAction("up", 10)).toEqual({ type: "move_selection", delta: -1 });
+		expect(resolveResumeBrowserKeyAction("tab", 10)).toEqual({ type: "move_selection", delta: 1 });
+		expect(resolveResumeBrowserKeyAction("pageup", 8)).toEqual({ type: "move_selection", delta: -7 });
+		expect(resolveResumeBrowserKeyAction("pagedown", 8)).toEqual({ type: "move_selection", delta: 7 });
 	});
 });

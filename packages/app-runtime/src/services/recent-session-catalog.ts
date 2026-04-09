@@ -72,14 +72,18 @@ export async function listRecentSessions(historyDir: string | undefined): Promis
 	if (!historyDir) {
 		return [];
 	}
+	const storeDir = getRecentSessionCatalogDir(historyDir);
 	try {
 		const parsed = JSON.parse(
-			await readFile(join(getRecentSessionCatalogDir(historyDir), "recent.json"), "utf8"),
+			await readFile(join(storeDir, "recent.json"), "utf8"),
 		) as unknown;
 		if (!Array.isArray(parsed)) {
 			return [];
 		}
-		return (parsed as RecentSessionEntry[]).map((entry) => normalizeRecentSessionEntry(entry));
+		const materialized = await Promise.all(
+			(parsed as RecentSessionEntry[]).map((entry) => materializeRecentSessionEntry(storeDir, entry)),
+		);
+		return dedupeRecentSessionEntriesBySessionId(materialized);
 	} catch {
 		return [];
 	}
@@ -94,12 +98,18 @@ export async function pruneRecentSessions(
 	}
 	const storeDir = getRecentSessionCatalogDir(historyDir);
 	const existing = await readRecentSessionsByDir(storeDir);
-	const normalized = existing.map((entry) => normalizeRecentSessionEntry(entry));
+	const normalized = dedupeRecentSessionEntriesBySessionId(
+		await Promise.all(existing.map((entry) => materializeRecentSessionEntry(storeDir, entry))),
+	);
 	const compacted = normalized.slice(0, Math.max(0, maxEntries));
 	const before = existing.length;
 	const after = compacted.length;
 	const last = await readLastRecentSessionByDir(storeDir);
-	const normalizedLast = last ? enrichRecoveryDataForRecentCatalog(normalizeRecentSessionRecoveryData(last)) : null;
+	const normalizedLast = last
+		? enrichRecoveryDataForRecentCatalog(
+				normalizeRecentSessionRecoveryData(await materializeRecentSessionRecoveryDataFromEntry(storeDir, last)),
+			)
+		: null;
 	if (before !== after || JSON.stringify(existing) !== JSON.stringify(compacted)) {
 		await mkdir(storeDir, { recursive: true });
 		await writeFile(join(storeDir, "recent.json"), `${JSON.stringify(compacted, null, 2)}\n`, "utf8");
@@ -186,6 +196,41 @@ async function readRecentSessionEntryById(storeDir: string, sessionId: string): 
 	} catch {
 		return null;
 	}
+}
+
+async function materializeRecentSessionEntry(storeDir: string, entry: RecentSessionEntry): Promise<RecentSessionEntry> {
+	const normalized = normalizeRecentSessionEntry(entry);
+	const persistedRecoveryData = await materializeRecentSessionRecoveryDataFromEntry(storeDir, normalized.recoveryData);
+	if (!persistedRecoveryData) {
+		return normalized;
+	}
+	return {
+		...normalized,
+		recoveryData: enrichRecoveryDataForRecentCatalog(normalizeRecentSessionRecoveryData(persistedRecoveryData)),
+	};
+}
+
+async function materializeRecentSessionRecoveryDataFromEntry(
+	storeDir: string,
+	recoveryData: SessionRecoveryData,
+): Promise<SessionRecoveryData> {
+	return (await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value)) ?? recoveryData;
+}
+
+function dedupeRecentSessionEntriesBySessionId(
+	entries: readonly RecentSessionEntry[],
+): readonly RecentSessionEntry[] {
+	const seen = new Set<string>();
+	const deduped: RecentSessionEntry[] = [];
+	for (const entry of entries) {
+		const sessionId = entry.recoveryData.sessionId.value;
+		if (seen.has(sessionId)) {
+			continue;
+		}
+		seen.add(sessionId);
+		deduped.push(entry);
+	}
+	return deduped;
 }
 
 function getRecentSessionEntriesDir(storeDir: string): string {
@@ -331,12 +376,15 @@ function normalizeRecentSessionEntry(entry: RecentSessionEntry): RecentSessionEn
 	};
 }
 
-async function materializeRecentSessionRecoveryData(recoveryData: SessionRecoveryData): Promise<SessionRecoveryData> {
+async function materializeRecentSessionRecoveryData(
+	recoveryData: SessionRecoveryData,
+	options?: { readonly reloadSessionFileMetadata?: boolean },
+): Promise<SessionRecoveryData> {
 	const normalized = normalizeRecentSessionRecoveryData(recoveryData);
-	const metadata =
-		normalized.metadata ??
-		(normalized.sessionFile ? await loadMetadataFromSessionFile(normalized.sessionFile) : null) ??
-		undefined;
+	const sessionFileMetadata = normalized.sessionFile ? await loadMetadataFromSessionFile(normalized.sessionFile) : null;
+	const metadata = options?.reloadSessionFileMetadata
+		? refreshMetadataFromSessionFile(normalized.metadata, sessionFileMetadata)
+		: (normalized.metadata ?? sessionFileMetadata ?? undefined);
 	return enrichRecoveryDataForRecentCatalog(
 		metadata
 			? {
@@ -354,7 +402,9 @@ async function persistRecentSessionRecoveryData(
 ): Promise<void> {
 	const existing = await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value);
 	const mergedRecoveryData = mergeRecentSessionRecoveryData(existing, recoveryData);
-	const enrichedRecoveryData = await materializeRecentSessionRecoveryData(mergedRecoveryData);
+	const enrichedRecoveryData = await materializeRecentSessionRecoveryData(mergedRecoveryData, {
+		reloadSessionFileMetadata: shouldReloadRecentSessionMetadataFromSessionFile(recoveryData),
+	});
 	await mkdir(storeDir, { recursive: true });
 	await mkdir(getRecentSessionEntriesDir(storeDir), { recursive: true });
 	await writeFile(join(storeDir, "last.json"), `${JSON.stringify(enrichedRecoveryData, null, 2)}\n`, "utf8");
@@ -364,6 +414,10 @@ async function persistRecentSessionRecoveryData(
 		"utf8",
 	);
 	await upsertRecentSession(storeDir, enrichedRecoveryData, options?.title);
+}
+
+export function shouldReloadRecentSessionMetadataFromSessionFile(recoveryData: SessionRecoveryData): boolean {
+	return recoveryData.metadata == null && typeof recoveryData.sessionFile === "string" && recoveryData.sessionFile.length > 0;
 }
 
 function mergeRecentSessionRecoveryData(
@@ -414,6 +468,31 @@ function mergeRecentSessionMetadata(
 				: existing?.resumeSummary?.source === "model"
 					? existing.resumeSummary
 					: (incoming?.resumeSummary ?? existing?.resumeSummary ?? null),
+	};
+}
+
+function refreshMetadataFromSessionFile(
+	existing: SessionRecoveryMetadata | null | undefined,
+	sessionFileMetadata: SessionRecoveryData["metadata"] | null,
+): SessionRecoveryMetadata | undefined {
+	if (!existing && !sessionFileMetadata) {
+		return undefined;
+	}
+	if (!sessionFileMetadata) {
+		return existing ?? undefined;
+	}
+	return {
+		...existing,
+		summary: normalizeRecentSessionText(sessionFileMetadata.summary) ?? normalizeRecentSessionText(existing?.summary) ?? undefined,
+		firstPrompt:
+			normalizeRecentSessionText(sessionFileMetadata.firstPrompt) ??
+			normalizeRecentSessionText(existing?.firstPrompt) ??
+			undefined,
+		messageCount: Math.max(sessionFileMetadata.messageCount, existing?.messageCount ?? 0),
+		fileSizeBytes: sessionFileMetadata.fileSizeBytes || existing?.fileSizeBytes || 0,
+		recentMessages:
+			sessionFileMetadata.recentMessages.length > 0 ? sessionFileMetadata.recentMessages : (existing?.recentMessages ?? []),
+		resumeSummary: existing?.resumeSummary ?? null,
 	};
 }
 

@@ -1,4 +1,4 @@
-import type { RecentSessionMatchSource, RecentSessionSearchHit } from "@pickle-pee/runtime";
+import type { RecentSessionEntry, RecentSessionMatchSource, RecentSessionSearchHit } from "@pickle-pee/runtime";
 import type { ResumeBrowserState } from "../types/index.js";
 
 export function moveResumeBrowserSelection(currentIndex: number, delta: number, total: number): number {
@@ -65,6 +65,48 @@ export function buildResumeBrowserFooterHintLines(): readonly string[] {
 	return ["Type to search · Enter to open · ↑↓ to select · Ctrl+V preview · Esc cancel"];
 }
 
+export function createResumeBrowserState(initialQuery: string): ResumeBrowserState {
+	return {
+		query: initialQuery,
+		hits: [],
+		selectedIndex: 0,
+		previewExpanded: false,
+		loading: true,
+	};
+}
+
+export function beginResumeBrowserSearch(state: ResumeBrowserState, nextQuery: string): ResumeBrowserState {
+	return {
+		...state,
+		query: nextQuery,
+		loading: true,
+		selectedIndex: state.selectedIndex,
+	};
+}
+
+export function completeResumeBrowserSearch(
+	state: ResumeBrowserState,
+	nextQuery: string,
+	hits: readonly RecentSessionSearchHit[],
+	selectedSessionId: string | null,
+	fallbackIndex: number,
+): ResumeBrowserState {
+	return {
+		...state,
+		query: nextQuery,
+		hits,
+		loading: false,
+		selectedIndex: resolveResumeBrowserSelectedIndex(hits, selectedSessionId, fallbackIndex),
+	};
+}
+
+export function toggleResumeBrowserPreviewState(state: ResumeBrowserState): ResumeBrowserState {
+	return {
+		...state,
+		previewExpanded: !state.previewExpanded,
+	};
+}
+
 export function measureResumeBrowserSelectedLineOffset(state: ResumeBrowserState, now = Date.now()): number {
 	let offset = 4;
 	if (state.loading || state.hits.length === 0) {
@@ -99,6 +141,131 @@ export function buildResumeBrowserPreviewLines(hit: RecentSessionSearchHit, now 
 		lines.push(`  ${role}: ${message.text}`);
 	}
 	return lines;
+}
+
+export function buildRestoredContextLines(source: RecentSessionEntry | RecentSessionSearchHit): readonly string[] {
+	const entry = "entry" in source ? source.entry : source;
+	const preview = entry.recoveryData.metadata?.recentMessages ?? [];
+	if (preview.length === 0) {
+		return [];
+	}
+	const lines = ["Restored context:"];
+	for (const item of preview) {
+		const label = item.role === "user" ? "User" : "Assistant";
+		lines.push(`  ${label}: ${truncateResumePreviewText(item.text, 88)}`);
+	}
+	return lines;
+}
+
+export function resolveRecentSessionDirectSelection(
+	selector: string,
+	displayedEntries: readonly RecentSessionEntry[],
+	allRecentEntries: readonly RecentSessionEntry[],
+): RecentSessionEntry | null {
+	const idxText = selector.startsWith("#") ? selector.slice(1) : selector;
+	const idx = Number.parseInt(idxText, 10);
+	if (Number.isFinite(idx) && idx >= 1 && idx <= displayedEntries.length) {
+		return displayedEntries[idx - 1] ?? null;
+	}
+
+	const exact = allRecentEntries.find((entry) => entry.recoveryData.sessionId.value === selector) ?? null;
+	if (exact) {
+		return exact;
+	}
+
+	const prefixMatches = allRecentEntries.filter((entry) => entry.recoveryData.sessionId.value.startsWith(selector));
+	return prefixMatches.length === 1 ? (prefixMatches[0] ?? null) : null;
+}
+
+export function resolveResumeBrowserSelectedIndex(
+	hits: readonly RecentSessionSearchHit[],
+	selectedSessionId: string | null,
+	fallbackIndex: number,
+): number {
+	if (hits.length === 0) {
+		return 0;
+	}
+	if (selectedSessionId) {
+		const matchedIndex = hits.findIndex((hit) => hit.entry.recoveryData.sessionId.value === selectedSessionId);
+		if (matchedIndex >= 0) {
+			return matchedIndex;
+		}
+	}
+	return moveResumeBrowserSelection(fallbackIndex, 0, hits.length);
+}
+
+export function summarizeResumeBrowserHit(hit: RecentSessionSearchHit | null | undefined): Record<string, unknown> | null {
+	if (!hit) {
+		return null;
+	}
+	return {
+		sessionId: hit.entry.recoveryData.sessionId.value,
+		matchSource: hit.matchSource,
+		headline: hit.headline,
+		title: hit.entry.title,
+		summarySource: hit.entry.recoveryData.metadata?.resumeSummary?.source ?? "legacy",
+		summaryVersion: hit.entry.recoveryData.metadata?.resumeSummary?.version ?? null,
+	};
+}
+
+export function resolveResumeBrowserSubmitHit(state: ResumeBrowserState): RecentSessionSearchHit | null {
+	if (state.loading) {
+		return null;
+	}
+	return state.hits[state.selectedIndex] ?? state.hits[0] ?? null;
+}
+
+export function buildResumeBrowserResumedLines(hit: RecentSessionSearchHit): readonly string[] {
+	const data = hit.entry.recoveryData;
+	return [
+		...buildRestoredContextLines(hit),
+		`Resumed: ${data.sessionId.value}`,
+		"Next: continue this session, or /resume to view history again.",
+	];
+}
+
+export type ResumeBrowserKey =
+	| "up"
+	| "down"
+	| "pageup"
+	| "pagedown"
+	| "wheelup"
+	| "wheeldown"
+	| "tab"
+	| "shifttab"
+	| "esc"
+	| "ctrlo"
+	| "ctrlv";
+
+export type ResumeBrowserKeyAction =
+	| { readonly type: "close" }
+	| { readonly type: "toggle_preview" }
+	| { readonly type: "move_selection"; readonly delta: number }
+	| null;
+
+export function resolveResumeBrowserKeyAction(
+	key: ResumeBrowserKey,
+	bodyViewportRows: number,
+): ResumeBrowserKeyAction {
+	if (key === "esc") {
+		return { type: "close" };
+	}
+	if (key === "ctrlv") {
+		return { type: "toggle_preview" };
+	}
+	if (key === "up" || key === "shifttab" || key === "wheelup") {
+		return { type: "move_selection", delta: -1 };
+	}
+	if (key === "down" || key === "tab" || key === "wheeldown") {
+		return { type: "move_selection", delta: 1 };
+	}
+	if (key === "pageup") {
+		return { type: "move_selection", delta: -Math.max(1, bodyViewportRows - 1) };
+	}
+	if (key === "pagedown") {
+		return { type: "move_selection", delta: Math.max(1, bodyViewportRows - 1) };
+	}
+	return null;
 }
 
 function buildResumeBrowserHitLines(
@@ -278,4 +445,11 @@ function compactResumeBrowserLine(value: string | null | undefined, maxLength: n
 		return normalized;
 	}
 	return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function truncateResumePreviewText(text: string, maxLength: number): string {
+	if (text.length <= maxLength) {
+		return text;
+	}
+	return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
