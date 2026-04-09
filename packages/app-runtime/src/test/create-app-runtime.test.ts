@@ -287,7 +287,7 @@ describe("createAppRuntime", () => {
 			historyDir,
 			mode: "interactive",
 			model: stubModel,
-			adapter: new StubKernelSessionAdapter(),
+			createAdapter: () => new StubKernelSessionAdapter(),
 		});
 		const session = runtime.createSession();
 		let closedRecoveryData: SessionRecoveryData | null = null;
@@ -665,7 +665,7 @@ describe("createAppRuntime", () => {
 			historyDir,
 			mode: "interactive",
 			model: stubModel,
-			adapter: new StubKernelSessionAdapter(),
+			createAdapter: () => new StubKernelSessionAdapter(),
 		});
 		const session = runtime.createSession();
 		let closedRecoveryData: SessionRecoveryData | null = null;
@@ -686,6 +686,46 @@ describe("createAppRuntime", () => {
 		expect(results[0]?.entry.recoveryData.sessionId.value).toBe(session.id.value);
 		expect(results[0]?.entry.recoveryData.metadata?.summary).toContain("README 发布流程梳理完成");
 		expect(results[0]?.matchSource).toBe("title");
+	});
+
+	it("keeps recent catalog consistent across close-and-new-session transitions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-clear-new-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const previous = runtime.createSession();
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await runtime.recordRecentSessionInput(previous, "旧会话：整理 README");
+		await previous.close();
+		await runtime.recordClosedRecentSession(previous, closedRecoveryData!);
+
+		const next = runtime.createSession();
+		await runtime.recordRecentSessionInput(next, "新会话：修复测试");
+
+		const browserResults = await runtime.searchRecentSessions("");
+		const oldResults = await runtime.searchRecentSessions("旧会话");
+		const newResults = await runtime.searchRecentSessions("新会话");
+		const recent = await runtime.listRecentSessions();
+
+		expect(recent).toHaveLength(2);
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(next.id.value);
+		expect(recent[1]?.recoveryData.sessionId.value).toBe(previous.id.value);
+		expect(newResults[0]?.entry.recoveryData.sessionId.value).toBe(next.id.value);
+		expect(oldResults[0]?.entry.recoveryData.sessionId.value).toBe(previous.id.value);
+		expect(browserResults.map((hit) => hit.entry.recoveryData.sessionId.value)).toEqual([
+			next.id.value,
+			previous.id.value,
+		]);
 	});
 
 	it("loads metadata from sessionFile before persisting session history", async () => {
