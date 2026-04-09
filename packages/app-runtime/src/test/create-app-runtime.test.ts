@@ -237,6 +237,41 @@ describe("createAppRuntime", () => {
 		});
 	});
 
+	it("persists canonicalized recovery data from session_closed into recent catalog", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-session-closed-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await session.close();
+		expect(closedRecoveryData).not.toBeNull();
+		await runtime.recordClosedRecentSession(session, closedRecoveryData!);
+
+		let recent = await runtime.listRecentSessions();
+		for (let attempt = 0; attempt < 20 && recent.length === 0; attempt += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			recent = await runtime.listRecentSessions();
+		}
+
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(recent[0]?.recoveryData.model).toMatchObject({ id: "stub-model", provider: "stub" });
+		expect(recent[0]?.recoveryData.toolSet).toEqual(["read", "edit"]);
+		expect(recent[0]?.recoveryData.workingDirectory).toBe("/tmp/workspace");
+		expect(recent[0]?.recoveryData.agentDir).toBe(agentDir);
+	});
+
 	it("builds runtime-owned session history from user and assistant turns", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-history-turns-"));
 		const historyDir = join(agentDir, "history");

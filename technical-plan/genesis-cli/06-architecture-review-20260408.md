@@ -705,6 +705,10 @@
 - [ ] P0-3：建立 session / rich recovery 的架构验收测试
   原因：没有稳定自动化护栏，后续边界收口会频繁回归。
   进行中说明：TTY、resume、recent-session、interactive 命令链路的回归测试已大幅补齐，但还未形成完整的架构验收层。
+  已完成子项：
+  - [x] P0-3.a：补齐 `session_closed -> recordClosedRecentSession -> recent catalog` 的跨层验收护栏测试
+  未完成子项：
+  - [ ] P0-3.b：补齐 recoverSession / recent search / compaction 组合场景的架构验收护栏
 
 ### 9.2 P1
 
