@@ -1792,7 +1792,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private currentResumeBrowserBodyDisplayRows(): number {
 		return this.currentResumeBrowserBodyBlocks().reduce(
-			(total, block) => total + countRenderedTerminalRows(block.split("\n"), this.terminalWidth()),
+			(total, block) => total + countRenderedTerminalRowsFromTuiCore(block.split("\n"), this.terminalWidth()),
 			0,
 		);
 	}
@@ -1819,12 +1819,12 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		let start = 0;
 		for (let index = 0; index < this._resumeBrowser.selectedIndex; index += 1) {
-			start += countRenderedTerminalRows((blocks[index] ?? "").split("\n"), this.terminalWidth());
+			start += countRenderedTerminalRowsFromTuiCore((blocks[index] ?? "").split("\n"), this.terminalWidth());
 		}
-		let end = start + Math.max(0, countRenderedTerminalRows(selectedBlock.split("\n"), this.terminalWidth()) - 1);
+		let end = start + Math.max(0, countRenderedTerminalRowsFromTuiCore(selectedBlock.split("\n"), this.terminalWidth()) - 1);
 		const previewBlock = blocks[this._resumeBrowser.selectedIndex + 1];
 		if (this._resumeBrowser.previewExpanded && previewBlock?.startsWith("Preview\n")) {
-			end += countRenderedTerminalRows(previewBlock.split("\n"), this.terminalWidth());
+			end += countRenderedTerminalRowsFromTuiCore(previewBlock.split("\n"), this.terminalWidth());
 		}
 		return {
 			start,
@@ -1868,7 +1868,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._mouseSelection === null) {
 			return "";
 		}
-		return extractPlainTextSelection(this._renderedTranscriptViewportLines, {
+		return extractPlainTextSelectionFromTuiCore(this._renderedTranscriptViewportLines, {
 			startRow: this._mouseSelection.anchorRow - 1,
 			startColumn: this._mouseSelection.anchorColumn,
 			endRow: this._mouseSelection.focusRow - 1,
@@ -2152,7 +2152,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentTranscriptDisplayRows(): number {
-		return computeTranscriptDisplayRows(
+		return computeTranscriptDisplayRowsFromTuiCore(
 			this.currentRenderedTranscriptBlocks(),
 			this.terminalWidth(),
 			this.currentWelcomeLineCount(),
@@ -2487,27 +2487,6 @@ export function formatInteractivePermissionBlock(
 
 export type InteractiveFooterRenderResult = RenderedComposerBlock;
 
-export function buildInteractiveFooterLeadingLines(state: {
-	readonly terminalWidth: number;
-	readonly turnNotice: "thinking" | "responding" | "tool" | "compacting" | null;
-	readonly turnNoticeAnimationFrame?: number;
-	readonly elapsedMs?: number | null;
-	readonly currentTurnUsage?: UsageSnapshot | null;
-	readonly lastTurnUsage?: UsageSnapshot | null;
-	readonly sessionUsage?: UsageSnapshot | null;
-	readonly activeToolLabel?: string | null;
-	readonly showPendingOutputIndicator?: boolean;
-	readonly detailPanelExpanded?: boolean;
-	readonly detailPanelSummary?: string | null;
-	readonly detailPanelLines?: readonly string[];
-	readonly queuedInputs?: readonly string[];
-}): readonly string[] {
-	return buildInteractiveFooterLeadingLinesFromUi({
-		...state,
-		truncateText: truncatePlainTerminalText,
-	});
-}
-
 function materializeInteractiveScreenFrame(
 	composed: ComposedScreen,
 	footerUi: InteractiveFooterRenderResult,
@@ -2562,7 +2541,10 @@ export function formatInteractiveFooter(state: {
 	} | null;
 }): InteractiveFooterRenderResult {
 	const separator = formatInteractiveInputSeparator(computeInteractiveFooterSeparatorWidth(state.terminalWidth));
-	const leadingLines = buildInteractiveFooterLeadingLines(state);
+	const leadingLines = buildInteractiveFooterLeadingLinesFromUi({
+		...state,
+		truncateText: truncatePlainTerminalText,
+	});
 	if (state.permission !== null) {
 		const prompt = "choice [Enter/1/2/3]> ";
 		const layout = composePromptBlock({
@@ -2941,70 +2923,8 @@ export function acceptFirstSlashSuggestion(
 	};
 }
 
-export function computeFooterCursorColumn(width: number, cursorColumn: number): number {
-	return computeFooterCursorColumnFromTuiCore(width, cursorColumn) - 1;
-}
-
-export function computeFooterStartRow(
-	welcomeLineCount: number,
-	terminalHeight: number,
-	footerHeight: number,
-	transcriptRows: number,
-): number {
-	const naturalStartRow = welcomeLineCount + 1 + Math.max(0, transcriptRows);
-	const bottomAnchoredStartRow = Math.max(1, terminalHeight - footerHeight + 1);
-	return Math.min(naturalStartRow, bottomAnchoredStartRow);
-}
-
-export function countRenderedTerminalRows(lines: readonly string[], width: number): number {
-	return countRenderedTerminalRowsFromTuiCore(lines, width);
-}
-
-export function computePromptCursorRowsUp(lines: readonly string[], width: number, cursorColumn: number): number {
-	return computePromptCursorRowsUpFromTuiCore(lines, width, cursorColumn);
-}
-
-export function computeFooterCursorRowsUp(
-	lines: readonly string[],
-	width: number,
-	cursorLineIndex: number,
-	cursorColumn: number,
-): number {
-	return computeFooterCursorRowsUpFromTuiCore(lines, width, cursorLineIndex, cursorColumn);
-}
-
-export function computeFooterCursorRowsFromEnd(
-	lines: readonly string[],
-	width: number,
-	cursorLineIndex: number,
-	cursorColumn: number,
-): number {
-	return computeFooterCursorRowsFromEndFromTuiCore(lines, width, cursorLineIndex, cursorColumn);
-}
-
-export function computeInteractiveEphemeralRows(
-	streaming: InteractiveStreamingRenderResult | null,
-	footer: InteractiveFooterRenderResult | null,
-): number {
-	return computeEphemeralRows(streaming, footer);
-}
-
 function truncatePlainTerminalText(text: string, width: number): string {
 	return truncatePlainTextFromTuiCore(text, width);
-}
-
-export function formatTurnNotice(
-	kind: "thinking" | "responding" | "tool" | "compacting",
-	options: {
-		readonly animationFrame?: number;
-		readonly queuedCount?: number;
-		readonly usage?: UsageSnapshot | null;
-		readonly showPendingOutputIndicator?: boolean;
-		readonly elapsedMs?: number | null;
-		readonly toolLabel?: string | null;
-	} = {},
-): string {
-	return formatTurnNoticeFromUi(kind, options);
 }
 
 function emptyUsageSnapshot(): UsageSnapshot {
@@ -3055,18 +2975,6 @@ export function computeVisibleTranscriptLines(
 	});
 }
 
-export function extractPlainTextSelection(
-	lines: readonly string[],
-	selection: {
-		startRow: number;
-		startColumn: number;
-		endRow: number;
-		endColumn: number;
-	},
-): string {
-	return extractPlainTextSelectionFromTuiCore(lines, selection);
-}
-
 function copyTextToClipboard(text: string): void {
 	if (text.length === 0) {
 		return;
@@ -3083,14 +2991,6 @@ function copyTextToClipboard(text: string): void {
 		input: text,
 		stdio: ["pipe", "ignore", "ignore"],
 	});
-}
-
-export function computeTranscriptDisplayRows(
-	blocks: readonly string[],
-	width: number,
-	unwrappedLeadingBlockCount = 0,
-): number {
-	return computeTranscriptDisplayRowsFromTuiCore(blocks, width, unwrappedLeadingBlockCount);
 }
 
 function isTranscriptUserBlock(block: string): boolean {

@@ -3,31 +3,16 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
-	buildInteractiveFooterLeadingLines,
 	buildWelcomeLines,
-	computeFooterCursorColumn,
-	computeFooterCursorRowsFromEnd,
-	computeFooterCursorRowsUp,
-	computeFooterStartRow,
-	computeInteractiveEphemeralRows,
-	computeInteractiveFooterSeparatorWidth,
-	computePromptCursorRowsUp,
 	computeSlashSuggestions,
-	computeTranscriptDisplayRows,
 	computeVisibleTranscriptLines,
-	countRenderedTerminalRows,
 	createDebouncedCallback,
-	extractPlainTextSelection,
 	formatInteractiveFooter,
 	formatInteractivePermissionBlock,
 	formatInteractiveToolEvent,
 	formatInteractiveToolResult,
 	formatInteractiveToolTitle,
 	formatSlashSuggestionHint,
-	formatTranscriptAssistantLine,
-	formatTranscriptUserBlocks,
-	formatTranscriptUserLine,
-	formatTurnNotice,
 	formatWelcomeBottomBorder,
 	formatWelcomeCenteredLine,
 	formatWelcomeFilledLine,
@@ -43,6 +28,7 @@ import {
 	appendAssistantTranscriptBlock,
 	appendTranscriptBlockWithSpacer,
 	computeInteractiveFooterSeparatorWidth,
+	buildInteractiveFooterLeadingLines,
 	formatFullWidthTranscriptUserLine,
 	formatInteractiveErrorDetailLine,
 	formatInteractiveErrorLine,
@@ -52,11 +38,25 @@ import {
 	formatTranscriptAssistantLine,
 	formatTranscriptUserBlocks,
 	formatTranscriptUserLine,
+	formatTurnNotice,
 	INTERACTIVE_THEME,
 	materializeAssistantTranscriptBlock,
 	mergeStreamingText,
 } from "@pickle-pee/ui";
-import { fitTerminalLine, wrapTranscriptContent } from "@pickle-pee/tui-core";
+import {
+	computeFooterCursorColumn,
+	computeFooterCursorRowsFromEnd,
+	computeFooterCursorRowsUp,
+	computeFooterStartRow,
+	computePromptCursorRowsUp,
+	computeTranscriptDisplayRows,
+	countRenderedTerminalRows,
+	truncatePlainText,
+	extractPlainTextSelection,
+	fitTerminalLine,
+	wrapTranscriptContent,
+	computeEphemeralRows,
+} from "@pickle-pee/tui-core";
 
 function formatLocalTraceTimestamp(value: Date): string {
 	const padTwo = (part: number): string => String(part).padStart(2, "0");
@@ -124,6 +124,7 @@ describe("interactive transcript formatting", () => {
 			detailPanelExpanded: true,
 			detailPanelLines: ["- file-a.ts", "- file-b.ts"],
 			queuedInputs: ["follow-up question"],
+			truncateText: truncatePlainText,
 		});
 
 		expect(lines.some((line) => line.includes("Last turn"))).toBe(true);
@@ -600,9 +601,9 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("keeps the footer close to short transcript content before bottom-anchoring", () => {
-		expect(computeFooterStartRow(11, 40, 4, 0)).toBe(12);
-		expect(computeFooterStartRow(11, 40, 4, 1)).toBe(13);
-		expect(computeFooterStartRow(11, 40, 4, 30)).toBe(37);
+		expect(computeFooterStartRow(40, 4, 11)).toBe(12);
+		expect(computeFooterStartRow(40, 4, 12)).toBe(13);
+		expect(computeFooterStartRow(40, 4, 41)).toBe(37);
 	});
 
 	it("counts rendered footer rows after terminal resize", () => {
@@ -610,9 +611,9 @@ describe("interactive transcript formatting", () => {
 		expect(computePromptCursorRowsUp(["──────────", "❯ hello", "──────────"], 4, 6)).toBe(4);
 		expect(computeFooterCursorRowsUp(["· Thinking…", "──────────", "❯ hello", "──────────"], 4, 2, 6)).toBe(7);
 		expect(computeFooterCursorRowsFromEnd(["· Thinking…", "──────────", "❯ hello", "──────────"], 4, 2, 6)).toBe(3);
-		expect(computeFooterCursorColumn(4, 6)).toBe(2);
+		expect(computeFooterCursorColumn(4, 6)).toBe(3);
 		expect(
-			computeInteractiveEphemeralRows(
+			computeEphemeralRows(
 				{
 					lines: ["⏺ hello", "world"],
 					renderedWidth: 4,
