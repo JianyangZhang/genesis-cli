@@ -158,6 +158,29 @@ describe("createAppRuntime", () => {
 		expect(adapter.lastResumeData).toEqual(recoveryData);
 	});
 
+	it("keeps recover -> setModel -> close lifecycle stable for a recovered session", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "interactive",
+			model: stubModel,
+			adapter,
+		});
+		const recovered = runtime.recoverSession({
+			sessionId: { value: "session-lifecycle" },
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		});
+
+		await recovered.switchModel({ provider: "test", id: "next-model", displayName: "Next Model" });
+		expect(adapter.lastModel).toMatchObject({ provider: "test", id: "next-model" });
+		await recovered.close();
+		expect(adapter.closed).toBe(true);
+	});
+
 	it("persists recovered session facts into recent catalog after follow-up input", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recover-facts-"));
 		const historyDir = join(agentDir, "history");
