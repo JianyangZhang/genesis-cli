@@ -391,6 +391,8 @@ export class SessionFacadeImpl implements SessionFacade {
 				displayName: recoveryData.model.displayName || this._state.model.displayName,
 			},
 			toolSet: recoveryData.toolSet.length > 0 ? recoveryData.toolSet : [...this._state.toolSet],
+			planSummary: recoveryData.planSummary ?? this._state.planSummary,
+			compactionSummary: recoveryData.compactionSummary ?? this._state.compactionSummary,
 			workingDirectory: recoveryData.workingDirectory ?? this._context.workingDirectory,
 			agentDir: recoveryData.agentDir ?? this._context.agentDir,
 		};

@@ -291,6 +291,40 @@ describe("SessionFacade", () => {
 		});
 	});
 
+	it("snapshotRecoveryData prefers in-memory plan/compaction summaries when adapter payload is missing them", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus, undefined, createPlanEngine());
+
+		facade.plan!.createAndActivate("p1", "收口会话契约", ["补齐摘要事实源"]);
+		adapter.enqueueDefaultEvents([
+			{
+				type: "compaction_end",
+				timestamp: 1000,
+				payload: {
+					compactedSummary: "会话摘要已更新",
+					recentUserPrompts: ["继续补齐 P0-1"],
+					recentAssistantResponses: ["我会先统一 recovery 契约。"],
+				},
+			},
+		]);
+		await facade.prompt("trigger compaction state sync");
+
+		const recoveryData = await facade.snapshotRecoveryData();
+		expect(recoveryData.planSummary).not.toBeNull();
+		expect(recoveryData.planSummary?.planId).toBe("p1");
+		expect(recoveryData.compactionSummary).not.toBeNull();
+		expect(recoveryData.compactionSummary?.compactedSummary).toBe("会话摘要已更新");
+	});
+
 	it("prompt throws after close", async () => {
 		const { facade } = createFacade();
 		await facade.close();
