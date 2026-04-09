@@ -226,7 +226,7 @@ export class SessionFacadeImpl implements SessionFacade {
 
 	async snapshotRecoveryData(): Promise<SessionRecoveryData> {
 		this.assertOpen();
-		return this._adapter.getRecoveryData();
+		return this.buildSessionRecoveryData(await this._adapter.getRecoveryData());
 	}
 
 	async close(): Promise<void> {
@@ -236,7 +236,7 @@ export class SessionFacadeImpl implements SessionFacade {
 		this._state = updateSessionStatus(this._state, "closing");
 		this.notifyStateChange();
 
-		const recoveryData = await this._adapter.getRecoveryData();
+		const recoveryData = this.buildSessionRecoveryData(await this._adapter.getRecoveryData());
 		await this._adapter.close();
 
 		const closedEvent = sessionClosed(this._state.id, recoveryData);
@@ -377,6 +377,23 @@ export class SessionFacadeImpl implements SessionFacade {
 		});
 
 		return true;
+	}
+
+	private buildSessionRecoveryData(recoveryData: SessionRecoveryData): SessionRecoveryData {
+		return {
+			...recoveryData,
+			sessionId: this._state.id,
+			model: {
+				...this._state.model,
+				...recoveryData.model,
+				id: recoveryData.model.id || this._state.model.id,
+				provider: recoveryData.model.provider || this._state.model.provider,
+				displayName: recoveryData.model.displayName || this._state.model.displayName,
+			},
+			toolSet: recoveryData.toolSet.length > 0 ? recoveryData.toolSet : [...this._state.toolSet],
+			workingDirectory: recoveryData.workingDirectory ?? this._context.workingDirectory,
+			agentDir: recoveryData.agentDir ?? this._context.agentDir,
+		};
 	}
 
 	/**

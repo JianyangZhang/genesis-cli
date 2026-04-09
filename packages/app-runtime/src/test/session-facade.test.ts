@@ -202,6 +202,95 @@ describe("SessionFacade", () => {
 		expect(order).toEqual(["getRecoveryData", "close"]);
 	});
 
+	it("snapshotRecoveryData canonicalizes session-facing recovery fields from facade context", async () => {
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp/project",
+			agentDir: "/tmp/agent",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+		const adapter: KernelSessionAdapter = {
+			async *sendPrompt() {},
+			async *sendContinue() {},
+			abort() {},
+			async close() {},
+			async getRecoveryData() {
+				return {
+					sessionId: { value: "adapter-id" },
+					model: { id: "", provider: "" },
+					toolSet: [],
+					planSummary: null,
+					compactionSummary: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					sessionFile: "/tmp/agent/session.jsonl",
+				};
+			},
+			resume() {},
+		};
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus);
+		const recoveryData = await facade.snapshotRecoveryData();
+
+		expect(recoveryData).toMatchObject({
+			sessionId: stubId,
+			model: stubModel,
+			toolSet: ["read"],
+			workingDirectory: "/tmp/project",
+			agentDir: "/tmp/agent",
+			sessionFile: "/tmp/agent/session.jsonl",
+		});
+	});
+
+	it("close emits canonicalized recovery data on session_closed", async () => {
+		const globalBus = createEventBus();
+		const state = createInitialSessionState(stubId, stubModel, new Set(["read"]));
+		const context = createRuntimeContext({
+			sessionId: stubId,
+			workingDirectory: "/tmp/project",
+			agentDir: "/tmp/agent",
+			mode: "print",
+			model: stubModel,
+			toolSet: new Set(["read"]),
+		});
+		let seenRecoveryData: SessionRecoveryData | null = null;
+		const adapter: KernelSessionAdapter = {
+			async *sendPrompt() {},
+			async *sendContinue() {},
+			abort() {},
+			async close() {},
+			async getRecoveryData() {
+				return {
+					sessionId: { value: "adapter-id" },
+					model: { id: "", provider: "" },
+					toolSet: [],
+					planSummary: null,
+					compactionSummary: null,
+					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+				};
+			},
+			resume() {},
+		};
+
+		globalBus.on("session_closed", (event) => {
+			seenRecoveryData = event.recoveryData;
+		});
+
+		const facade = new SessionFacadeImpl(adapter, state, context, globalBus);
+		await facade.close();
+
+		expect(seenRecoveryData).toMatchObject({
+			sessionId: stubId,
+			model: stubModel,
+			toolSet: ["read"],
+			workingDirectory: "/tmp/project",
+			agentDir: "/tmp/agent",
+		});
+	});
+
 	it("prompt throws after close", async () => {
 		const { facade } = createFacade();
 		await facade.close();

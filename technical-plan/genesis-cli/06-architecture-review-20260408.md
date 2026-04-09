@@ -687,6 +687,11 @@
 - [ ] P0-1：补齐 `kernel session core`
   原因：是当前最深层的边界缺口；所有 `resume` / `compact` / `clear` / `history` 问题最终都会回到这里。
   进行中说明：上层 interactive 命令与 resume 展示逻辑已持续从 `app-cli` 向 `app-ui`/`runtime` 收口，但 kernel 侧统一 session core 还未真正补齐。
+  已完成子项：
+  - [x] P0-1.a：`SessionFacade` recovery snapshot / close event 输出更完整的 session-facing recovery 契约
+  未完成子项：
+  - [ ] P0-1.b：kernel / runtime 的 transcript persistence 与 recovery contract 继续统一
+  - [ ] P0-1.c：compaction / summary / preview / working directory 等会话域边界继续内聚
 - [ ] P0-2：统一会话事实来源与 recent catalog 投影关系
   原因：当前 `resume` 体验和跨模式一致性都依赖这一层稳定。
   进行中说明：recent catalog / session metadata / rich recovery 的一致性护栏已补强，但“单一事实源 + 稳定投影”还未彻底收口。
