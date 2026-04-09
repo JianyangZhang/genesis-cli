@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { KernelSessionContract, KernelSessionSnapshot } from "@pickle-pee/kernel";
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
 import type { KernelSessionAdapter, RawUpstreamEvent, ToolExecutionGate } from "./kernel-session-adapter.js";
 import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";
@@ -16,23 +17,6 @@ export interface PiMonoResolvedAuthReport {
 	readonly sourceDetail?: string;
 	readonly placeholder: boolean;
 	readonly authorized: boolean;
-}
-
-interface AgentSession {
-	readonly isStreaming: boolean;
-	subscribe(listener: (event: unknown) => void): () => void;
-	prompt(input: string): Promise<void>;
-	followUp(input: string): Promise<void>;
-	abort(): Promise<void>;
-	compact(customInstructions?: string): Promise<void>;
-	getSnapshot(): Promise<AgentSessionSnapshot>;
-	dispose(): void;
-}
-
-interface AgentSessionSnapshot {
-	readonly sessionId: string;
-	readonly sessionFile?: string;
-	readonly metadata: SessionRecoveryData["metadata"];
 }
 
 interface PiMonoTool {
@@ -90,7 +74,7 @@ interface PiMonoSdk {
 		create(cwd: string): unknown;
 		open(sessionPath: string): unknown;
 	};
-	createAgentSession(options: CreateAgentSessionOptions): Promise<{ session: AgentSession }>;
+	createAgentSession(options: CreateAgentSessionOptions): Promise<{ session: KernelSessionContract }>;
 	createBashTool(cwd: string): PiMonoTool;
 	createEditTool(cwd: string): PiMonoTool;
 	createFindTool(cwd: string): PiMonoTool;
@@ -132,7 +116,7 @@ export interface PiMonoSessionAdapterOptions {
 }
 
 export class PiMonoSessionAdapter implements KernelSessionAdapter {
-	private session: AgentSession | null = null;
+	private session: KernelSessionContract | null = null;
 	private toolExecutionGate: ToolExecutionGate | null = null;
 	private activeQueue: AsyncPushQueue<RawUpstreamEvent> | null = null;
 	private readonly pendingToolStartEvents = new Map<string, RawUpstreamEvent>();
@@ -484,7 +468,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		this.session = await this.createUnderlyingSession();
 	}
 
-	private async getActiveSnapshot(): Promise<AgentSessionSnapshot | null> {
+	private async getActiveSnapshot(): Promise<KernelSessionSnapshot | null> {
 		if (!this.session) return null;
 		try {
 			return await this.session.getSnapshot();
@@ -493,7 +477,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		}
 	}
 
-	private async createUnderlyingSession(): Promise<AgentSession> {
+	private async createUnderlyingSession(): Promise<KernelSessionContract> {
 		const recovery = this.pendingRecoveryData;
 		const workingDirectory = recovery?.workingDirectory ?? this.options.workingDirectory;
 		const agentDir = recovery?.agentDir ?? this.options.agentDir;
@@ -656,7 +640,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 	}
 }
 
-async function defaultCreateSession(options: CreateAgentSessionOptions): Promise<AgentSession> {
+async function defaultCreateSession(options: CreateAgentSessionOptions): Promise<KernelSessionContract> {
 	const sdk = await loadPiMonoSdk();
 	const result = await sdk.createAgentSession(options);
 	return result.session;
