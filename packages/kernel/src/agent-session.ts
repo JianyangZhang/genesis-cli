@@ -1,7 +1,7 @@
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Agent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, Message, Model, UserMessage } from "@pickle-pee/pi-ai";
+import { Agent, type AgentMessage, type StreamFn } from "@mariozechner/pi-agent-core";
+import type { AssistantMessage, Message, UserMessage } from "@pickle-pee/pi-ai";
 import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
 import { streamWithKernelProvider } from "./provider-registry.js";

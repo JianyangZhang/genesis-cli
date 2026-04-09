@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { KernelSessionContract, KernelSessionSnapshot } from "@pickle-pee/kernel" with { "resolution-mode": "import" };
+import type { KernelSessionContract, KernelSessionSnapshot } from "@pickle-pee/kernel";
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
 import type { KernelSessionAdapter, RawUpstreamEvent, ToolExecutionGate } from "./kernel-session-adapter.js";
 import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";

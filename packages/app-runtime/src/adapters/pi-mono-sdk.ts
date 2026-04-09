@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { KernelSessionContract } from "@pickle-pee/kernel" with { "resolution-mode": "import" };
+import type { KernelSessionContract } from "@pickle-pee/kernel";
 
 export type PiMonoAuthSourceKind = "auth_storage" | "env" | "literal" | "missing";
 
