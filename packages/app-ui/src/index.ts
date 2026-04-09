@@ -9,8 +9,7 @@ export type {
 	ToolCallDisplayStatus,
 	TuiScreenLayout,
 } from "./adapters/index.js";
-// Adapters (TUI)
-export {
+import {
 	ansiClearBelow,
 	ansiClearLine,
 	ansiCursorHome,
@@ -33,6 +32,32 @@ export {
 	renderScreen,
 	renderStatusLine,
 } from "./adapters/index.js";
+
+// Legacy TUI/ANSI compatibility namespace.
+// New call sites should prefer app-tui-core and keep this surface read-only.
+export const legacyTuiCompat = {
+	ansiClearBelow,
+	ansiClearLine,
+	ansiCursorHome,
+	ansiDisableFocusReporting,
+	ansiDisableMouseTracking,
+	ansiEnableFocusReporting,
+	ansiEnableMouseTracking,
+	ansiEnterAlternateScreen,
+	ansiExitAlternateScreen,
+	ansiHideCursor,
+	ansiMoveLeft,
+	ansiMoveRight,
+	ansiMoveUp,
+	ansiResetCursor,
+	ansiRestoreCursor,
+	ansiSaveCursor,
+	ansiShowCursor,
+	createLayoutAccumulator,
+	renderHeader,
+	renderScreen,
+	renderStatusLine,
+} as const;
 export type {
 	InteractiveLocalCommandDeps,
 	SlashCommandRegistry,

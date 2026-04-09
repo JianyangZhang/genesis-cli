@@ -66,7 +66,6 @@ import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } f
 import {
 	appendAssistantTranscriptBlock as appendAssistantTranscriptBlockFromUi,
 	appendTranscriptBlockWithSpacer as appendTranscriptBlockWithSpacerFromUi,
-	ansiShowCursor,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
@@ -90,6 +89,7 @@ import {
 	resolveResumeBrowserSelectedIndex,
 	resolveResumeBrowserSubmitHit,
 	reduceInteractionState,
+	legacyTuiCompat,
 	summarizeResumeBrowserHit,
 	toggleResumeBrowserPreviewState,
 } from "@pickle-pee/ui";
@@ -1957,7 +1957,7 @@ class InteractiveModeHandler implements ModeHandler {
 			process.stdout.write(encodeResetScrollRegion());
 		}
 		process.stdout.write(encodeFramePatches([{ type: "move-cursor", cursor: next.frame.cursor }], next.frame.width));
-		process.stdout.write(ansiShowCursor());
+		process.stdout.write(legacyTuiCompat.ansiShowCursor());
 		this._renderedFooterUi = next.footerUi;
 		this._renderedFooterStartRow = next.footerStartRow;
 		this._lastScreenFrame = next.frame;
