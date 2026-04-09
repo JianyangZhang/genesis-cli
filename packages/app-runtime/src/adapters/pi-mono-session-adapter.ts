@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { KernelSessionContract, KernelSessionSnapshot } from "@pickle-pee/kernel";
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
 import type { KernelSessionAdapter, RawUpstreamEvent, ToolExecutionGate } from "./kernel-session-adapter.js";
 import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";
@@ -38,6 +37,24 @@ interface CreateAgentSessionOptions {
 	readonly authStorage?: unknown;
 	readonly modelRegistry?: unknown;
 	readonly sessionManager?: unknown;
+}
+
+// Mirrors @pickle-pee/kernel KernelSessionContract/KernelSessionSnapshot.
+interface KernelSessionContract {
+	readonly isStreaming: boolean;
+	subscribe(listener: (event: unknown) => void): () => void;
+	prompt(input: string): Promise<void>;
+	followUp(input: string): Promise<void>;
+	abort(): Promise<void>;
+	compact(customInstructions?: string): Promise<void>;
+	getSnapshot(): Promise<KernelSessionSnapshot>;
+	dispose(): void;
+}
+
+interface KernelSessionSnapshot {
+	readonly sessionId: string;
+	readonly sessionFile?: string;
+	readonly metadata: SessionRecoveryData["metadata"];
 }
 
 interface PiMonoSdk {
@@ -109,7 +126,7 @@ export interface PiMonoSessionAdapterOptions {
 	readonly toolSet?: readonly string[];
 	readonly thinkingLevel?: ThinkingLevel;
 	readonly createTools?: (cwd: string, toolSet: readonly string[]) => PiMonoTool[];
-	readonly createSession?: (options: CreateAgentSessionOptions) => Promise<AgentSession>;
+	readonly createSession?: (options: CreateAgentSessionOptions) => Promise<KernelSessionContract>;
 	readonly onAuthResolved?: (report: PiMonoResolvedAuthReport) => void;
 	readonly onUpstreamEvent?: (event: unknown) => void;
 	readonly onSessionRecovered?: (report: { readonly mode: "resume" | "new"; readonly sessionFile?: string }) => void;
@@ -243,27 +260,10 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 
 	private async resolveAuthReport(): Promise<PiMonoResolvedAuthReport> {
 		const recovery = this.pendingRecoveryData;
-		const agentDir = recovery?.agentDir ?? this.options.agentDir;
-		const sdk = await loadPiMonoSdk();
-		const authStorage = sdk.AuthStorage.create(agentDir ? join(agentDir, "auth.json") : undefined);
-		const modelRegistry = sdk.ModelRegistry.create(authStorage, agentDir ? join(agentDir, "models.json") : undefined);
-		const model = modelRegistry.find(this.currentModel.provider, this.currentModel.id) as PiMonoModel | undefined;
-		if (!model) {
-			throw new Error(
-				`Model ${this.currentModel.provider}/${this.currentModel.id} is not configured in ${
-					agentDir ?? ".genesis-local/agent"
-				}/models.json`,
-			);
-		}
-		const auth = modelRegistry.getRequestAuth?.(model);
-		return {
-			provider: this.currentModel.provider,
-			modelId: this.currentModel.id,
-			sourceKind: auth?.source?.kind ?? "missing",
-			sourceDetail: auth?.source?.detail,
-			placeholder: auth?.source?.placeholder === true,
-			authorized: auth?.ok ?? true,
-		};
+		return await resolvePiMonoAuthReport({
+			agentDir: recovery?.agentDir ?? this.options.agentDir,
+			model: this.currentModel,
+		});
 	}
 
 	private async *runPromptLikeOperation(input: string, mode: "prompt" | "continue"): AsyncIterable<RawUpstreamEvent> {
@@ -715,6 +715,35 @@ function extractTargetPath(parameters: Readonly<Record<string, unknown>> | undef
 	}
 
 	return undefined;
+}
+
+export async function resolvePiMonoAuthReport(options: {
+	readonly agentDir?: string;
+	readonly model: ModelDescriptor;
+}): Promise<PiMonoResolvedAuthReport> {
+	const sdk = await loadPiMonoSdk();
+	const authStorage = sdk.AuthStorage.create(options.agentDir ? join(options.agentDir, "auth.json") : undefined);
+	const modelRegistry = sdk.ModelRegistry.create(
+		authStorage,
+		options.agentDir ? join(options.agentDir, "models.json") : undefined,
+	);
+	const model = modelRegistry.find(options.model.provider, options.model.id) as PiMonoModel | undefined;
+	if (!model) {
+		throw new Error(
+			`Model ${options.model.provider}/${options.model.id} is not configured in ${
+				options.agentDir ?? ".genesis-local/agent"
+			}/models.json`,
+		);
+	}
+	const auth = modelRegistry.getRequestAuth?.(model);
+	return {
+		provider: options.model.provider,
+		modelId: options.model.id,
+		sourceKind: auth?.source?.kind ?? "missing",
+		sourceDetail: auth?.source?.detail,
+		placeholder: auth?.source?.placeholder === true,
+		authorized: auth?.ok ?? true,
+	};
 }
 
 export async function loadPiMonoSdk(options: LoadPiMonoSdkOptions = {}): Promise<PiMonoSdk> {
