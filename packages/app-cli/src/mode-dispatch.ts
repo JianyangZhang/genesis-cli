@@ -21,14 +21,17 @@ import type {
 } from "@pickle-pee/runtime";
 import {
 	type ComposedScreen,
+	clampScrollOffset,
 	composePromptBlock,
 	composeScreenWithFooter,
 	composeSectionBlock,
+	computeBodyViewportRows,
 	computeEphemeralRows,
 	computeFooterCursorColumn as computeFooterCursorColumnFromTuiCore,
 	computeFooterCursorRowsFromEnd as computeFooterCursorRowsFromEndFromTuiCore,
 	computeFooterCursorRowsUp as computeFooterCursorRowsUpFromTuiCore,
 	computeFooterStartRow as computeFooterStartRowFromTuiCore,
+	computeMaxScrollOffset,
 	computePromptCursorColumn as computePromptCursorColumnFromTuiCore,
 	computePromptCursorRowsUp as computePromptCursorRowsUpFromTuiCore,
 	computeSelectionColumnsForRow,
@@ -42,6 +45,7 @@ import {
 	encodeFramePatches,
 	encodeResetScrollRegion,
 	encodeSetScrollRegion,
+	ensureVisibleSelectionOffset,
 	extractPlainTextSelection as extractPlainTextSelectionFromTuiCore,
 	fitTerminalLine as fitTerminalLineFromTuiCore,
 	materializeComposerBlock,
@@ -60,7 +64,6 @@ import {
 } from "@pickle-pee/tui-core";
 import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
 import {
-	ansiShowCursor,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
@@ -68,14 +71,25 @@ import {
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
 	beginResumeBrowserSearch,
+	computeInteractiveFooterSeparatorWidth,
 	createInteractiveCommandRegistry,
 	completeResumeBrowserSearch,
 	createResumeBrowserState,
 	eventToJsonEnvelope,
 	formatEventAsText,
+	formatFullWidthTranscriptUserLine,
+	formatInteractiveErrorDetailLine,
+	formatInteractiveErrorLine,
+	formatInteractiveInfoLine,
+	formatInteractiveInputSeparator,
+	formatInteractivePromptBuffer,
 	formatResumeBrowserTranscriptBlocks,
+	formatTranscriptUserBlocks,
+	INTERACTIVE_THEME,
 	formatTurnNotice as formatTurnNoticeFromUi,
 	initialInteractionState,
+	createInteractiveConversationState,
+	materializeAssistantTranscriptBlock,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
@@ -92,7 +106,6 @@ import { createModelCommandHost, type ModelCommandHostOptions } from "./model-co
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
-import { INTERACTIVE_THEME } from "./theme.js";
 import { createTtySession } from "./tty-session.js";
 
 // ---------------------------------------------------------------------------
@@ -137,6 +150,7 @@ interface UsageSnapshot {
 }
 
 const RESIZE_REDRAW_DEBOUNCE_MS = 120;
+const RENDER_DEBUG_SAME_FRAME_THROTTLE_MS = 250;
 
 // ---------------------------------------------------------------------------
 // Interactive mode
@@ -163,8 +177,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _historyIndex: number | null = null;
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
-	private readonly _transcriptBlocks: string[] = [];
-	private _assistantBuffer = "";
+	private readonly _conversation = createInteractiveConversationState();
 	private _turnNotice: "thinking" | "responding" | "compacting" | null = null;
 	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
@@ -204,6 +217,9 @@ class InteractiveModeHandler implements ModeHandler {
 	private _runtime: AppRuntime | null = null;
 	private _recentSessionPersistTimer: ReturnType<typeof setTimeout> | null = null;
 	private _startupCheckScreenActive = false;
+	private _lastRenderDebugKey: string | null = null;
+	private _lastRenderDebugLoggedAt = 0;
+	private _suppressedRenderDebugCount = 0;
 
 	async start(runtime: AppRuntime): Promise<void> {
 		const handler = this;
@@ -286,8 +302,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._historyIndex = null;
 			this._lastError = null;
 			this._changedPaths.clear();
-			this._transcriptBlocks.length = 0;
-			this._assistantBuffer = "";
+			this._conversation.clear();
 			this.stopTurnNoticeAnimation();
 			this._turnNotice = null;
 			this._turnNoticeAnimationFrame = 0;
@@ -1105,7 +1120,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this.startTurnNoticeAnimation();
 			}
 			const previousRows = this.currentTranscriptDisplayRows();
-			this._assistantBuffer = mergeStreamingText(this._assistantBuffer, event.content);
+			this._conversation.mergeAssistantDelta(event.content);
 			this.adjustTranscriptScrollForGrowth(previousRows, this.currentTranscriptDisplayRows());
 			this.fullRedrawInteractiveScreen();
 			return;
@@ -1120,14 +1135,14 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private flushAssistantBuffer(redrawPrompt: boolean): void {
-		if (this._assistantBuffer.length === 0) {
+		if (!this._conversation.hasAssistantBuffer()) {
 			if (redrawPrompt) {
 				this.renderPromptLine();
 			}
 			return;
 		}
-		const assistantText = this._assistantBuffer;
-		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
+		const assistantText = this._conversation.consumeAssistantBuffer();
+		const assistantBlock = materializeAssistantTranscriptBlock(assistantText);
 		if (assistantBlock !== null) {
 			const previousRows = this.currentTranscriptDisplayRows();
 			this.rememberAssistantTranscriptBlock(assistantBlock);
@@ -1136,7 +1151,6 @@ class InteractiveModeHandler implements ModeHandler {
 				void this._runtime.recordRecentSessionAssistantText(this._sessionRef.current, assistantText);
 			}
 		}
-		this._assistantBuffer = "";
 		if (redrawPrompt) {
 			this.renderPromptLine();
 		}
@@ -1536,16 +1550,11 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser === null) {
 			return;
 		}
-		const viewportRows = Math.max(1, this.currentResumeBrowserBodyViewportRows());
-		const selectedRange = this.currentResumeBrowserSelectedRowRange();
-		if (selectedRange === null) {
-			return;
-		}
-		if (selectedRange.start < this._resumeBrowserScrollOffset) {
-			this._resumeBrowserScrollOffset = selectedRange.start;
-		} else if (selectedRange.end >= this._resumeBrowserScrollOffset + viewportRows) {
-			this._resumeBrowserScrollOffset = selectedRange.end - viewportRows + 1;
-		}
+		this._resumeBrowserScrollOffset = ensureVisibleSelectionOffset({
+			currentOffset: this._resumeBrowserScrollOffset,
+			viewportRows: this.currentResumeBrowserBodyViewportRows(),
+			selectedRange: this.currentResumeBrowserSelectedRowRange(),
+		});
 		this.clampResumeBrowserScrollOffset();
 	}
 
@@ -1622,10 +1631,10 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private currentDetailPanelContentLines(): readonly string[] {
 		if (this._thinkingBuffer.trim().length > 0) {
-			return wrapTranscriptContent(this._thinkingBuffer.trim(), this.terminalWidth());
+			return wrapTranscriptContentFromTuiCore(this._thinkingBuffer.trim(), this.terminalWidth());
 		}
 		if (this._compactionDetailText.trim().length > 0) {
-			return wrapTranscriptContent(this._compactionDetailText.trim(), this.terminalWidth());
+			return wrapTranscriptContentFromTuiCore(this._compactionDetailText.trim(), this.terminalWidth());
 		}
 		return [];
 	}
@@ -1638,17 +1647,16 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private shouldShowPendingOutputIndicator(activeToolLabel: string | null): boolean {
-		if (this._assistantBuffer.length > 0) {
+		if (this._conversation.hasAssistantBuffer()) {
 			return true;
 		}
 		if (activeToolLabel === null) {
 			return false;
 		}
-		const lastNonEmptyIndex = findLastNonEmptyBlockIndex(this._transcriptBlocks);
-		if (lastNonEmptyIndex === -1) {
+		const lastBlock = this._conversation.getLatestTranscriptBlock();
+		if (lastBlock === null) {
 			return false;
 		}
-		const lastBlock = this._transcriptBlocks[lastNonEmptyIndex] ?? "";
 		return !isTranscriptUserBlock(lastBlock) && !lastBlock.startsWith("⏺ ") && !lastBlock.startsWith("  ⎿ ");
 	}
 
@@ -1779,24 +1787,24 @@ class InteractiveModeHandler implements ModeHandler {
 			this.currentResumeBrowserTopLines().length,
 			Math.max(0, this.terminalHeight() - footerHeight),
 		);
-		return Math.max(0, this.terminalHeight() - topHeight - footerHeight);
+		return computeBodyViewportRows(this.terminalHeight(), topHeight, footerHeight);
 	}
 
 	private currentResumeBrowserBodyDisplayRows(): number {
 		return this.currentResumeBrowserBodyBlocks().reduce(
-			(total, block) => total + countRenderedTerminalRows(block.split("\n"), this.terminalWidth()),
+			(total, block) => total + countRenderedTerminalRowsFromTuiCore(block.split("\n"), this.terminalWidth()),
 			0,
 		);
 	}
 
 	private currentResumeBrowserBodyMaxScroll(): number {
-		return Math.max(0, this.currentResumeBrowserBodyDisplayRows() - this.currentResumeBrowserBodyViewportRows());
+		return computeMaxScrollOffset(this.currentResumeBrowserBodyDisplayRows(), this.currentResumeBrowserBodyViewportRows());
 	}
 
 	private clampResumeBrowserScrollOffset(): void {
-		this._resumeBrowserScrollOffset = Math.max(
-			0,
-			Math.min(this._resumeBrowserScrollOffset, this.currentResumeBrowserBodyMaxScroll()),
+		this._resumeBrowserScrollOffset = clampScrollOffset(
+			this._resumeBrowserScrollOffset,
+			this.currentResumeBrowserBodyMaxScroll(),
 		);
 	}
 
@@ -1811,12 +1819,12 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		let start = 0;
 		for (let index = 0; index < this._resumeBrowser.selectedIndex; index += 1) {
-			start += countRenderedTerminalRows((blocks[index] ?? "").split("\n"), this.terminalWidth());
+			start += countRenderedTerminalRowsFromTuiCore((blocks[index] ?? "").split("\n"), this.terminalWidth());
 		}
-		let end = start + Math.max(0, countRenderedTerminalRows(selectedBlock.split("\n"), this.terminalWidth()) - 1);
+		let end = start + Math.max(0, countRenderedTerminalRowsFromTuiCore(selectedBlock.split("\n"), this.terminalWidth()) - 1);
 		const previewBlock = blocks[this._resumeBrowser.selectedIndex + 1];
 		if (this._resumeBrowser.previewExpanded && previewBlock?.startsWith("Preview\n")) {
-			end += countRenderedTerminalRows(previewBlock.split("\n"), this.terminalWidth());
+			end += countRenderedTerminalRowsFromTuiCore(previewBlock.split("\n"), this.terminalWidth());
 		}
 		return {
 			start,
@@ -1825,14 +1833,11 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentTranscriptMaxScroll(): number {
-		return Math.max(0, this.currentTranscriptDisplayRows() - this.currentTranscriptViewportRows());
+		return computeMaxScrollOffset(this.currentTranscriptDisplayRows(), this.currentTranscriptViewportRows());
 	}
 
 	private clampTranscriptScrollOffset(): void {
-		this._transcriptScrollOffset = Math.max(
-			0,
-			Math.min(this._transcriptScrollOffset, this.currentTranscriptMaxScroll()),
-		);
+		this._transcriptScrollOffset = clampScrollOffset(this._transcriptScrollOffset, this.currentTranscriptMaxScroll());
 	}
 
 	private isTranscriptMouseRow(row: number): boolean {
@@ -1863,7 +1868,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._mouseSelection === null) {
 			return "";
 		}
-		return extractPlainTextSelection(this._renderedTranscriptViewportLines, {
+		return extractPlainTextSelectionFromTuiCore(this._renderedTranscriptViewportLines, {
 			startRow: this._mouseSelection.anchorRow - 1,
 			startColumn: this._mouseSelection.anchorColumn,
 			endRow: this._mouseSelection.focusRow - 1,
@@ -1895,15 +1900,11 @@ class InteractiveModeHandler implements ModeHandler {
 		if (block.length === 0) {
 			return;
 		}
-		const nextBlocks = appendTranscriptBlockWithSpacer(this._transcriptBlocks, block);
-		this._transcriptBlocks.length = 0;
-		this._transcriptBlocks.push(...nextBlocks);
+		this._conversation.rememberTranscriptBlock(block, true);
 	}
 
 	private rememberAssistantTranscriptBlock(block: string): void {
-		const nextBlocks = appendAssistantTranscriptBlock(this._transcriptBlocks, block);
-		this._transcriptBlocks.length = 0;
-		this._transcriptBlocks.push(...nextBlocks);
+		this._conversation.rememberAssistantTranscriptBlock(block);
 	}
 
 	private fullRedrawInteractiveScreen(): void {
@@ -1925,15 +1926,19 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		const next = this.buildInteractiveScreenFrame();
 		const patches = diffScreenFrames(this._lastScreenFrame, next.frame);
-		getActiveDebugLogger()?.debug("tui.render", "Rendered interactive screen frame", {
+		const patchSummary = summarizeFramePatches(patches);
+		const renderDebug = this.prepareRenderDebugRecord({
 			resetScrollRegion: options.resetScrollRegion ?? false,
 			footerStartRow: next.footerStartRow,
 			pinFooterToBottom: next.pinFooterToBottom,
 			footerLineCount: next.footerUi.lines.length,
 			transcriptViewportLineCount: this._renderedTranscriptViewportLines.length,
 			frame: summarizeScreenFrame(next.frame),
-			patches: summarizeFramePatches(patches),
+			patches: patchSummary,
 		});
+		if (renderDebug !== null) {
+			getActiveDebugLogger()?.debug("tui.render", "Rendered interactive screen frame", renderDebug);
+		}
 		if (this._resumeBrowser !== null) {
 			getActiveDebugLogger()?.debug("resume.browser.layout", "Rendered resume browser layout", {
 				headerLineCount: this.currentResumeBrowserTopLines().length,
@@ -1961,6 +1966,59 @@ class InteractiveModeHandler implements ModeHandler {
 		this._renderedFooterUi = next.footerUi;
 		this._renderedFooterStartRow = next.footerStartRow;
 		this._lastScreenFrame = next.frame;
+	}
+
+	private prepareRenderDebugRecord(record: {
+		readonly resetScrollRegion: boolean;
+		readonly footerStartRow: number;
+		readonly pinFooterToBottom: boolean;
+		readonly footerLineCount: number;
+		readonly transcriptViewportLineCount: number;
+		readonly frame: ReturnType<typeof summarizeScreenFrame>;
+		readonly patches: ReturnType<typeof summarizeFramePatches>;
+	}):
+		| (typeof record & {
+				readonly suppressedSinceLast?: number;
+		  })
+		| null {
+		if (record.resetScrollRegion) {
+			const next = {
+				...record,
+				...(this._suppressedRenderDebugCount > 0
+					? { suppressedSinceLast: this._suppressedRenderDebugCount }
+					: {}),
+			};
+			this._suppressedRenderDebugCount = 0;
+			this._lastRenderDebugKey = null;
+			this._lastRenderDebugLoggedAt = Date.now();
+			return next;
+		}
+
+		const key = JSON.stringify({
+			footerStartRow: record.footerStartRow,
+			pinFooterToBottom: record.pinFooterToBottom,
+			footerLineCount: record.footerLineCount,
+			transcriptViewportLineCount: record.transcriptViewportLineCount,
+			nonEmptyRows: record.frame.nonEmptyRows,
+			writeLineCount: record.patches.writeLineCount,
+			clearLineCount: record.patches.clearLineCount,
+			moveCursorCount: record.patches.moveCursorCount,
+		});
+		const now = Date.now();
+		if (this._lastRenderDebugKey === key && now - this._lastRenderDebugLoggedAt < RENDER_DEBUG_SAME_FRAME_THROTTLE_MS) {
+			this._suppressedRenderDebugCount += 1;
+			return null;
+		}
+		const next = {
+			...record,
+			...(this._suppressedRenderDebugCount > 0
+				? { suppressedSinceLast: this._suppressedRenderDebugCount }
+				: {}),
+		};
+		this._suppressedRenderDebugCount = 0;
+		this._lastRenderDebugKey = key;
+		this._lastRenderDebugLoggedAt = now;
+		return next;
 	}
 
 	private buildInteractiveScreenFrame(): {
@@ -1992,7 +2050,7 @@ class InteractiveModeHandler implements ModeHandler {
 			return selectionColumns === null
 				? isTranscriptUserBlock(visibleLine)
 					? formatFullWidthTranscriptUserLine(plainLine, terminalWidth)
-					: fitTerminalLine(visibleLine, terminalWidth)
+					: fitTerminalLineFromTuiCore(visibleLine, terminalWidth)
 				: renderSelectedPlainLine(
 						plainLine,
 						selectionColumns.startColumn,
@@ -2006,7 +2064,7 @@ class InteractiveModeHandler implements ModeHandler {
 			height: terminalHeight,
 			bodyLines,
 			footer: {
-				lines: footerUi.lines.map((line: string) => fitTerminalLine(line ?? "", terminalWidth)),
+				lines: footerUi.lines.map((line: string) => fitTerminalLineFromTuiCore(line ?? "", terminalWidth)),
 				cursorLineIndex: footerUi.cursorLineIndex,
 				cursorColumn: footerUi.cursorColumn,
 			},
@@ -2027,7 +2085,7 @@ class InteractiveModeHandler implements ModeHandler {
 		const footerUi = this.buildResumeBrowserFooterUi();
 		const headerLines = this.currentResumeBrowserTopLines();
 		const topHeight = Math.min(headerLines.length, Math.max(0, terminalHeight - footerUi.lines.length));
-		const topVisibleLines = headerLines.slice(0, topHeight).map((line) => fitTerminalLine(line, terminalWidth));
+		const topVisibleLines = headerLines.slice(0, topHeight).map((line) => fitTerminalLineFromTuiCore(line, terminalWidth));
 		const availableBodyRows = Math.max(0, terminalHeight - topVisibleLines.length - footerUi.lines.length);
 		const totalBodyRows = this.currentResumeBrowserBodyDisplayRows();
 		const maxTopOffset = Math.max(0, totalBodyRows - availableBodyRows);
@@ -2038,7 +2096,7 @@ class InteractiveModeHandler implements ModeHandler {
 			availableBodyRows,
 			Math.max(0, maxTopOffset - topOffset),
 			0,
-		).map((line) => fitTerminalLine(line, terminalWidth));
+		).map((line) => fitTerminalLineFromTuiCore(line, terminalWidth));
 		this._renderedTranscriptViewportLines = bodyVisibleLines.map((line) => stripAnsiWelcome(line));
 		const footerStartRow = Math.max(1, terminalHeight - footerUi.lines.length + 1);
 		const screenLines = Array.from({ length: terminalHeight }, () => "");
@@ -2055,7 +2113,7 @@ class InteractiveModeHandler implements ModeHandler {
 		for (const [index, line] of footerUi.lines.entries()) {
 			const row = footerStartRow - 1 + index;
 			if (row >= 0 && row < screenLines.length) {
-				screenLines[row] = fitTerminalLine(line ?? "", terminalWidth);
+				screenLines[row] = fitTerminalLineFromTuiCore(line ?? "", terminalWidth);
 			}
 		}
 		return {
@@ -2094,7 +2152,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentTranscriptDisplayRows(): number {
-		return computeTranscriptDisplayRows(
+		return computeTranscriptDisplayRowsFromTuiCore(
 			this.currentRenderedTranscriptBlocks(),
 			this.terminalWidth(),
 			this.currentWelcomeLineCount(),
@@ -2105,15 +2163,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._resumeBrowser !== null) {
 			return formatResumeBrowserTranscriptBlocks(this._resumeBrowser);
 		}
-		const welcomeBlocks = this._welcomeLines;
-		if (this._assistantBuffer.length === 0) {
-			return [...welcomeBlocks, ...this._transcriptBlocks];
-		}
-		const assistantBlock = materializeAssistantTranscriptBlock(this._assistantBuffer);
-		if (assistantBlock === null) {
-			return [...welcomeBlocks, ...this._transcriptBlocks];
-		}
-		return appendAssistantTranscriptBlock([...welcomeBlocks, ...this._transcriptBlocks], assistantBlock);
+		return this._conversation.renderedTranscriptBlocks(this._welcomeLines);
 	}
 
 	private currentWelcomeLineCount(): number {
@@ -2386,10 +2436,6 @@ export function formatWelcomeCenteredLine(contentWidth: number, text: string): s
 	return `${applyWelcomeBorderColor("│")}${" ".repeat(left)}${text}${" ".repeat(right)}${applyWelcomeBorderColor("│")}`;
 }
 
-export function computePromptCursorColumn(prompt: string, buffer: string, cursor: number): number {
-	return computePromptCursorColumnFromTuiCore(prompt, buffer, cursor);
-}
-
 export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boolean {
 	if (event.category === "session") return false;
 	if (event.category === "tool") return false;
@@ -2440,27 +2486,6 @@ export function formatInteractivePermissionBlock(
 }
 
 export type InteractiveFooterRenderResult = RenderedComposerBlock;
-
-export function buildInteractiveFooterLeadingLines(state: {
-	readonly terminalWidth: number;
-	readonly turnNotice: "thinking" | "responding" | "tool" | "compacting" | null;
-	readonly turnNoticeAnimationFrame?: number;
-	readonly elapsedMs?: number | null;
-	readonly currentTurnUsage?: UsageSnapshot | null;
-	readonly lastTurnUsage?: UsageSnapshot | null;
-	readonly sessionUsage?: UsageSnapshot | null;
-	readonly activeToolLabel?: string | null;
-	readonly showPendingOutputIndicator?: boolean;
-	readonly detailPanelExpanded?: boolean;
-	readonly detailPanelSummary?: string | null;
-	readonly detailPanelLines?: readonly string[];
-	readonly queuedInputs?: readonly string[];
-}): readonly string[] {
-	return buildInteractiveFooterLeadingLinesFromUi({
-		...state,
-		truncateText: truncatePlainTerminalText,
-	});
-}
 
 function materializeInteractiveScreenFrame(
 	composed: ComposedScreen,
@@ -2516,7 +2541,10 @@ export function formatInteractiveFooter(state: {
 	} | null;
 }): InteractiveFooterRenderResult {
 	const separator = formatInteractiveInputSeparator(computeInteractiveFooterSeparatorWidth(state.terminalWidth));
-	const leadingLines = buildInteractiveFooterLeadingLines(state);
+	const leadingLines = buildInteractiveFooterLeadingLinesFromUi({
+		...state,
+		truncateText: truncatePlainTerminalText,
+	});
 	if (state.permission !== null) {
 		const prompt = "choice [Enter/1/2/3]> ";
 		const layout = composePromptBlock({
@@ -2531,7 +2559,7 @@ export function formatInteractiveFooter(state: {
 	}
 	const hint = formatSlashSuggestionHint(
 		state.suggestions,
-		state.terminalWidth - computePromptCursorColumn(state.prompt, state.buffer, state.buffer.length),
+		state.terminalWidth - computePromptCursorColumnFromTuiCore(state.prompt, state.buffer, state.buffer.length),
 	);
 	const layout = composePromptBlock({
 		leadingLines,
@@ -2829,6 +2857,10 @@ function truncatePreviewLine(line: string): string {
 	return measureTerminalDisplayWidth(line) <= 72 ? line : `${line.slice(0, 69)}...`;
 }
 
+function ansiShowCursor(): string {
+	return "\x1b[?25h";
+}
+
 function formatMiniDiffPreview(oldString: string, newString: string): string {
 	if (oldString.trim().length === 0 && newString.trim().length === 0) return "";
 	const removed = oldString
@@ -2891,130 +2923,8 @@ export function acceptFirstSlashSuggestion(
 	};
 }
 
-export function formatTranscriptUserLine(content: string): string {
-	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.userTranscriptFg} ${content} ${INTERACTIVE_THEME.reset}`;
-}
-
-export function formatTranscriptUserBlocks(content: string): readonly string[] {
-	return content
-		.split(/\n{2,}/)
-		.map((part) => part.trim())
-		.filter((part) => part.length > 0)
-		.map((part) => formatTranscriptUserLine(part));
-}
-
-export function formatFullWidthTranscriptUserLine(content: string, width: number): string {
-	const plain = content.replace(/\r?\n/g, " ");
-	const visibleWidth = measureTerminalDisplayWidth(plain);
-	const safeWidth = Math.max(1, width);
-	const padded =
-		visibleWidth >= safeWidth
-			? truncatePlainTerminalText(plain, safeWidth)
-			: `${plain}${" ".repeat(safeWidth - visibleWidth)}`;
-	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.userTranscriptFg}${padded}${INTERACTIVE_THEME.reset}`;
-}
-
-export function formatTranscriptAssistantLine(content: string): string {
-	return `${INTERACTIVE_THEME.assistantBullet}⏺${INTERACTIVE_THEME.reset} ${content}`;
-}
-
-export function formatInteractiveInfoLine(content: string): string {
-	return `${INTERACTIVE_THEME.brand}${content}${INTERACTIVE_THEME.reset}`;
-}
-
-export function formatInteractiveWarningLine(content: string): string {
-	return `${INTERACTIVE_THEME.warning}${content}${INTERACTIVE_THEME.reset}`;
-}
-
-export function formatInteractiveErrorLine(content: string): string {
-	return `${INTERACTIVE_THEME.warningSoft}${INTERACTIVE_THEME.bold}Error:${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.warningSoft}${content}${INTERACTIVE_THEME.reset}`;
-}
-
-export function formatInteractiveErrorDetailLine(content: string): string {
-	return `${INTERACTIVE_THEME.warningSoft}${content}${INTERACTIVE_THEME.reset}`;
-}
-
-export function formatInteractivePromptBuffer(content: string, plain = false): string {
-	if (plain) return content;
-	return content;
-}
-
-export function formatInteractiveInputSeparator(width: number): string {
-	return `${INTERACTIVE_THEME.muted}${"─".repeat(Math.max(1, width))}${INTERACTIVE_THEME.reset}`;
-}
-
-export function computeInteractiveFooterSeparatorWidth(terminalWidth: number): number {
-	return Math.max(20, terminalWidth);
-}
-
-export function computeFooterCursorColumn(width: number, cursorColumn: number): number {
-	return computeFooterCursorColumnFromTuiCore(width, cursorColumn) - 1;
-}
-
-export function computeFooterStartRow(
-	welcomeLineCount: number,
-	terminalHeight: number,
-	footerHeight: number,
-	transcriptRows: number,
-): number {
-	const naturalStartRow = welcomeLineCount + 1 + Math.max(0, transcriptRows);
-	const bottomAnchoredStartRow = Math.max(1, terminalHeight - footerHeight + 1);
-	return Math.min(naturalStartRow, bottomAnchoredStartRow);
-}
-
-export function countRenderedTerminalRows(lines: readonly string[], width: number): number {
-	return countRenderedTerminalRowsFromTuiCore(lines, width);
-}
-
-export function computePromptCursorRowsUp(lines: readonly string[], width: number, cursorColumn: number): number {
-	return computePromptCursorRowsUpFromTuiCore(lines, width, cursorColumn);
-}
-
-export function computeFooterCursorRowsUp(
-	lines: readonly string[],
-	width: number,
-	cursorLineIndex: number,
-	cursorColumn: number,
-): number {
-	return computeFooterCursorRowsUpFromTuiCore(lines, width, cursorLineIndex, cursorColumn);
-}
-
-export function computeFooterCursorRowsFromEnd(
-	lines: readonly string[],
-	width: number,
-	cursorLineIndex: number,
-	cursorColumn: number,
-): number {
-	return computeFooterCursorRowsFromEndFromTuiCore(lines, width, cursorLineIndex, cursorColumn);
-}
-
-export function computeInteractiveEphemeralRows(
-	streaming: InteractiveStreamingRenderResult | null,
-	footer: InteractiveFooterRenderResult | null,
-): number {
-	return computeEphemeralRows(streaming, footer);
-}
-
-export function fitTerminalLine(line: string, width: number): string {
-	return fitTerminalLineFromTuiCore(line, width);
-}
-
 function truncatePlainTerminalText(text: string, width: number): string {
 	return truncatePlainTextFromTuiCore(text, width);
-}
-
-export function formatTurnNotice(
-	kind: "thinking" | "responding" | "tool" | "compacting",
-	options: {
-		readonly animationFrame?: number;
-		readonly queuedCount?: number;
-		readonly usage?: UsageSnapshot | null;
-		readonly showPendingOutputIndicator?: boolean;
-		readonly elapsedMs?: number | null;
-		readonly toolLabel?: string | null;
-	} = {},
-): string {
-	return formatTurnNoticeFromUi(kind, options);
 }
 
 function emptyUsageSnapshot(): UsageSnapshot {
@@ -3048,38 +2958,6 @@ function hasUsageSnapshot(usage: UsageSnapshot | null | undefined): usage is Usa
 	return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0 || usage.totalTokens > 0;
 }
 
-export function mergeStreamingText(existing: string, incoming: string): string {
-	if (incoming.length === 0) return existing;
-	if (existing.length === 0) return incoming;
-	if (incoming.startsWith(existing)) return incoming;
-	const embeddedExistingIndex = incoming.indexOf(existing);
-	if (embeddedExistingIndex >= 0 && embeddedExistingIndex <= 8) {
-		return incoming.slice(embeddedExistingIndex);
-	}
-	if (existing.endsWith(incoming)) return existing;
-
-	const trimmedIncoming = incoming.trimStart();
-	if (trimmedIncoming.startsWith(existing)) return trimmedIncoming;
-
-	const maxOverlap = Math.min(existing.length, incoming.length);
-	for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
-		if (existing.endsWith(incoming.slice(0, overlap))) {
-			return `${existing}${incoming.slice(overlap)}`;
-		}
-	}
-	const trimmedMaxOverlap = Math.min(existing.length, trimmedIncoming.length);
-	for (let overlap = trimmedMaxOverlap; overlap > 0; overlap -= 1) {
-		if (existing.endsWith(trimmedIncoming.slice(0, overlap))) {
-			return `${existing}${trimmedIncoming.slice(overlap)}`;
-		}
-	}
-	return `${existing}${incoming}`;
-}
-
-export function wrapTranscriptContent(content: string, width: number): readonly string[] {
-	return wrapTranscriptContentFromTuiCore(content, width);
-}
-
 export function computeVisibleTranscriptLines(
 	blocks: readonly string[],
 	width: number,
@@ -3093,20 +2971,8 @@ export function computeVisibleTranscriptLines(
 		maxRows,
 		offsetFromBottom,
 		unwrappedLeadingBlockCount,
-		wrapLine: wrapTranscriptContent,
+		wrapLine: wrapTranscriptContentFromTuiCore,
 	});
-}
-
-export function extractPlainTextSelection(
-	lines: readonly string[],
-	selection: {
-		startRow: number;
-		startColumn: number;
-		endRow: number;
-		endColumn: number;
-	},
-): string {
-	return extractPlainTextSelectionFromTuiCore(lines, selection);
 }
 
 function copyTextToClipboard(text: string): void {
@@ -3125,46 +2991,6 @@ function copyTextToClipboard(text: string): void {
 		input: text,
 		stdio: ["pipe", "ignore", "ignore"],
 	});
-}
-
-export function computeTranscriptDisplayRows(
-	blocks: readonly string[],
-	width: number,
-	unwrappedLeadingBlockCount = 0,
-): number {
-	return computeTranscriptDisplayRowsFromTuiCore(blocks, width, unwrappedLeadingBlockCount);
-}
-
-export function materializeAssistantTranscriptBlock(buffer: string): string | null {
-	if (buffer.length === 0) {
-		return null;
-	}
-	return formatTranscriptAssistantLine(buffer);
-}
-
-export function appendAssistantTranscriptBlock(blocks: readonly string[], assistantBlock: string): readonly string[] {
-	return appendTranscriptBlockWithSpacer(blocks, assistantBlock);
-}
-
-export function appendTranscriptBlockWithSpacer(blocks: readonly string[], block: string): readonly string[] {
-	if (block.length === 0) {
-		return [...blocks];
-	}
-	const lastNonEmptyIndex = findLastNonEmptyBlockIndex(blocks);
-	if (lastNonEmptyIndex === -1) {
-		return [block];
-	}
-	const normalized = blocks.slice(0, lastNonEmptyIndex + 1);
-	return [...normalized, "", block];
-}
-
-function findLastNonEmptyBlockIndex(blocks: readonly string[]): number {
-	for (let index = blocks.length - 1; index >= 0; index -= 1) {
-		if ((blocks[index] ?? "").length > 0) {
-			return index;
-		}
-	}
-	return -1;
 }
 
 function isTranscriptUserBlock(block: string): boolean {

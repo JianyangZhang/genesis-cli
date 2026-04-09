@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computePromptCursorColumn } from "../mode-dispatch.js";
+import { computePromptCursorColumn } from "@pickle-pee/tui-core";
 import { measureTerminalDisplayWidth } from "../terminal-display-width.js";
 
 describe("measureTerminalDisplayWidth", () => {

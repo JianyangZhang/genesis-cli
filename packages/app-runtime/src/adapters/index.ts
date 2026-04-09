@@ -7,4 +7,9 @@ export {
 	type PiMonoBridgeResult,
 	type PiMonoBridgeState,
 } from "./pi-mono-event-bridge.js";
-export { PiMonoSessionAdapter, type PiMonoSessionAdapterOptions } from "./pi-mono-session-adapter.js";
+export {
+	PiMonoSessionAdapter,
+	resolvePiMonoAuthReport,
+	type PiMonoResolvedAuthReport,
+	type PiMonoSessionAdapterOptions,
+} from "./pi-mono-session-adapter.js";

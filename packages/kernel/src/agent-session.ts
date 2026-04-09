@@ -5,6 +5,11 @@ import type { AssistantMessage, Message, Model, UserMessage } from "@pickle-pee/
 import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
 import { streamWithKernelProvider } from "./provider-registry.js";
+import type {
+	KernelCreateSessionOptions,
+	KernelSessionContract,
+	KernelSessionSnapshot,
+} from "./session-contract.js";
 import { SessionManager } from "./session-manager.js";
 import {
 	type GenesisSessionMetadata,
@@ -13,33 +18,19 @@ import {
 } from "./session-metadata.js";
 import { createBashTool, createEditTool, createReadTool, createWriteTool, type KernelTool } from "./tools.js";
 
-export interface CreateAgentSessionOptions {
-	readonly cwd: string;
-	readonly agentDir?: string;
-	readonly model?: Model<any>;
-	readonly thinkingLevel?: ThinkingLevel;
-	readonly tools?: readonly KernelTool[];
+export interface CreateAgentSessionOptions extends KernelCreateSessionOptions {
 	readonly authStorage?: AuthStorage;
 	readonly modelRegistry?: ModelRegistry;
 	readonly sessionManager?: SessionManager;
 }
 
-export interface GenesisAgentSession {
+export interface GenesisAgentSession extends KernelSessionContract {
 	readonly sessionId: string;
 	readonly sessionFile?: string;
-	readonly isStreaming: boolean;
-	subscribe(listener: (event: unknown) => void): () => void;
-	prompt(input: string): Promise<void>;
-	followUp(input: string): Promise<void>;
-	compact(customInstructions?: string): Promise<void>;
 	getSnapshot(): Promise<GenesisSessionSnapshot>;
-	abort(): Promise<void>;
-	dispose(): void;
 }
 
-export interface GenesisSessionSnapshot {
-	readonly sessionId: string;
-	readonly sessionFile?: string;
+export interface GenesisSessionSnapshot extends KernelSessionSnapshot {
 	readonly metadata: GenesisSessionMetadata | null;
 }
 

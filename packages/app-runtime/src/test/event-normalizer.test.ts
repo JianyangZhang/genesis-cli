@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RawUpstreamEvent } from "../adapters/kernel-session-adapter.js";
 import { EventNormalizer } from "../services/event-normalizer.js";
 import type { SessionId } from "../types/index.js";
@@ -7,6 +7,15 @@ const stubSessionId: SessionId = { value: "norm-test" };
 
 describe("EventNormalizer", () => {
 	const normalizer = new EventNormalizer(stubSessionId);
+	const originalDebug = process.env.GENESIS_DEBUG;
+
+	afterEach(() => {
+		if (originalDebug === undefined) {
+			delete process.env.GENESIS_DEBUG;
+		} else {
+			process.env.GENESIS_DEBUG = originalDebug;
+		}
+	});
 
 	it("maps agent_start to session_created", () => {
 		const raw: RawUpstreamEvent = {
@@ -202,6 +211,34 @@ describe("EventNormalizer", () => {
 		const raw: RawUpstreamEvent = { type: "unknown_event_type", timestamp: 9000 };
 		const result = normalizer.normalize(raw);
 		expect(result).toBeNull();
+	});
+
+	it("reports unknown events once per event type", () => {
+		const onUnknownEvent = vi.fn();
+		const withObserver = new EventNormalizer(stubSessionId, { onUnknownEvent });
+		withObserver.normalize({ type: "unknown_event_type", timestamp: 1 });
+		withObserver.normalize({ type: "unknown_event_type", timestamp: 2 });
+		withObserver.normalize({ type: "unknown_event_type_2", timestamp: 3 });
+
+		expect(onUnknownEvent).toHaveBeenCalledTimes(2);
+		expect(onUnknownEvent.mock.calls[0]?.[0]).toMatchObject({
+			sessionId: stubSessionId,
+			type: "unknown_event_type",
+			timestamp: 1,
+		});
+	});
+
+	it("writes a debug warning for unknown events when GENESIS_DEBUG is enabled", () => {
+		process.env.GENESIS_DEBUG = "1";
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const withDebug = new EventNormalizer(stubSessionId);
+		withDebug.normalize({ type: "unknown_event_type", timestamp: 1 });
+		withDebug.normalize({ type: "unknown_event_type", timestamp: 2 });
+
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(warn.mock.calls[0]?.[0]).toContain("Unknown upstream event type");
+
+		warn.mockRestore();
 	});
 
 	it("assigns unique event IDs", () => {

@@ -3,55 +3,60 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
-	appendAssistantTranscriptBlock,
-	appendTranscriptBlockWithSpacer,
-	buildInteractiveFooterLeadingLines,
 	buildWelcomeLines,
-	computeFooterCursorColumn,
-	computeFooterCursorRowsFromEnd,
-	computeFooterCursorRowsUp,
-	computeFooterStartRow,
-	computeInteractiveEphemeralRows,
-	computeInteractiveFooterSeparatorWidth,
-	computePromptCursorRowsUp,
 	computeSlashSuggestions,
-	computeTranscriptDisplayRows,
 	computeVisibleTranscriptLines,
-	countRenderedTerminalRows,
 	createDebouncedCallback,
-	extractPlainTextSelection,
-	fitTerminalLine,
-	formatFullWidthTranscriptUserLine,
-	formatInteractiveErrorDetailLine,
-	formatInteractiveErrorLine,
 	formatInteractiveFooter,
-	formatInteractiveInfoLine,
-	formatInteractiveInputSeparator,
 	formatInteractivePermissionBlock,
-	formatInteractivePromptBuffer,
 	formatInteractiveToolEvent,
 	formatInteractiveToolResult,
 	formatInteractiveToolTitle,
 	formatSlashSuggestionHint,
-	formatTranscriptAssistantLine,
-	formatTranscriptUserBlocks,
-	formatTranscriptUserLine,
-	formatTurnNotice,
 	formatWelcomeBottomBorder,
 	formatWelcomeCenteredLine,
 	formatWelcomeFilledLine,
 	formatWelcomeTopBorder,
-	materializeAssistantTranscriptBlock,
-	mergeStreamingText,
 	movePermissionSelection,
 	permissionDecisionFromSelection,
 	pickWelcomeGreeting,
 	readInteractiveCliPackageVersion,
 	shouldRenderInteractiveTranscriptEvent,
 	WELCOME_BIBLE_GREETINGS,
-	wrapTranscriptContent,
 } from "../mode-dispatch.js";
-import { INTERACTIVE_THEME } from "../theme.js";
+import {
+	appendAssistantTranscriptBlock,
+	appendTranscriptBlockWithSpacer,
+	computeInteractiveFooterSeparatorWidth,
+	buildInteractiveFooterLeadingLines,
+	formatFullWidthTranscriptUserLine,
+	formatInteractiveErrorDetailLine,
+	formatInteractiveErrorLine,
+	formatInteractiveInfoLine,
+	formatInteractiveInputSeparator,
+	formatInteractivePromptBuffer,
+	formatTranscriptAssistantLine,
+	formatTranscriptUserBlocks,
+	formatTranscriptUserLine,
+	formatTurnNotice,
+	INTERACTIVE_THEME,
+	materializeAssistantTranscriptBlock,
+	mergeStreamingText,
+} from "@pickle-pee/ui";
+import {
+	computeFooterCursorColumn,
+	computeFooterCursorRowsFromEnd,
+	computeFooterCursorRowsUp,
+	computeFooterStartRow,
+	computePromptCursorRowsUp,
+	computeTranscriptDisplayRows,
+	countRenderedTerminalRows,
+	truncatePlainText,
+	extractPlainTextSelection,
+	fitTerminalLine,
+	wrapTranscriptContent,
+	computeEphemeralRows,
+} from "@pickle-pee/tui-core";
 
 function formatLocalTraceTimestamp(value: Date): string {
 	const padTwo = (part: number): string => String(part).padStart(2, "0");
@@ -119,6 +124,7 @@ describe("interactive transcript formatting", () => {
 			detailPanelExpanded: true,
 			detailPanelLines: ["- file-a.ts", "- file-b.ts"],
 			queuedInputs: ["follow-up question"],
+			truncateText: truncatePlainText,
 		});
 
 		expect(lines.some((line) => line.includes("Last turn"))).toBe(true);
@@ -263,6 +269,13 @@ describe("interactive transcript formatting", () => {
 		const packageJsonPath = resolve(__dirname, "../../package.json");
 		const expectedVersion = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version: string };
 		expect(readInteractiveCliPackageVersion(packageJsonPath)).toBe(expectedVersion.version);
+	});
+
+	it("keeps interactive host detached from legacy app-ui ANSI compatibility exports", () => {
+		const sourcePath = resolve(__dirname, "../mode-dispatch.ts");
+		const source = readFileSync(sourcePath, "utf8");
+		expect(source).not.toContain("legacyTuiCompat");
+		expect(source).not.toContain("ansiShowCursor,");
 	});
 
 	it("keeps welcome lines within narrow terminal widths after fitting", () => {
@@ -543,7 +556,7 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("materializes the final assistant transcript block before redraw clears the buffer", () => {
-		expect(materializeAssistantTranscriptBlock("hello")).toBe(formatTranscriptAssistantLine("hello"));
+		expect(materializeAssistantTranscriptBlock("hello")).toBe("⏺ hello");
 		expect(materializeAssistantTranscriptBlock("")).toBeNull();
 	});
 
@@ -588,9 +601,9 @@ describe("interactive transcript formatting", () => {
 	});
 
 	it("keeps the footer close to short transcript content before bottom-anchoring", () => {
-		expect(computeFooterStartRow(11, 40, 4, 0)).toBe(12);
-		expect(computeFooterStartRow(11, 40, 4, 1)).toBe(13);
-		expect(computeFooterStartRow(11, 40, 4, 30)).toBe(37);
+		expect(computeFooterStartRow(40, 4, 11)).toBe(12);
+		expect(computeFooterStartRow(40, 4, 12)).toBe(13);
+		expect(computeFooterStartRow(40, 4, 41)).toBe(37);
 	});
 
 	it("counts rendered footer rows after terminal resize", () => {
@@ -598,9 +611,9 @@ describe("interactive transcript formatting", () => {
 		expect(computePromptCursorRowsUp(["──────────", "❯ hello", "──────────"], 4, 6)).toBe(4);
 		expect(computeFooterCursorRowsUp(["· Thinking…", "──────────", "❯ hello", "──────────"], 4, 2, 6)).toBe(7);
 		expect(computeFooterCursorRowsFromEnd(["· Thinking…", "──────────", "❯ hello", "──────────"], 4, 2, 6)).toBe(3);
-		expect(computeFooterCursorColumn(4, 6)).toBe(2);
+		expect(computeFooterCursorColumn(4, 6)).toBe(3);
 		expect(
-			computeInteractiveEphemeralRows(
+			computeEphemeralRows(
 				{
 					lines: ["⏺ hello", "world"],
 					renderedWidth: 4,

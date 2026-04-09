@@ -14,7 +14,7 @@ import type { KernelSessionAdapter, ToolExecutionGateDecision } from "../adapter
 import type { EventBus, Unsubscribe } from "../events/event-bus.js";
 import { createEventBus } from "../events/event-bus.js";
 import type { RuntimeEvent, ToolStartedEvent } from "../events/runtime-event.js";
-import type { ToolGovernor } from "../governance/tool-governor.js";
+import type { GovernorDecision, ToolGovernor } from "../governance/tool-governor.js";
 import type { PlanEngine } from "../planning/plan-engine.js";
 import type { PlanOrchestrator } from "../planning/plan-orchestrator.js";
 import { createPlanOrchestrator } from "../planning/plan-orchestrator.js";
@@ -343,29 +343,15 @@ export class SessionFacadeImpl implements SessionFacade {
 
 		this._adapter.setToolExecutionGate({
 			beforeToolExecution: ({ toolName, toolCallId, parameters }): ToolExecutionGateDecision => {
-				const targetPath = extractTargetPath(parameters);
-				const decision = this._governor!.beforeExecution({
-					sessionId: this._state.id.value,
-					toolName,
-					toolCallId,
-					workingDirectory: this._context.workingDirectory,
-					sessionMode: this._context.mode,
-					isSubAgent: false,
-					targetPath,
-					parameters,
-				});
+				const evaluation = this.evaluateToolPermission(toolName, toolCallId, parameters);
+				const decision = evaluation.decision;
 
 				if (decision.type === "allow") {
 					return decision;
 				}
 
 				if (decision.type === "ask_user") {
-					this._pendingPermissions.set(toolCallId, {
-						toolName,
-						riskLevel: decision.riskLevel,
-						targetPath,
-						commandDigest: extractCommandDigest(parameters),
-					});
+					this.recordPendingPermission(toolCallId, toolName, decision.riskLevel, evaluation.targetPath, parameters);
 				}
 
 				return {
@@ -420,23 +406,12 @@ export class SessionFacadeImpl implements SessionFacade {
 		}
 
 		if (normalized.type === "tool_started") {
-			const targetPath =
-				typeof normalized.parameters?.file_path === "string"
-					? normalized.parameters.file_path
-					: typeof normalized.parameters?.path === "string"
-						? normalized.parameters.path
-						: undefined;
-
-			const decision = this._governor.beforeExecution({
-				sessionId: this._state.id.value,
-				toolName: normalized.toolName,
-				toolCallId: normalized.toolCallId,
-				workingDirectory: this._context.workingDirectory,
-				sessionMode: this._context.mode,
-				isSubAgent: false,
-				targetPath,
-				parameters: normalized.parameters,
-			});
+			const evaluation = this.evaluateToolPermission(
+				normalized.toolName,
+				normalized.toolCallId,
+				normalized.parameters,
+			);
+			const decision = evaluation.decision;
 
 			if (decision.type === "deny") {
 				return {
@@ -452,12 +427,13 @@ export class SessionFacadeImpl implements SessionFacade {
 			}
 
 			if (decision.type === "ask_user") {
-				this._pendingPermissions.set(normalized.toolCallId, {
-					toolName: normalized.toolName,
-					riskLevel: decision.riskLevel,
-					targetPath,
-					commandDigest: extractCommandDigest(normalized.parameters),
-				});
+				this.recordPendingPermission(
+					normalized.toolCallId,
+					normalized.toolName,
+					decision.riskLevel,
+					evaluation.targetPath,
+					normalized.parameters,
+				);
 				this._bufferedToolExecutions.set(normalized.toolCallId, {
 					startedEvent: normalized,
 					bufferedEvents: [],
@@ -477,18 +453,45 @@ export class SessionFacadeImpl implements SessionFacade {
 			return normalized;
 		}
 
-		if (normalized.type === "tool_completed") {
-			this._governor.afterExecution({
-				toolName: normalized.toolName,
-				toolCallId: normalized.toolCallId,
-				status: normalized.status,
-				durationMs: normalized.durationMs,
-			});
-			return normalized;
-		}
-
 		// tool_update, tool_denied, etc. — pass through
 		return normalized;
+	}
+
+	private evaluateToolPermission(
+		toolName: string,
+		toolCallId: string,
+		parameters: Readonly<Record<string, unknown>> | undefined,
+	): {
+		readonly decision: GovernorDecision;
+		readonly targetPath?: string;
+	} {
+		const targetPath = extractTargetPath(parameters);
+		const decision = this._governor!.beforeExecution({
+			sessionId: this._state.id.value,
+			toolName,
+			toolCallId,
+			workingDirectory: this._context.workingDirectory,
+			sessionMode: this._context.mode,
+			isSubAgent: false,
+			targetPath,
+			parameters,
+		});
+		return { decision, targetPath };
+	}
+
+	private recordPendingPermission(
+		toolCallId: string,
+		toolName: string,
+		riskLevel: string,
+		targetPath: string | undefined,
+		parameters: Readonly<Record<string, unknown>> | undefined,
+	): void {
+		this._pendingPermissions.set(toolCallId, {
+			toolName,
+			riskLevel,
+			targetPath,
+			commandDigest: extractCommandDigest(parameters),
+		});
 	}
 
 	private emitRuntimeEvent(event: RuntimeEvent): void {

@@ -283,6 +283,41 @@ describe("PiMonoSessionAdapter", () => {
 		const recovery = await adapter.getRecoveryData();
 		expect(recovery.metadata?.summary).toBe("fake summary");
 	});
+
+	it("recreates underlying session after setModel and preserves close lifecycle", async () => {
+		const agentDir = await createAgentDir();
+		let createCount = 0;
+		let disposeCount = 0;
+		const createSession = async () => {
+			createCount += 1;
+			const session = new FakeAgentSession(async () => {
+				session.emit({ type: "agent_end", messages: [] } as never);
+			});
+			const originalDispose = session.dispose.bind(session);
+			session.dispose = () => {
+				disposeCount += 1;
+				originalDispose();
+			};
+			return session.asAgentSession();
+		};
+
+		const adapter = new PiMonoSessionAdapter({
+			workingDirectory: process.cwd(),
+			agentDir,
+			model: { provider: "test-provider", id: "test-model" },
+			createTools: () => [],
+			createSession: createSession as never,
+		});
+
+		await collectEvents(adapter.sendPrompt("first"));
+		expect(createCount).toBe(1);
+		await adapter.setModel({ provider: "test-provider", id: "test-model-v2" });
+		expect(disposeCount).toBe(1);
+		await collectEvents(adapter.sendPrompt("second"));
+		expect(createCount).toBe(2);
+		await adapter.close();
+		expect(disposeCount).toBe(2);
+	});
 });
 
 class FakeAgentSession {

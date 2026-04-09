@@ -158,6 +158,29 @@ describe("createAppRuntime", () => {
 		expect(adapter.lastResumeData).toEqual(recoveryData);
 	});
 
+	it("keeps recover -> setModel -> close lifecycle stable for a recovered session", async () => {
+		const adapter = new StubKernelSessionAdapter();
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "interactive",
+			model: stubModel,
+			adapter,
+		});
+		const recovered = runtime.recoverSession({
+			sessionId: { value: "session-lifecycle" },
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		});
+
+		await recovered.switchModel({ provider: "test", id: "next-model", displayName: "Next Model" });
+		expect(adapter.lastModel).toMatchObject({ provider: "test", id: "next-model" });
+		await recovered.close();
+		expect(adapter.closed).toBe(true);
+	});
+
 	it("persists recovered session facts into recent catalog after follow-up input", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recover-facts-"));
 		const historyDir = join(agentDir, "history");
@@ -343,6 +366,54 @@ describe("createAppRuntime", () => {
 		expect(recent[0]?.recoveryData.toolSet).toEqual(["read", "edit"]);
 		expect(recent[0]?.recoveryData.workingDirectory).toBe("/tmp/workspace");
 		expect(recent[0]?.recoveryData.agentDir).toBe(agentDir);
+	});
+
+	it("treats kernel metadata as authoritative when closing a session with live metadata", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-kernel-metadata-authority-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+		await runtime.recordRecentSessionInput(session, "live first prompt");
+		await runtime.recordRecentSessionAssistantText(session, "live assistant summary");
+
+		await runtime.recordClosedRecentSession(session, {
+			sessionId: session.id,
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "kernel summary",
+				firstPrompt: "kernel first prompt",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user", text: "kernel first prompt" },
+					{ role: "assistant", text: "kernel assistant answer" },
+				],
+			},
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+		});
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "kernel summary",
+			firstPrompt: "kernel first prompt",
+		});
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "kernel first prompt" },
+			{ role: "assistant", text: "kernel assistant answer" },
+		]);
 	});
 
 	it("builds runtime-owned session history from user and assistant turns", async () => {
@@ -718,6 +789,48 @@ describe("createAppRuntime", () => {
 		expect(results[0]?.entry.recoveryData.sessionId.value).toBe(session.id.value);
 		expect(results[0]?.entry.recoveryData.metadata?.summary).toContain("README 发布流程梳理完成");
 		expect(results[0]?.matchSource).toBe("title");
+	});
+
+	it("keeps resume/compact/recent-session behavior consistent across resumed turns", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-resume-compact-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const first = runtime.createSession();
+		let closedRecoveryData: SessionRecoveryData | null = null;
+		runtime.events.on("session_closed", (event) => {
+			closedRecoveryData = event.recoveryData;
+		});
+
+		await runtime.recordRecentSessionEvent(first, {
+			category: "compaction",
+			type: "compaction_completed",
+			summary: { compactedSummary: "v1 compact summary" },
+		});
+		await first.close();
+		await runtime.recordClosedRecentSession(first, closedRecoveryData!);
+
+		const resumed = await runtime.recoverSession(closedRecoveryData!);
+		await runtime.recordRecentSessionEvent(resumed, {
+			category: "compaction",
+			type: "compaction_completed",
+			summary: { compactedSummary: "v2 compact summary" },
+		});
+		await resumed.close();
+		await runtime.recordClosedRecentSession(resumed, closedRecoveryData!);
+
+		const recent = await runtime.listRecentSessions();
+		const hits = await runtime.searchRecentSessions("v2 compact summary");
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(first.id.value);
+		expect(recent[0]?.recoveryData.metadata?.summary).toContain("v2 compact summary");
+		expect(hits[0]?.entry.recoveryData.sessionId.value).toBe(first.id.value);
 	});
 
 	it("keeps recent catalog consistent across close-and-new-session transitions", async () => {

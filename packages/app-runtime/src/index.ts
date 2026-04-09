@@ -6,6 +6,8 @@ export {
 	type PiMonoBridgeResult,
 	type PiMonoBridgeState,
 	PiMonoSessionAdapter,
+	resolvePiMonoAuthReport,
+	type PiMonoResolvedAuthReport,
 	type PiMonoSessionAdapterOptions,
 } from "./adapters/index.js";
 // Adapters

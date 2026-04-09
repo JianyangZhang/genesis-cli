@@ -2,7 +2,10 @@
  * Translates raw upstream events into standardized product-layer RuntimeEvents.
  *
  * This is the single point of translation. Unrecognized raw events return `null`
- * and are silently dropped — they are never leaked to consumers.
+ * and are never forwarded to consumers.
+ *
+ * For observability, unknown event types are reported once per type via
+ * `onUnknownEvent`, and emit a debug warning when `GENESIS_DEBUG` is enabled.
  *
  * The mapping table is a P2 skeleton. It will be refined when pi-mono is
  * integrated and the actual upstream event types are known.
@@ -13,8 +16,22 @@ import type { RuntimeEvent } from "../events/runtime-event.js";
 import { generateEventId } from "../session/session-events.js";
 import type { SessionId } from "../types/index.js";
 
+interface EventNormalizerOptions {
+	readonly onUnknownEvent?: (event: {
+		readonly sessionId: SessionId;
+		readonly type: string;
+		readonly timestamp: number;
+		readonly payload?: Readonly<Record<string, unknown>>;
+	}) => void;
+}
+
 export class EventNormalizer {
-	constructor(private readonly sessionId: SessionId) {}
+	private readonly unknownEventTypes = new Set<string>();
+
+	constructor(
+		private readonly sessionId: SessionId,
+		private readonly options: EventNormalizerOptions = {},
+	) {}
 
 	/**
 	 * Map a raw upstream event to a product-layer RuntimeEvent.
@@ -192,7 +209,35 @@ export class EventNormalizer {
 				};
 
 			default:
+				this.reportUnknownEvent(raw);
 				return null;
 		}
 	}
+
+	private reportUnknownEvent(raw: RawUpstreamEvent): void {
+		if (this.unknownEventTypes.has(raw.type)) {
+			return;
+		}
+		this.unknownEventTypes.add(raw.type);
+		this.options.onUnknownEvent?.({
+			sessionId: this.sessionId,
+			type: raw.type,
+			timestamp: raw.timestamp,
+			payload: raw.payload,
+		});
+		if (isDebugEnabled()) {
+			console.warn(
+				`[runtime:event-normalizer] Unknown upstream event type="${raw.type}" session="${this.sessionId.value}"`,
+			);
+		}
+	}
+}
+
+function isDebugEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	const raw = env.GENESIS_DEBUG;
+	if (!raw) {
+		return false;
+	}
+	const normalized = raw.trim().toLowerCase();
+	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }

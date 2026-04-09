@@ -14,6 +14,7 @@ import {
 import { ensureAgentDirBootstrapped, resolveDefaultBootstrapBaseUrl } from "./bootstrap.js";
 import { type DebugLoggerSession, getLastDebugSession, initializeDebugLogger } from "./debug-logger.js";
 import { createModeHandler, runInteractiveStartupChecks } from "./mode-dispatch.js";
+import { runInteractiveStartupDiagnostics, validateInteractiveModelConfiguration } from "./startup-diagnostics.js";
 
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -47,6 +48,8 @@ export interface ParsedArgs {
 	readonly flags: Readonly<Record<string, string | boolean>>;
 	readonly positional: readonly string[];
 }
+
+export { validateInteractiveModelConfiguration };
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
 	const flags: Record<string, string | boolean> = {};
@@ -269,17 +272,9 @@ async function prepareInteractiveLaunch(
 	});
 	logger.debug("cli.bootstrap", "Agent directory bootstrapped");
 
-	const startupAdapter = new PiMonoSessionAdapter({
-		workingDirectory: options.workingDirectory,
-		agentDir: options.agentDir,
-		historyDir: options.historyDir,
-		model: options.model,
-		toolSet: options.toolSet,
-		thinkingLevel: options.thinkingLevel,
-		onAuthResolved: (report) => logAuthResolution(logger, { ...report, phase: "startup_check" }),
-	});
-	const startupAuth = await startupAdapter.validateStartupConfiguration();
-	await startupAdapter.close();
+	const startupDiagnostics = await runInteractiveStartupDiagnostics({ options });
+	const startupAuth = startupDiagnostics.authReport;
+	logAuthResolution(logger, { ...startupAuth, phase: "startup_check" });
 	logger.debug("cli.startup_check", "Interactive startup checks passed", {
 		model: options.model,
 		agentDir: options.agentDir,
@@ -318,26 +313,6 @@ async function createRuntimeForCliOptions(
 	const recentSessionPrune = await runtime.pruneRecentSessions();
 	logger.debug("resume.catalog.prune", "Pruned recent-session catalog on startup", recentSessionPrune);
 	return runtime;
-}
-
-export function validateInteractiveModelConfiguration(options: CliOptions, env: NodeJS.ProcessEnv = process.env): void {
-	const requiredApiKeyEnv = options.bootstrapOverrides?.apiKeyEnv?.trim() || "GENESIS_API_KEY";
-	const requiredApiKeyValue = env[requiredApiKeyEnv]?.trim();
-	if (!requiredApiKeyValue || requiredApiKeyValue === "your_zhipu_api_key") {
-		throw new Error(`${requiredApiKeyEnv} is required for interactive mode.`);
-	}
-	if (!options.bootstrapOverrides?.baseUrl?.trim()) {
-		throw new Error("GENESIS_BOOTSTRAP_BASE_URL is required for interactive mode.");
-	}
-	if (!options.bootstrapOverrides?.api?.trim()) {
-		throw new Error("GENESIS_BOOTSTRAP_API is required for interactive mode.");
-	}
-	if (!options.model.provider.trim()) {
-		throw new Error("GENESIS_MODEL_PROVIDER is required for interactive mode.");
-	}
-	if (!options.model.id.trim()) {
-		throw new Error("GENESIS_MODEL_ID is required for interactive mode.");
-	}
 }
 
 interface FileConfig {

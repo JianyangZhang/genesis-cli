@@ -79,13 +79,13 @@ Genesis follows a layered "terminal host / content semantics / runtime contracts
 - Layers:
   - `packages/app-cli` owns process entrypoints, the TTY lifecycle, debug wiring, and the interactive mode host
   - `packages/app-tui-core` owns terminal capability detection, mode lifecycle, screen frames, patch diffs, and composer/layout rendering primitives
-  - `packages/app-ui` owns slash commands, the resume browser, formatters, footer content preparation, and interaction semantics
+  - `packages/app-ui` owns slash commands, the resume browser, formatters, the interactive theme, footer content preparation, and interaction semantics
   - `packages/app-runtime` owns the session facade, event normalization, recent sessions, governance, and planning
   - `packages/app-tools` owns the tool catalog, risk classification, permission policy, command classification, and audit support
   - `packages/kernel` owns the vendored kernel, provider integration, and upstream session plumbing
   - `packages/app-config`, `packages/app-extensions`, and `packages/app-evaluation` fill in configuration, extension, and evaluation support
 - Boundaries:
-  - `app-cli` hosts and wires the terminal, but does not own product copy or layout semantics
+  - `app-cli` hosts and wires the terminal, but does not own product copy, theme tokens, or layout semantics
   - `app-tui-core` owns terminal materialization and rendering rules, but not slash-command or product semantics
   - `app-ui` decides what to show, but not TTY lifecycle or transcript persistence
   - `app-runtime` maps kernel/upstream semantics into stable product contracts
@@ -101,7 +101,9 @@ Genesis follows a layered "terminal host / content semantics / runtime contracts
 - Current direction:
   - keep moving interactive rendering rules into `app-tui-core`
   - keep moving content semantics out of `app-cli` and back into `app-ui`
+  - keep `recent-session` metadata authority explicit: `kernel/session file` stays primary, while `app-runtime` provides catalog aggregation and fallback
   - keep refining `/resume` into a stable chain where `app-runtime` provides structured summaries, `app-ui` owns presentation semantics, and `app-cli` stays focused on TTY wiring
+  - keep legacy ANSI/TUI exports behind a compatibility namespace only, not as a mainline entrypoint
   - keep `app-runtime` and `app-tools` contracts stable, and add `--debug` observability alongside every complex workflow
 
 ---
