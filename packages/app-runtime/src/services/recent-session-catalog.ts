@@ -20,7 +20,7 @@ export function getRecentSessionCatalogDir(historyDir: string): string {
 export async function recordRecentSession(
 	historyDir: string | undefined,
 	recoveryData: SessionRecoveryData,
-	options?: { readonly title?: string },
+	options?: { readonly title?: string; readonly authoritativeMetadata?: boolean },
 ): Promise<void> {
 	if (!historyDir) {
 		return;
@@ -398,10 +398,10 @@ async function materializeRecentSessionRecoveryData(
 async function persistRecentSessionRecoveryData(
 	storeDir: string,
 	recoveryData: SessionRecoveryData,
-	options?: { readonly title?: string },
+	options?: { readonly title?: string; readonly authoritativeMetadata?: boolean },
 ): Promise<void> {
 	const existing = await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value);
-	const mergedRecoveryData = mergeRecentSessionRecoveryData(existing, recoveryData);
+	const mergedRecoveryData = mergeRecentSessionRecoveryData(existing, recoveryData, options?.authoritativeMetadata === true);
 	const enrichedRecoveryData = await materializeRecentSessionRecoveryData(mergedRecoveryData, {
 		reloadSessionFileMetadata: shouldReloadRecentSessionMetadataFromSessionFile(recoveryData),
 	});
@@ -423,6 +423,7 @@ export function shouldReloadRecentSessionMetadataFromSessionFile(recoveryData: S
 function mergeRecentSessionRecoveryData(
 	existing: SessionRecoveryData | null,
 	incoming: SessionRecoveryData,
+	preferIncomingMetadata = false,
 ): SessionRecoveryData {
 	if (!existing) {
 		return incoming;
@@ -437,7 +438,7 @@ function mergeRecentSessionRecoveryData(
 			displayName: normalizeRecentSessionIdentityText(incoming.model.displayName) ?? existing.model.displayName,
 		},
 		toolSet: incoming.toolSet.length > 0 ? incoming.toolSet : existing.toolSet,
-		metadata: mergeRecentSessionMetadata(existing.metadata, incoming.metadata),
+		metadata: mergeRecentSessionMetadata(existing.metadata, incoming.metadata, preferIncomingMetadata),
 		workingDirectory: incoming.workingDirectory ?? existing.workingDirectory,
 		sessionFile: incoming.sessionFile ?? existing.sessionFile,
 		agentDir: incoming.agentDir ?? existing.agentDir,
@@ -447,15 +448,20 @@ function mergeRecentSessionRecoveryData(
 function mergeRecentSessionMetadata(
 	existing: SessionRecoveryMetadata | null | undefined,
 	incoming: SessionRecoveryMetadata | null | undefined,
+	preferIncomingMetadata = false,
 ): SessionRecoveryMetadata | undefined {
 	if (!existing && !incoming) {
 		return undefined;
 	}
-	const mergedRecentMessages = mergeRecentSessionMessages(existing?.recentMessages, incoming?.recentMessages);
+	const mergedRecentMessages =
+		preferIncomingMetadata && (incoming?.recentMessages?.length ?? 0) > 0
+			? incoming!.recentMessages
+			: mergeRecentSessionMessages(existing?.recentMessages, incoming?.recentMessages);
 	return {
 		firstPrompt:
-			normalizeRecentSessionText(existing?.firstPrompt) ??
-			normalizeRecentSessionText(incoming?.firstPrompt) ??
+			(preferIncomingMetadata
+				? normalizeRecentSessionText(incoming?.firstPrompt) ?? normalizeRecentSessionText(existing?.firstPrompt)
+				: normalizeRecentSessionText(existing?.firstPrompt) ?? normalizeRecentSessionText(incoming?.firstPrompt)) ??
 			undefined,
 		summary:
 			normalizeRecentSessionText(incoming?.summary) ?? normalizeRecentSessionText(existing?.summary) ?? undefined,

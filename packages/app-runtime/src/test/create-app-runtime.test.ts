@@ -345,6 +345,54 @@ describe("createAppRuntime", () => {
 		expect(recent[0]?.recoveryData.agentDir).toBe(agentDir);
 	});
 
+	it("treats kernel metadata as authoritative when closing a session with live metadata", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-kernel-metadata-authority-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+		await runtime.recordRecentSessionInput(session, "live first prompt");
+		await runtime.recordRecentSessionAssistantText(session, "live assistant summary");
+
+		await runtime.recordClosedRecentSession(session, {
+			sessionId: session.id,
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "kernel summary",
+				firstPrompt: "kernel first prompt",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user", text: "kernel first prompt" },
+					{ role: "assistant", text: "kernel assistant answer" },
+				],
+			},
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+		});
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "kernel summary",
+			firstPrompt: "kernel first prompt",
+		});
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "kernel first prompt" },
+			{ role: "assistant", text: "kernel assistant answer" },
+		]);
+	});
+
 	it("builds runtime-owned session history from user and assistant turns", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-history-turns-"));
 		const historyDir = join(agentDir, "history");

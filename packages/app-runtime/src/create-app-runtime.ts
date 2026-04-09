@@ -250,7 +250,10 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 					withRecentSessionContext(session, recoveryData),
 					getLiveRecentSessionMetadata(session),
 				);
-				await recordRecentSession(config.historyDir, merged, options);
+				await recordRecentSession(config.historyDir, merged, {
+					...options,
+					authoritativeMetadata: true,
+				});
 				clearLiveRecentSessionMetadata(session);
 			});
 		},
@@ -426,10 +429,11 @@ function mergeRuntimeOwnedMetadata(
 	existing: SessionRecoveryMetadata | null | undefined,
 	live: SessionRecoveryMetadata,
 ): SessionRecoveryMetadata {
-	const recentMessages = live.recentMessages.length > 0 ? live.recentMessages : (existing?.recentMessages ?? []);
+	// Kernel/session-file metadata is the authority. Runtime live metadata is fallback-only.
+	const recentMessages = (existing?.recentMessages?.length ?? 0) > 0 ? existing!.recentMessages : live.recentMessages;
 	return {
-		firstPrompt: live.firstPrompt ?? existing?.firstPrompt,
-		summary: live.summary ?? existing?.summary,
+		firstPrompt: existing?.firstPrompt ?? live.firstPrompt,
+		summary: existing?.summary ?? live.summary,
 		messageCount: Math.max(existing?.messageCount ?? 0, live.messageCount, recentMessages.length),
 		fileSizeBytes: Math.max(existing?.fileSizeBytes ?? 0, live.fileSizeBytes),
 		recentMessages,
