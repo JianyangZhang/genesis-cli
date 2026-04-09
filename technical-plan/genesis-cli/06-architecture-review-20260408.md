@@ -690,9 +690,10 @@
   已完成子项：
   - [x] P0-1.a：`SessionFacade` recovery snapshot / close event 输出更完整的 session-facing recovery 契约
   - [x] P0-1.b：`create-app-runtime` 侧减少对 `SessionFacade` recovery snapshot 的重复 canonicalize
+  - [x] P0-1.c：`recoverSession` 优先继承 `recoveryData.workingDirectory` 作为会话上下文事实源
   未完成子项：
-  - [ ] P0-1.c：kernel / runtime 的 transcript persistence 与 recovery contract 继续统一
-  - [ ] P0-1.d：compaction / summary / preview / working directory 等会话域边界继续内聚
+  - [ ] P0-1.d：kernel / runtime 的 transcript persistence 与 recovery contract 继续统一
+  - [ ] P0-1.e：compaction / summary / preview / working directory 等会话域边界继续内聚
 - [ ] P0-2：统一会话事实来源与 recent catalog 投影关系
   原因：当前 `resume` 体验和跨模式一致性都依赖这一层稳定。
   进行中说明：recent catalog / session metadata / rich recovery 的一致性护栏已补强，但“单一事实源 + 稳定投影”还未彻底收口。

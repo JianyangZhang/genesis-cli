@@ -366,7 +366,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			const state = recoverSessionState(data);
 			const context = createRuntimeContext({
 				sessionId: data.sessionId,
-				workingDirectory: config.workingDirectory,
+				workingDirectory: data.workingDirectory ?? config.workingDirectory,
 				agentDir: data.agentDir ?? config.agentDir,
 				configSources: config.configSources,
 				mode: config.mode,

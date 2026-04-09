@@ -105,6 +105,7 @@ describe("createAppRuntime", () => {
 			toolSet: ["read", "edit"],
 			planSummary: null,
 			compactionSummary: null,
+			workingDirectory: "/tmp/recovered-workdir",
 			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
 		};
 
@@ -124,6 +125,7 @@ describe("createAppRuntime", () => {
 
 		expect(recovered.state.status).toBe("active");
 		expect(recovered.id).toEqual(session.id);
+		expect(recovered.context.workingDirectory).toBe("/tmp/recovered-workdir");
 		expect(events).toHaveLength(1);
 		if (events[0]!.type === "session_resumed") {
 			expect(events[0]!.recoveryData.model).toEqual(stubModel);
