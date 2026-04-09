@@ -89,7 +89,6 @@ import {
 	resolveResumeBrowserSelectedIndex,
 	resolveResumeBrowserSubmitHit,
 	reduceInteractionState,
-	legacyTuiCompat,
 	summarizeResumeBrowserHit,
 	toggleResumeBrowserPreviewState,
 } from "@pickle-pee/ui";
@@ -1957,7 +1956,7 @@ class InteractiveModeHandler implements ModeHandler {
 			process.stdout.write(encodeResetScrollRegion());
 		}
 		process.stdout.write(encodeFramePatches([{ type: "move-cursor", cursor: next.frame.cursor }], next.frame.width));
-		process.stdout.write(legacyTuiCompat.ansiShowCursor());
+		process.stdout.write(ansiShowCursor());
 		this._renderedFooterUi = next.footerUi;
 		this._renderedFooterStartRow = next.footerStartRow;
 		this._lastScreenFrame = next.frame;
@@ -2872,6 +2871,10 @@ function normalizeToolResultLines(
 
 function truncatePreviewLine(line: string): string {
 	return measureTerminalDisplayWidth(line) <= 72 ? line : `${line.slice(0, 69)}...`;
+}
+
+function ansiShowCursor(): string {
+	return "\x1b[?25h";
 }
 
 function formatMiniDiffPreview(oldString: string, newString: string): string {
