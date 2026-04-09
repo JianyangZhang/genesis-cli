@@ -9,6 +9,7 @@ export type {
 	SlashCommandType,
 } from "../types/index.js";
 export { createBuiltinCommands } from "./builtin-commands.js";
+export { createBuiltinCommandRegistry, createInteractiveCommandRegistry } from "./command-platform.js";
 export type { InteractiveLocalCommandDeps } from "./interactive-local-commands.js";
 export { createInteractiveLocalCommands, renderWorkingTreeSummary } from "./interactive-local-commands.js";
 export type { SlashCommandRegistry, SlashCommandResolution } from "./slash-command-registry.js";

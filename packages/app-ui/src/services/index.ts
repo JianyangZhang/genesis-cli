@@ -17,6 +17,7 @@ export {
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSelectedIndex,
 	resolveResumeBrowserSubmitHit,
 	summarizeResumeBrowserHit,

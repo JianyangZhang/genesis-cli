@@ -41,6 +41,8 @@ export type {
 // Domain (slash commands)
 export {
 	createBuiltinCommands,
+	createBuiltinCommandRegistry,
+	createInteractiveCommandRegistry,
 	createInteractiveLocalCommands,
 	renderWorkingTreeSummary,
 	createSlashCommandRegistry,
@@ -73,6 +75,7 @@ export {
 	RPC_ERRORS,
 	RPC_METHODS,
 	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSelectedIndex,
 	resolveResumeBrowserSubmitHit,
 	reduceInteractionState,

@@ -224,6 +224,50 @@ export function buildResumeBrowserResumedLines(hit: RecentSessionSearchHit): rea
 	];
 }
 
+export type ResumeBrowserKey =
+	| "up"
+	| "down"
+	| "pageup"
+	| "pagedown"
+	| "wheelup"
+	| "wheeldown"
+	| "tab"
+	| "shifttab"
+	| "esc"
+	| "ctrlo"
+	| "ctrlv";
+
+export type ResumeBrowserKeyAction =
+	| { readonly type: "close" }
+	| { readonly type: "toggle_preview" }
+	| { readonly type: "move_selection"; readonly delta: number }
+	| null;
+
+export function resolveResumeBrowserKeyAction(
+	key: ResumeBrowserKey,
+	bodyViewportRows: number,
+): ResumeBrowserKeyAction {
+	if (key === "esc") {
+		return { type: "close" };
+	}
+	if (key === "ctrlv") {
+		return { type: "toggle_preview" };
+	}
+	if (key === "up" || key === "shifttab" || key === "wheelup") {
+		return { type: "move_selection", delta: -1 };
+	}
+	if (key === "down" || key === "tab" || key === "wheeldown") {
+		return { type: "move_selection", delta: 1 };
+	}
+	if (key === "pageup") {
+		return { type: "move_selection", delta: -Math.max(1, bodyViewportRows - 1) };
+	}
+	if (key === "pagedown") {
+		return { type: "move_selection", delta: Math.max(1, bodyViewportRows - 1) };
+	}
+	return null;
+}
+
 function buildResumeBrowserHitLines(
 	hit: RecentSessionSearchHit,
 	options: { readonly selected: boolean; readonly now: number; readonly query: string },

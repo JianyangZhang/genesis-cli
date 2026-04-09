@@ -68,11 +68,9 @@ import {
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
 	beginResumeBrowserSearch,
-	createBuiltinCommands,
+	createInteractiveCommandRegistry,
 	completeResumeBrowserSearch,
 	createResumeBrowserState,
-	createInteractiveLocalCommands,
-	createSlashCommandRegistry,
 	eventToJsonEnvelope,
 	formatEventAsText,
 	formatResumeBrowserTranscriptBlocks,
@@ -80,6 +78,7 @@ import {
 	initialInteractionState,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSelectedIndex,
 	resolveResumeBrowserSubmitHit,
 	reduceInteractionState,
@@ -162,7 +161,6 @@ class InteractiveModeHandler implements ModeHandler {
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
 	private readonly _history: string[] = [];
 	private _historyIndex: number | null = null;
-	private _suppressPersistOnce = false;
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private readonly _transcriptBlocks: string[] = [];
@@ -229,12 +227,6 @@ class InteractiveModeHandler implements ModeHandler {
 		this._sessionRef = sessionRef;
 		this._sink = sink;
 		this._runtime = runtime;
-
-		// Slash command registry
-		const registry = createSlashCommandRegistry();
-		for (const cmd of createBuiltinCommands()) {
-			registry.register(cmd);
-		}
 
 		let interactionState: InteractionState = initialInteractionState();
 		let sessionTitle: string | undefined;
@@ -329,10 +321,6 @@ class InteractiveModeHandler implements ModeHandler {
 			interactionState = initialInteractionState();
 
 			sessionRef.current.events.on("session_closed", (event) => {
-				if (this._suppressPersistOnce) {
-					this._suppressPersistOnce = false;
-					return;
-				}
 				try {
 					void runtime.recordClosedRecentSession(sessionRef.current, (event as SessionClosedEvent).recoveryData, {
 						title: sessionTitle,
@@ -411,15 +399,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.fullRedrawInteractiveScreen();
 		};
 
-		const register = (command: SlashCommand): void => {
-			registry.register(command);
-		};
-
-		for (const cmd of createBuiltinCommands()) {
-			register(cmd);
-		}
-		for (const cmd of createInteractiveLocalCommands({
-			registry,
+		const registry = createInteractiveCommandRegistry({
 			getCurrentSession: () => sessionRef.current,
 			getSessionTitle: () => sessionTitle,
 			setSessionTitle: (next) => {
@@ -579,11 +559,9 @@ class InteractiveModeHandler implements ModeHandler {
 					clearTimeout(timeout);
 				}
 			},
-		})) {
-			register(cmd);
-		}
+		});
 
-		register({
+		registry.register({
 			name: "resume",
 			description: "Show recent sessions or resume one",
 			type: "local",
@@ -979,36 +957,17 @@ class InteractiveModeHandler implements ModeHandler {
 			| "ctrlv",
 	): void {
 		if (this._resumeBrowser !== null) {
-			if (key === "esc") {
+			const action = resolveResumeBrowserKeyAction(key, this.currentResumeBrowserBodyViewportRows());
+			if (action?.type === "close") {
 				this.closeResumeBrowser();
 				return;
 			}
-			if (key === "ctrlv") {
+			if (action?.type === "toggle_preview") {
 				this.toggleResumeBrowserPreview();
 				return;
 			}
-			if (key === "up" || key === "shifttab") {
-				this.moveResumeBrowserSelection(-1);
-				return;
-			}
-			if (key === "down" || key === "tab") {
-				this.moveResumeBrowserSelection(1);
-				return;
-			}
-			if (key === "pageup") {
-				this.moveResumeBrowserSelection(-Math.max(1, this.currentResumeBrowserBodyViewportRows() - 1));
-				return;
-			}
-			if (key === "pagedown") {
-				this.moveResumeBrowserSelection(Math.max(1, this.currentResumeBrowserBodyViewportRows() - 1));
-				return;
-			}
-			if (key === "wheelup") {
-				this.moveResumeBrowserSelection(-1);
-				return;
-			}
-			if (key === "wheeldown") {
-				this.moveResumeBrowserSelection(1);
+			if (action?.type === "move_selection") {
+				this.moveResumeBrowserSelection(action.delta);
 				return;
 			}
 		}
@@ -1537,9 +1496,6 @@ class InteractiveModeHandler implements ModeHandler {
 		event: RuntimeEvent,
 		title?: string,
 	): void {
-		if (this._suppressPersistOnce) {
-			return;
-		}
 		if (this._recentSessionPersistTimer !== null) {
 			clearTimeout(this._recentSessionPersistTimer);
 		}

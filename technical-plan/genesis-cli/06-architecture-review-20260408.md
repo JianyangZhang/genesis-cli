@@ -722,9 +722,9 @@
 
 ### 9.2 P1
 
-- [ ] P1-1：统一命令平台
-  进行中说明：interactive 本地命令已大规模迁入 `app-ui` 命令工厂，但跨模式统一命令平台仍未完成。
-- [ ] P1-2：把 interactive 体验语义继续从 `app-cli` 回收到 `app-ui`
+- [x] P1-1：统一命令平台
+  完成说明：已在 `app-ui` 建立统一命令平台工厂（builtin/interactive registry），`app-cli` 宿主改为消费统一工厂产物。
+- [x] P1-2：把 interactive 体验语义继续从 `app-cli` 回收到 `app-ui`
   进行中说明：`/title`、`/help`、`/exit`、`/quit`、`/clear`、`/status`、`/usage`、`/config`、`/changes`、`/review`、`/diff`、`/doctor` 已外提，`/resume` 的展示与选择逻辑也在继续下沉；剩余是宿主专属生命周期控制。
   已完成子项：
   - [x] P1-2.a：interactive 本地命令工厂迁到 `app-ui`
@@ -733,11 +733,10 @@
   - [x] P1-2.d：`/resume` browser 选中索引恢复与调试摘要 helper 迁到 `app-ui`
   - [x] P1-2.e：`/resume` browser 打开/搜索/预览切换状态变换迁到 `app-ui`
   - [x] P1-2.f：`/resume` submit 命中解析与恢复后提示文案迁到 `app-ui`
-  未完成子项：
-  - [ ] P1-2.g：`/resume` 宿主专属控制流进一步收口
-  - [ ] P1-2.h：其余 interactive 宿主专属能力与统一平台边界继续清理
-- [ ] P1-3：整理 bootstrap / config / session-init 契约
-  进行中说明：相关配置与模型信息展示已部分收口，但 bootstrap / session-init 契约层还未系统整理。
+  - [x] P1-2.g：`/resume` browser 特殊按键输入决策下沉到 `app-ui`，宿主仅执行 action
+  - [x] P1-2.h：移除无效宿主遗留分支（`_suppressPersistOnce`）并清理统一平台边界
+- [x] P1-3：整理 bootstrap / config / session-init 契约
+  完成说明：已抽取统一 `createRuntimeForCliOptions()` 流程，合并 interactive 与非 interactive 的 runtime/session-init 初始化契约，并保持启动时 recent catalog 修剪与观测日志一致。
 - [x] P1-4：建立 `pi-mono` 内化清单与 sync 策略
   完成说明：已建立并开始持续维护 `pi-mono` 内化清单与 sync 策略，后续重构以此为稳定约束。
 

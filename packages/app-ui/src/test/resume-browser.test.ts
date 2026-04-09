@@ -9,6 +9,7 @@ import {
 	measureResumeBrowserSelectedLineOffset,
 	moveResumeBrowserSelection,
 	resolveRecentSessionDirectSelection,
+	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSelectedIndex,
 	resolveResumeBrowserSubmitHit,
 	summarizeResumeBrowserHit,
@@ -604,5 +605,14 @@ describe("resume browser formatter", () => {
 			"Resumed: session-resume",
 			"Next: continue this session, or /resume to view history again.",
 		]);
+	});
+
+	it("maps resume-browser special keys into pure key actions", () => {
+		expect(resolveResumeBrowserKeyAction("esc", 10)).toEqual({ type: "close" });
+		expect(resolveResumeBrowserKeyAction("ctrlv", 10)).toEqual({ type: "toggle_preview" });
+		expect(resolveResumeBrowserKeyAction("up", 10)).toEqual({ type: "move_selection", delta: -1 });
+		expect(resolveResumeBrowserKeyAction("tab", 10)).toEqual({ type: "move_selection", delta: 1 });
+		expect(resolveResumeBrowserKeyAction("pageup", 8)).toEqual({ type: "move_selection", delta: -7 });
+		expect(resolveResumeBrowserKeyAction("pagedown", 8)).toEqual({ type: "move_selection", delta: 7 });
 	});
 });
