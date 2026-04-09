@@ -1,4 +1,4 @@
-technical-plan/
+/technical-plan/
 .DS_Store
 node_modules/
 dist/
