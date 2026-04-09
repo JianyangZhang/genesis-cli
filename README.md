@@ -79,13 +79,13 @@ Genesis 采用“终端宿主 / 内容语义 / 运行时契约 / 仓库自持内
 - 分层：
   - `packages/app-cli` 负责进程入口、TTY 生命周期、debug 接线与 interactive mode 宿主
   - `packages/app-tui-core` 负责终端能力探测、mode lifecycle、screen frame、patch diff、composer/layout 等渲染内核
-  - `packages/app-ui` 负责 slash commands、resume browser、formatter、footer 内容准备与交互展示语义
+  - `packages/app-ui` 负责 slash commands、resume browser、formatter、interactive theme、footer 内容准备与交互展示语义
   - `packages/app-runtime` 负责 session facade、事件归一化、recent sessions、governance 与 planning
   - `packages/app-tools` 负责工具 catalog、风险分级、权限策略、命令分类与审计
   - `packages/kernel` 负责 vendored kernel、provider 接线与上游 session plumbing
   - `packages/app-config`、`packages/app-extensions`、`packages/app-evaluation` 作为配套包补齐配置、扩展与评估能力
 - 边界：
-  - `app-cli` 只承载宿主与接线，不承载产品文案与布局语义
+  - `app-cli` 只承载宿主与接线，不承载产品文案、主题常量与布局语义
   - `app-tui-core` 只负责终端物化与渲染规则，不负责 slash command 或业务语义
   - `app-ui` 负责“显示什么”，不负责 TTY 生命周期或 transcript 持久化
   - `app-runtime` 负责把 kernel/upstream 语义映射成稳定产品契约
