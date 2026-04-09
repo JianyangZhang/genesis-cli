@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { KernelSessionContract } from "@pickle-pee/kernel" with { "resolution-mode": "import" };
 
 export type PiMonoAuthSourceKind = "auth_storage" | "env" | "literal" | "missing";
 
@@ -23,21 +24,6 @@ export interface CreateAgentSessionOptions {
 	readonly authStorage?: unknown;
 	readonly modelRegistry?: unknown;
 	readonly sessionManager?: unknown;
-}
-
-interface KernelSessionContract {
-	readonly isStreaming: boolean;
-	subscribe(listener: (event: unknown) => void): () => void;
-	prompt(input: string): Promise<void>;
-	followUp(input: string): Promise<void>;
-	abort(): Promise<void>;
-	compact(customInstructions?: string): Promise<void>;
-	getSnapshot(): Promise<{
-		readonly sessionId: string;
-		readonly sessionFile?: string;
-		readonly metadata: unknown;
-	}>;
-	dispose(): void;
 }
 
 export interface PiMonoSdk {

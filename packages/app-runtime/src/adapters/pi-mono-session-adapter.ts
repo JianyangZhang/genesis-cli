@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { KernelSessionContract, KernelSessionSnapshot } from "@pickle-pee/kernel" with { "resolution-mode": "import" };
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
 import type { KernelSessionAdapter, RawUpstreamEvent, ToolExecutionGate } from "./kernel-session-adapter.js";
 import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";
@@ -25,24 +26,6 @@ export interface PiMonoResolvedAuthReport {
 	readonly sourceDetail?: string;
 	readonly placeholder: boolean;
 	readonly authorized: boolean;
-}
-
-// Mirrors @pickle-pee/kernel KernelSessionContract/KernelSessionSnapshot.
-interface KernelSessionContract {
-	readonly isStreaming: boolean;
-	subscribe(listener: (event: unknown) => void): () => void;
-	prompt(input: string): Promise<void>;
-	followUp(input: string): Promise<void>;
-	abort(): Promise<void>;
-	compact(customInstructions?: string): Promise<void>;
-	getSnapshot(): Promise<KernelSessionSnapshot>;
-	dispose(): void;
-}
-
-interface KernelSessionSnapshot {
-	readonly sessionId: string;
-	readonly sessionFile?: string;
-	readonly metadata: unknown;
 }
 
 interface Deferred<T> {
