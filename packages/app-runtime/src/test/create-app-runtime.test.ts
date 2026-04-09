@@ -158,6 +158,36 @@ describe("createAppRuntime", () => {
 		expect(adapter.lastResumeData).toEqual(recoveryData);
 	});
 
+	it("persists recovered session facts into recent catalog after follow-up input", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recover-facts-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/fallback",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const recovered = runtime.recoverSession({
+			sessionId: { value: "recovered-facts-session" },
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			workingDirectory: "/tmp/recovered-workdir",
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		});
+
+		await runtime.recordRecentSessionInput(recovered, "恢复后继续推进");
+		const recent = await runtime.listRecentSessions();
+
+		expect(recent[0]?.recoveryData.sessionId.value).toBe("recovered-facts-session");
+		expect(recent[0]?.recoveryData.workingDirectory).toBe("/tmp/recovered-workdir");
+		expect(recent[0]?.recoveryData.toolSet).toEqual(["read", "edit"]);
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("恢复后继续推进");
+	});
+
 	it("supports recoverSession + compaction + close + search as a stable recent-session flow", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-recover-flow-"));
 		const historyDir = join(agentDir, "history");

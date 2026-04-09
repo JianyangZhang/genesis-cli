@@ -701,9 +701,10 @@
   - [x] P0-2.a：recent-session metadata 缺失时可从 `sessionFile` 回填并刷新缓存
   - [x] P0-2.b：`listRecentSessions()` 优先以 `entries/<sessionId>.json` 作为 `recoveryData` 事实源，`recent.json` 仅作投影
   - [x] P0-2.c：`pruneRecentSessions()` 重写 `recent.json` / `last.json` 时优先吸收 entry facts
+  - [x] P0-2.d：`recoverSession` 后续输入写入 recent catalog 时保持 recovered 事实（sessionId/workingDirectory/toolSet）一致
   未完成子项：
-  - [ ] P0-2.d：runtime/kernel 会话事实源边界继续收紧
-- [ ] P0-3：建立 session / rich recovery 的架构验收测试
+  - [ ] P0-2.e：runtime/kernel 会话事实源边界继续收紧
+- [x] P0-3：建立 session / rich recovery 的架构验收测试
   原因：没有稳定自动化护栏，后续边界收口会频繁回归。
   进行中说明：TTY、resume、recent-session、interactive 命令链路的回归测试已大幅补齐，但还未形成完整的架构验收层。
   已完成子项：
