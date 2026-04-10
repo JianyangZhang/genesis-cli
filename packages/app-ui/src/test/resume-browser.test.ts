@@ -1,3 +1,4 @@
+import type { RecentSessionEntry, RecentSessionSearchHit } from "@pickle-pee/runtime";
 import { describe, expect, it } from "vitest";
 import {
 	beginResumeBrowserSearch,
@@ -15,6 +16,39 @@ import {
 	summarizeResumeBrowserHit,
 	toggleResumeBrowserPreviewState,
 } from "../services/resume-browser.js";
+
+function createRecentEntry(
+	sessionId: string,
+	title: string,
+	updatedAt: number,
+	overrides?: Partial<RecentSessionEntry["recoveryData"]>,
+): RecentSessionEntry {
+	const baseMetadata = { messageCount: 0, fileSizeBytes: 0, recentMessages: [] as const };
+	const baseTaskState = { status: "idle" as const, currentTaskId: null, startedAt: null };
+	return {
+		title,
+		updatedAt,
+		recoveryData: {
+			sessionId: { value: sessionId },
+			model: { id: "glm-5.1", provider: "zai" },
+			toolSet: [],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: overrides?.metadata ?? baseMetadata,
+			taskState: overrides?.taskState ?? baseTaskState,
+			...overrides,
+		},
+	};
+}
+
+function createRecentHit(
+	entry: RecentSessionEntry,
+	headline: string,
+	snippet: string,
+	matchSource: RecentSessionSearchHit["matchSource"],
+): RecentSessionSearchHit {
+	return { entry, headline, snippet, matchSource };
+}
 
 describe("resume browser formatter", () => {
 	it("formats recent-session browsing and preview hints", () => {
@@ -369,32 +403,8 @@ describe("resume browser formatter", () => {
 	});
 
 	it("resolves direct recent-session selections by index, exact id, and unique prefix", () => {
-		const first = {
-			title: "first",
-			updatedAt: 1,
-			recoveryData: {
-				sessionId: { value: "session-search-first" },
-				model: { id: "glm-5.1", provider: "zai" },
-				toolSet: [],
-				planSummary: null,
-				compactionSummary: null,
-				metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
-				taskState: { status: "idle", currentTaskId: null, startedAt: null },
-			},
-		};
-		const second = {
-			title: "second",
-			updatedAt: 2,
-			recoveryData: {
-				sessionId: { value: "session-search-second" },
-				model: { id: "glm-5.1", provider: "zai" },
-				toolSet: [],
-				planSummary: null,
-				compactionSummary: null,
-				metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
-				taskState: { status: "idle", currentTaskId: null, startedAt: null },
-			},
-		};
+		const first = createRecentEntry("session-search-first", "first", 1);
+		const second = createRecentEntry("session-search-second", "second", 2);
 		const displayed = [first, second];
 
 		expect(resolveRecentSessionDirectSelection("#1", displayed, displayed)).toBe(first);
@@ -405,42 +415,8 @@ describe("resume browser formatter", () => {
 
 	it("restores selected resume-browser index by session id and clamps fallback", () => {
 		const hits = [
-			{
-				entry: {
-					title: "first",
-					updatedAt: 1,
-					recoveryData: {
-						sessionId: { value: "session-a" },
-						model: { id: "glm-5.1", provider: "zai" },
-						toolSet: [],
-						planSummary: null,
-						compactionSummary: null,
-						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
-						taskState: { status: "idle", currentTaskId: null, startedAt: null },
-					},
-				},
-				headline: "first",
-				snippet: "first",
-				matchSource: "recent" as const,
-			},
-			{
-				entry: {
-					title: "second",
-					updatedAt: 2,
-					recoveryData: {
-						sessionId: { value: "session-b" },
-						model: { id: "glm-5.1", provider: "zai" },
-						toolSet: [],
-						planSummary: null,
-						compactionSummary: null,
-						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
-						taskState: { status: "idle", currentTaskId: null, startedAt: null },
-					},
-				},
-				headline: "second",
-				snippet: "second",
-				matchSource: "recent" as const,
-			},
+			createRecentHit(createRecentEntry("session-a", "first", 1), "first", "first", "recent"),
+			createRecentHit(createRecentEntry("session-b", "second", 2), "second", "second", "recent"),
 		];
 
 		expect(resolveResumeBrowserSelectedIndex(hits, "session-b", 0)).toBe(1);
@@ -507,42 +483,8 @@ describe("resume browser formatter", () => {
 		});
 
 		const hits = [
-			{
-				entry: {
-					title: "first",
-					updatedAt: 1,
-					recoveryData: {
-						sessionId: { value: "session-a" },
-						model: { id: "glm-5.1", provider: "zai" },
-						toolSet: [],
-						planSummary: null,
-						compactionSummary: null,
-						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
-						taskState: { status: "idle", currentTaskId: null, startedAt: null },
-					},
-				},
-				headline: "first",
-				snippet: "first",
-				matchSource: "recent" as const,
-			},
-			{
-				entry: {
-					title: "second",
-					updatedAt: 2,
-					recoveryData: {
-						sessionId: { value: "session-b" },
-						model: { id: "glm-5.1", provider: "zai" },
-						toolSet: [],
-						planSummary: null,
-						compactionSummary: null,
-						metadata: { messageCount: 0, fileSizeBytes: 0, recentMessages: [] },
-						taskState: { status: "idle", currentTaskId: null, startedAt: null },
-					},
-				},
-				headline: "second",
-				snippet: "second",
-				matchSource: "recent" as const,
-			},
+			createRecentHit(createRecentEntry("session-a", "first", 1), "first", "first", "recent"),
+			createRecentHit(createRecentEntry("session-b", "second", 2), "second", "second", "recent"),
 		];
 
 		const completed = completeResumeBrowserSearch(searching, "abcd", hits, "session-b", 0);
@@ -555,31 +497,21 @@ describe("resume browser formatter", () => {
 	});
 
 	it("resolves resume-browser submit hit and formats resumed output lines", () => {
-		const hit = {
-			entry: {
-				title: "resume target",
-				updatedAt: 1,
-				recoveryData: {
-					sessionId: { value: "session-resume" },
-					model: { id: "glm-5.1", provider: "zai" },
-					toolSet: [],
-					planSummary: null,
-					compactionSummary: null,
-					metadata: {
-						messageCount: 2,
-						fileSizeBytes: 64,
-						recentMessages: [
-							{ role: "user", text: "继续推进 /resume" },
-							{ role: "assistant", text: "我会先恢复上下文。" },
-						],
-					},
-					taskState: { status: "idle", currentTaskId: null, startedAt: null },
+		const hit = createRecentHit(
+			createRecentEntry("session-resume", "resume target", 1, {
+				metadata: {
+					messageCount: 2,
+					fileSizeBytes: 64,
+					recentMessages: [
+						{ role: "user" as const, text: "继续推进 /resume" },
+						{ role: "assistant" as const, text: "我会先恢复上下文。" },
+					],
 				},
-			},
-			headline: "resume target",
-			snippet: "resume target",
-			matchSource: "recent" as const,
-		};
+			}),
+			"resume target",
+			"resume target",
+			"recent",
+		);
 		expect(
 			resolveResumeBrowserSubmitHit({
 				query: "",

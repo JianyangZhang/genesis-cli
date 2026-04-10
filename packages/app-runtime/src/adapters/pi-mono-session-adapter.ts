@@ -1,16 +1,17 @@
 import { join } from "node:path";
-import type { KernelSessionContract, KernelSessionSnapshot } from "@pickle-pee/kernel" with { "resolution-mode": "import" };
 import type { ModelDescriptor, SessionRecoveryData } from "../types/index.js";
 import type { KernelSessionAdapter, RawUpstreamEvent, ToolExecutionGate } from "./kernel-session-adapter.js";
 import { bridgePiMonoEvent, createInitialBridgeState, type PiMonoBridgeState } from "./pi-mono-event-bridge.js";
 import {
+	type CreateAgentSessionOptions,
 	createToolsForSet,
 	defaultCreateSession,
 	defaultToolSet,
 	extractTargetPath,
-	loadPiMonoSdk as loadPiMonoSdkFromSdk,
-	type CreateAgentSessionOptions,
 	type LoadPiMonoSdkOptions,
+	loadPiMonoSdk as loadPiMonoSdkFromSdk,
+	type PiMonoKernelSessionContract,
+	type PiMonoKernelSessionSnapshot,
 	type PiMonoSdk,
 	type PiMonoTool,
 } from "./pi-mono-sdk.js";
@@ -48,14 +49,14 @@ export interface PiMonoSessionAdapterOptions {
 	readonly toolSet?: readonly string[];
 	readonly thinkingLevel?: ThinkingLevel;
 	readonly createTools?: (cwd: string, toolSet: readonly string[]) => PiMonoTool[];
-	readonly createSession?: (options: CreateAgentSessionOptions) => Promise<KernelSessionContract>;
+	readonly createSession?: (options: CreateAgentSessionOptions) => Promise<PiMonoKernelSessionContract>;
 	readonly onAuthResolved?: (report: PiMonoResolvedAuthReport) => void;
 	readonly onUpstreamEvent?: (event: unknown) => void;
 	readonly onSessionRecovered?: (report: { readonly mode: "resume" | "new"; readonly sessionFile?: string }) => void;
 }
 
 export class PiMonoSessionAdapter implements KernelSessionAdapter {
-	private session: KernelSessionContract | null = null;
+	private session: PiMonoKernelSessionContract | null = null;
 	private toolExecutionGate: ToolExecutionGate | null = null;
 	private activeQueue: AsyncPushQueue<RawUpstreamEvent> | null = null;
 	private readonly pendingToolStartEvents = new Map<string, RawUpstreamEvent>();
@@ -390,7 +391,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		this.session = await this.createUnderlyingSession();
 	}
 
-	private async getActiveSnapshot(): Promise<KernelSessionSnapshot | null> {
+	private async getActiveSnapshot(): Promise<PiMonoKernelSessionSnapshot | null> {
 		if (!this.session) return null;
 		try {
 			return await this.session.getSnapshot();
@@ -399,7 +400,7 @@ export class PiMonoSessionAdapter implements KernelSessionAdapter {
 		}
 	}
 
-	private async createUnderlyingSession(): Promise<KernelSessionContract> {
+	private async createUnderlyingSession(): Promise<PiMonoKernelSessionContract> {
 		const recovery = this.pendingRecoveryData;
 		const workingDirectory = recovery?.workingDirectory ?? this.options.workingDirectory;
 		const agentDir = recovery?.agentDir ?? this.options.agentDir;

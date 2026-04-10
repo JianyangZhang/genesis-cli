@@ -41,7 +41,14 @@ function createMockSession(overrides?: Partial<SessionState>): SessionFacade {
 		get state() {
 			return state;
 		},
-		context: {} as SessionFacade["context"],
+		context: {
+			sessionId: state.id,
+			workingDirectory: "/repo",
+			mode: "interactive",
+			model: state.model,
+			toolSet: state.toolSet,
+			taskState: state.taskState,
+		},
 		events: {} as SessionFacade["events"],
 		plan: null,
 		prompt: async () => {},
@@ -132,7 +139,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -155,12 +165,22 @@ describe("createInteractiveLocalCommands", () => {
 
 	it("/status renders session state and next-step guidance", async () => {
 		const session = createMockSession({
-			planSummary: { stepCount: 5, completedSteps: 2 },
-			compactionSummary: { estimatedTokensSaved: 128, completedAt: Date.now() },
+			planSummary: { planId: "plan-1", goal: "ship release", status: "active", stepCount: 5, completedSteps: 2 },
+			compactionSummary: {
+				compressedAt: Date.now(),
+				originalMessageCount: 12,
+				retainedMessageCount: 4,
+				estimatedTokensSaved: 128,
+			},
 			taskState: { status: "running", currentTaskId: "task-7", startedAt: Date.now() - 1_000 },
 		});
 		(session.context as SessionFacade["context"]) = {
+			sessionId: session.id,
 			workingDirectory: "/repo",
+			mode: "interactive",
+			model: session.state.model,
+			toolSet: session.state.toolSet,
+			taskState: session.state.taskState,
 		} as SessionFacade["context"];
 		const runtime = createMockRuntime(session);
 		const registry = createSlashCommandRegistry();
@@ -180,7 +200,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -352,7 +375,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({
 				type: "ok",
 				stdout: "--- a/notes.txt\n+++ b/notes.txt\n@@\n-hello\n+hello changed\n",
@@ -388,7 +414,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => ({
 				providerKey: "zai",
@@ -441,7 +470,10 @@ describe("createInteractiveLocalCommands", () => {
 				],
 			}),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -458,11 +490,16 @@ describe("createInteractiveLocalCommands", () => {
 	it("/config renders effective config from an injected snapshot", async () => {
 		const session = createMockSession();
 		(session.context as SessionFacade["context"]) = {
+			sessionId: session.id,
 			workingDirectory: "/repo",
 			configSources: {
 				model: { layer: "cli", detail: "--model" },
 				provider: { layer: "env", detail: "GENESIS_PROVIDER" },
 			},
+			mode: "interactive",
+			model: session.state.model,
+			toolSet: session.state.toolSet,
+			taskState: session.state.taskState,
 		} as SessionFacade["context"];
 		const runtime = createMockRuntime(session);
 		const registry = createSlashCommandRegistry();
@@ -501,7 +538,10 @@ describe("createInteractiveLocalCommands", () => {
 					reasoning: true,
 				},
 			}),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -547,7 +587,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -579,7 +622,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -621,7 +667,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -657,7 +706,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -689,7 +741,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
@@ -725,7 +780,10 @@ describe("createInteractiveLocalCommands", () => {
 			getPendingPermissionCallId: () => null,
 			getToolUsageSummary: () => ({ total: 0, success: 0, failure: 0, denied: 0, recent: [] }),
 			getConfigSnapshot: async () => ({ sources: [], agentDir: "/agent", modelsPath: "/agent/models.json" }),
-			getWorkingTreeSummary: async () => ({ changedPaths: [], snapshot: { available: true, statusLines: [], diffStatLines: [] } }),
+			getWorkingTreeSummary: async () => ({
+				changedPaths: [],
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
+			}),
 			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});

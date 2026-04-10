@@ -22,6 +22,7 @@ usage() {
 Usage: ./scripts/publish-all.sh <command>
 
 Commands:
+  preflight Run smoke and dry-run pack checks without npm login / clean-tree requirements
   check    Run pre-publish checks and dry-run packs for all published packages
   publish  Publish all packages in dependency order
   verify   Install the published CLI globally and verify version commands
@@ -120,15 +121,16 @@ assert_version_not_published() {
 }
 
 run_check() {
-  require_npm_login
-  require_clean_worktree
-
   (
     cd "$ROOT_DIR"
     npm run check
     npm run build
   )
 
+  run_preflight
+}
+
+run_preflight() {
   smoke_check_runtime_adapter "$ROOT_DIR/packages/app-runtime/dist/adapters/pi-mono-session-adapter.js"
 
   for package_name in "${PACKAGES[@]}"; do
@@ -137,6 +139,12 @@ run_check() {
       npm pack --dry-run -w "$package_name" >/dev/null
     )
   done
+}
+
+run_release_check() {
+  require_npm_login
+  require_clean_worktree
+  run_check
 }
 
 run_publish() {
@@ -172,8 +180,11 @@ main() {
   local command="${1:-}"
 
   case "$command" in
+    preflight)
+      run_preflight
+      ;;
     check)
-      run_check
+      run_release_check
       ;;
     publish)
       run_publish

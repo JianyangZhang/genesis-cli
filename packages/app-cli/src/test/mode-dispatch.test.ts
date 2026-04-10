@@ -1,5 +1,38 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+	computeEphemeralRows,
+	computeFooterCursorColumn,
+	computeFooterCursorRowsFromEnd,
+	computeFooterCursorRowsUp,
+	computeFooterStartRow,
+	computePromptCursorRowsUp,
+	computeTranscriptDisplayRows,
+	countRenderedTerminalRows,
+	extractPlainTextSelection,
+	fitTerminalLine,
+	truncatePlainText,
+	wrapTranscriptContent,
+} from "@pickle-pee/tui-core";
+import {
+	appendAssistantTranscriptBlock,
+	appendTranscriptBlockWithSpacer,
+	buildInteractiveFooterLeadingLines,
+	computeInteractiveFooterSeparatorWidth,
+	formatFullWidthTranscriptUserLine,
+	formatInteractiveErrorDetailLine,
+	formatInteractiveErrorLine,
+	formatInteractiveInfoLine,
+	formatInteractiveInputSeparator,
+	formatInteractivePromptBuffer,
+	formatTranscriptAssistantLine,
+	formatTranscriptUserBlocks,
+	formatTranscriptUserLine,
+	formatTurnNotice,
+	INTERACTIVE_THEME,
+	materializeAssistantTranscriptBlock,
+	mergeStreamingText,
+} from "@pickle-pee/ui";
 import { describe, expect, it, vi } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
@@ -24,39 +57,6 @@ import {
 	shouldRenderInteractiveTranscriptEvent,
 	WELCOME_BIBLE_GREETINGS,
 } from "../mode-dispatch.js";
-import {
-	appendAssistantTranscriptBlock,
-	appendTranscriptBlockWithSpacer,
-	computeInteractiveFooterSeparatorWidth,
-	buildInteractiveFooterLeadingLines,
-	formatFullWidthTranscriptUserLine,
-	formatInteractiveErrorDetailLine,
-	formatInteractiveErrorLine,
-	formatInteractiveInfoLine,
-	formatInteractiveInputSeparator,
-	formatInteractivePromptBuffer,
-	formatTranscriptAssistantLine,
-	formatTranscriptUserBlocks,
-	formatTranscriptUserLine,
-	formatTurnNotice,
-	INTERACTIVE_THEME,
-	materializeAssistantTranscriptBlock,
-	mergeStreamingText,
-} from "@pickle-pee/ui";
-import {
-	computeFooterCursorColumn,
-	computeFooterCursorRowsFromEnd,
-	computeFooterCursorRowsUp,
-	computeFooterStartRow,
-	computePromptCursorRowsUp,
-	computeTranscriptDisplayRows,
-	countRenderedTerminalRows,
-	truncatePlainText,
-	extractPlainTextSelection,
-	fitTerminalLine,
-	wrapTranscriptContent,
-	computeEphemeralRows,
-} from "@pickle-pee/tui-core";
 
 function formatLocalTraceTimestamp(value: Date): string {
 	const padTwo = (part: number): string => String(part).padStart(2, "0");
@@ -617,11 +617,8 @@ describe("interactive transcript formatting", () => {
 				{
 					lines: ["⏺ hello", "world"],
 					renderedWidth: 4,
-					startRow: 10,
-					reservedRows: 5,
 				},
 				{
-					block: "──────────\n❯ hi\n──────────",
 					lines: ["──────────", "❯ hi", "──────────"],
 					cursorLineIndex: 1,
 					cursorColumn: 4,

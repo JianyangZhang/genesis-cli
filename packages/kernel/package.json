@@ -1,6 +1,6 @@
 {
   "name": "@pickle-pee/kernel",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "description": "Vendored Genesis kernel for agent sessions, providers, and built-in tools",
   "main": "./dist/index.js",
@@ -19,7 +19,7 @@
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.65.0",
     "@mariozechner/pi-ai": "npm:@pickle-pee/pi-ai@0.65.1",
-    "@pickle-pee/pi-ai": "1.0.3",
+    "@pickle-pee/pi-ai": "1.0.4",
     "@sinclair/typebox": "^0.34.41"
   },
   "publishConfig": {

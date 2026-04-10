@@ -4,6 +4,7 @@
 		"baseUrl": ".",
 		"paths": {
 			"@pickle-pee/runtime": ["../app-runtime/dist/index"],
+			"@pickle-pee/tui-core": ["../app-tui-core/dist/index"],
 			"@pickle-pee/tools": ["../app-tools/dist/index"]
 		}
 	},

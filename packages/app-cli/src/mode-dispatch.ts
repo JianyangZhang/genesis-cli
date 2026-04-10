@@ -13,8 +13,6 @@ import type {
 	AppRuntime,
 	CliMode,
 	CompactionSummary,
-	RecentSessionEntry,
-	RecentSessionSearchHit,
 	RuntimeEvent,
 	SessionClosedEvent,
 	SessionFacade,
@@ -26,14 +24,10 @@ import {
 	composeScreenWithFooter,
 	composeSectionBlock,
 	computeBodyViewportRows,
-	computeEphemeralRows,
 	computeFooterCursorColumn as computeFooterCursorColumnFromTuiCore,
-	computeFooterCursorRowsFromEnd as computeFooterCursorRowsFromEndFromTuiCore,
-	computeFooterCursorRowsUp as computeFooterCursorRowsUpFromTuiCore,
 	computeFooterStartRow as computeFooterStartRowFromTuiCore,
 	computeMaxScrollOffset,
 	computePromptCursorColumn as computePromptCursorColumnFromTuiCore,
-	computePromptCursorRowsUp as computePromptCursorRowsUpFromTuiCore,
 	computeSelectionColumnsForRow,
 	computeTranscriptDisplayRows as computeTranscriptDisplayRowsFromTuiCore,
 	computeVisibleViewportLines,
@@ -64,16 +58,17 @@ import {
 } from "@pickle-pee/tui-core";
 import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
 import {
+	beginResumeBrowserSearch,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
-	beginResumeBrowserSearch,
+	completeResumeBrowserSearch,
 	computeInteractiveFooterSeparatorWidth,
 	createInteractiveCommandRegistry,
-	completeResumeBrowserSearch,
+	createInteractiveConversationState,
 	createResumeBrowserState,
 	eventToJsonEnvelope,
 	formatEventAsText,
@@ -86,16 +81,13 @@ import {
 	formatResumeBrowserTranscriptBlocks,
 	formatTranscriptUserBlocks,
 	INTERACTIVE_THEME,
-	formatTurnNotice as formatTurnNoticeFromUi,
 	initialInteractionState,
-	createInteractiveConversationState,
 	materializeAssistantTranscriptBlock,
 	moveResumeBrowserSelection,
+	reduceInteractionState,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
-	resolveResumeBrowserSelectedIndex,
 	resolveResumeBrowserSubmitHit,
-	reduceInteractionState,
 	summarizeResumeBrowserHit,
 	toggleResumeBrowserPreviewState,
 } from "@pickle-pee/ui";
@@ -503,7 +495,7 @@ class InteractiveModeHandler implements ModeHandler {
 								name: active.name ?? active.id,
 								id: active.id,
 								reasoning: Boolean(active.reasoning),
-						  }
+							}
 						: null,
 					modelError: active ? null : `Model not configured: ${ctx.session.state.model.id}`,
 				};
@@ -1798,7 +1790,10 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentResumeBrowserBodyMaxScroll(): number {
-		return computeMaxScrollOffset(this.currentResumeBrowserBodyDisplayRows(), this.currentResumeBrowserBodyViewportRows());
+		return computeMaxScrollOffset(
+			this.currentResumeBrowserBodyDisplayRows(),
+			this.currentResumeBrowserBodyViewportRows(),
+		);
 	}
 
 	private clampResumeBrowserScrollOffset(): void {
@@ -1821,7 +1816,8 @@ class InteractiveModeHandler implements ModeHandler {
 		for (let index = 0; index < this._resumeBrowser.selectedIndex; index += 1) {
 			start += countRenderedTerminalRowsFromTuiCore((blocks[index] ?? "").split("\n"), this.terminalWidth());
 		}
-		let end = start + Math.max(0, countRenderedTerminalRowsFromTuiCore(selectedBlock.split("\n"), this.terminalWidth()) - 1);
+		let end =
+			start + Math.max(0, countRenderedTerminalRowsFromTuiCore(selectedBlock.split("\n"), this.terminalWidth()) - 1);
 		const previewBlock = blocks[this._resumeBrowser.selectedIndex + 1];
 		if (this._resumeBrowser.previewExpanded && previewBlock?.startsWith("Preview\n")) {
 			end += countRenderedTerminalRowsFromTuiCore(previewBlock.split("\n"), this.terminalWidth());
@@ -1984,9 +1980,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (record.resetScrollRegion) {
 			const next = {
 				...record,
-				...(this._suppressedRenderDebugCount > 0
-					? { suppressedSinceLast: this._suppressedRenderDebugCount }
-					: {}),
+				...(this._suppressedRenderDebugCount > 0 ? { suppressedSinceLast: this._suppressedRenderDebugCount } : {}),
 			};
 			this._suppressedRenderDebugCount = 0;
 			this._lastRenderDebugKey = null;
@@ -2005,15 +1999,16 @@ class InteractiveModeHandler implements ModeHandler {
 			moveCursorCount: record.patches.moveCursorCount,
 		});
 		const now = Date.now();
-		if (this._lastRenderDebugKey === key && now - this._lastRenderDebugLoggedAt < RENDER_DEBUG_SAME_FRAME_THROTTLE_MS) {
+		if (
+			this._lastRenderDebugKey === key &&
+			now - this._lastRenderDebugLoggedAt < RENDER_DEBUG_SAME_FRAME_THROTTLE_MS
+		) {
 			this._suppressedRenderDebugCount += 1;
 			return null;
 		}
 		const next = {
 			...record,
-			...(this._suppressedRenderDebugCount > 0
-				? { suppressedSinceLast: this._suppressedRenderDebugCount }
-				: {}),
+			...(this._suppressedRenderDebugCount > 0 ? { suppressedSinceLast: this._suppressedRenderDebugCount } : {}),
 		};
 		this._suppressedRenderDebugCount = 0;
 		this._lastRenderDebugKey = key;
@@ -2085,7 +2080,9 @@ class InteractiveModeHandler implements ModeHandler {
 		const footerUi = this.buildResumeBrowserFooterUi();
 		const headerLines = this.currentResumeBrowserTopLines();
 		const topHeight = Math.min(headerLines.length, Math.max(0, terminalHeight - footerUi.lines.length));
-		const topVisibleLines = headerLines.slice(0, topHeight).map((line) => fitTerminalLineFromTuiCore(line, terminalWidth));
+		const topVisibleLines = headerLines
+			.slice(0, topHeight)
+			.map((line) => fitTerminalLineFromTuiCore(line, terminalWidth));
 		const availableBodyRows = Math.max(0, terminalHeight - topVisibleLines.length - footerUi.lines.length);
 		const totalBodyRows = this.currentResumeBrowserBodyDisplayRows();
 		const maxTopOffset = Math.max(0, totalBodyRows - availableBodyRows);

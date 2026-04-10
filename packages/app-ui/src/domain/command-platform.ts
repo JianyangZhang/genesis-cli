@@ -1,6 +1,6 @@
-import type { SlashCommandRegistry } from "./slash-command-registry.js";
 import { createBuiltinCommands } from "./builtin-commands.js";
 import { createInteractiveLocalCommands, type InteractiveLocalCommandDeps } from "./interactive-local-commands.js";
+import type { SlashCommandRegistry } from "./slash-command-registry.js";
 import { createSlashCommandRegistry } from "./slash-command-registry.js";
 
 export function createBuiltinCommandRegistry(): SlashCommandRegistry {

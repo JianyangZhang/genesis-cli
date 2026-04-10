@@ -351,7 +351,13 @@ export class SessionFacadeImpl implements SessionFacade {
 				}
 
 				if (decision.type === "ask_user") {
-					this.recordPendingPermission(toolCallId, toolName, decision.riskLevel, evaluation.targetPath, parameters);
+					this.recordPendingPermission(
+						toolCallId,
+						toolName,
+						decision.riskLevel,
+						evaluation.targetPath,
+						parameters,
+					);
 				}
 
 				return {

@@ -234,14 +234,25 @@ describe("createAppRuntime", () => {
 		const recovered = runtime.recoverSession(recoveryData);
 		let closedRecoveryData: SessionRecoveryData | null = null;
 		runtime.events.on("session_closed", (event) => {
-			closedRecoveryData = event.recoveryData;
+			if (event.type === "session_closed") {
+				closedRecoveryData = event.recoveryData;
+			}
 		});
 
 		await runtime.recordRecentSessionInput(recovered, "README 发布流程");
 		await runtime.recordRecentSessionEvent(recovered, {
+			id: "evt-compaction-recovered",
 			category: "compaction",
 			type: "compaction_completed",
-			summary: { compactedSummary: "README 发布流程梳理完成" },
+			timestamp: Date.now(),
+			sessionId: recovered.id,
+			summary: {
+				compressedAt: Date.now(),
+				originalMessageCount: 10,
+				retainedMessageCount: 4,
+				estimatedTokensSaved: 128,
+				compactedSummary: "README 发布流程梳理完成",
+			},
 		});
 		await recovered.close();
 		await runtime.recordClosedRecentSession(recovered, closedRecoveryData!);
@@ -347,7 +358,9 @@ describe("createAppRuntime", () => {
 		const session = runtime.createSession();
 		let closedRecoveryData: SessionRecoveryData | null = null;
 		runtime.events.on("session_closed", (event) => {
-			closedRecoveryData = event.recoveryData;
+			if (event.type === "session_closed") {
+				closedRecoveryData = event.recoveryData;
+			}
 		});
 
 		await session.close();
@@ -773,13 +786,24 @@ describe("createAppRuntime", () => {
 		const session = runtime.createSession();
 		let closedRecoveryData: SessionRecoveryData | null = null;
 		runtime.events.on("session_closed", (event) => {
-			closedRecoveryData = event.recoveryData;
+			if (event.type === "session_closed") {
+				closedRecoveryData = event.recoveryData;
+			}
 		});
 
 		await runtime.recordRecentSessionEvent(session, {
+			id: "evt-compaction-session",
 			category: "compaction",
 			type: "compaction_completed",
-			summary: { compactedSummary: "README 发布流程梳理完成" },
+			timestamp: Date.now(),
+			sessionId: session.id,
+			summary: {
+				compressedAt: Date.now(),
+				originalMessageCount: 10,
+				retainedMessageCount: 4,
+				estimatedTokensSaved: 128,
+				compactedSummary: "README 发布流程梳理完成",
+			},
 		});
 		await session.close();
 		await runtime.recordClosedRecentSession(session, closedRecoveryData!);
@@ -805,22 +829,42 @@ describe("createAppRuntime", () => {
 		const first = runtime.createSession();
 		let closedRecoveryData: SessionRecoveryData | null = null;
 		runtime.events.on("session_closed", (event) => {
-			closedRecoveryData = event.recoveryData;
+			if (event.type === "session_closed") {
+				closedRecoveryData = event.recoveryData;
+			}
 		});
 
 		await runtime.recordRecentSessionEvent(first, {
+			id: "evt-compaction-first",
 			category: "compaction",
 			type: "compaction_completed",
-			summary: { compactedSummary: "v1 compact summary" },
+			timestamp: Date.now(),
+			sessionId: first.id,
+			summary: {
+				compressedAt: Date.now(),
+				originalMessageCount: 10,
+				retainedMessageCount: 4,
+				estimatedTokensSaved: 128,
+				compactedSummary: "v1 compact summary",
+			},
 		});
 		await first.close();
 		await runtime.recordClosedRecentSession(first, closedRecoveryData!);
 
 		const resumed = await runtime.recoverSession(closedRecoveryData!);
 		await runtime.recordRecentSessionEvent(resumed, {
+			id: "evt-compaction-resumed",
 			category: "compaction",
 			type: "compaction_completed",
-			summary: { compactedSummary: "v2 compact summary" },
+			timestamp: Date.now(),
+			sessionId: resumed.id,
+			summary: {
+				compressedAt: Date.now(),
+				originalMessageCount: 10,
+				retainedMessageCount: 4,
+				estimatedTokensSaved: 128,
+				compactedSummary: "v2 compact summary",
+			},
 		});
 		await resumed.close();
 		await runtime.recordClosedRecentSession(resumed, closedRecoveryData!);
@@ -847,7 +891,9 @@ describe("createAppRuntime", () => {
 		const previous = runtime.createSession();
 		let closedRecoveryData: SessionRecoveryData | null = null;
 		runtime.events.on("session_closed", (event) => {
-			closedRecoveryData = event.recoveryData;
+			if (event.type === "session_closed") {
+				closedRecoveryData = event.recoveryData;
+			}
 		});
 
 		await runtime.recordRecentSessionInput(previous, "旧会话：整理 README");

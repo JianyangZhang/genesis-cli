@@ -74,9 +74,7 @@ export async function listRecentSessions(historyDir: string | undefined): Promis
 	}
 	const storeDir = getRecentSessionCatalogDir(historyDir);
 	try {
-		const parsed = JSON.parse(
-			await readFile(join(storeDir, "recent.json"), "utf8"),
-		) as unknown;
+		const parsed = JSON.parse(await readFile(join(storeDir, "recent.json"), "utf8")) as unknown;
 		if (!Array.isArray(parsed)) {
 			return [];
 		}
@@ -217,9 +215,7 @@ async function materializeRecentSessionRecoveryDataFromEntry(
 	return (await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value)) ?? recoveryData;
 }
 
-function dedupeRecentSessionEntriesBySessionId(
-	entries: readonly RecentSessionEntry[],
-): readonly RecentSessionEntry[] {
+function dedupeRecentSessionEntriesBySessionId(entries: readonly RecentSessionEntry[]): readonly RecentSessionEntry[] {
 	const seen = new Set<string>();
 	const deduped: RecentSessionEntry[] = [];
 	for (const entry of entries) {
@@ -381,7 +377,9 @@ async function materializeRecentSessionRecoveryData(
 	options?: { readonly reloadSessionFileMetadata?: boolean },
 ): Promise<SessionRecoveryData> {
 	const normalized = normalizeRecentSessionRecoveryData(recoveryData);
-	const sessionFileMetadata = normalized.sessionFile ? await loadMetadataFromSessionFile(normalized.sessionFile) : null;
+	const sessionFileMetadata = normalized.sessionFile
+		? await loadMetadataFromSessionFile(normalized.sessionFile)
+		: null;
 	const metadata = options?.reloadSessionFileMetadata
 		? refreshMetadataFromSessionFile(normalized.metadata, sessionFileMetadata)
 		: (normalized.metadata ?? sessionFileMetadata ?? undefined);
@@ -401,7 +399,11 @@ async function persistRecentSessionRecoveryData(
 	options?: { readonly title?: string; readonly authoritativeMetadata?: boolean },
 ): Promise<void> {
 	const existing = await readRecentSessionEntryById(storeDir, recoveryData.sessionId.value);
-	const mergedRecoveryData = mergeRecentSessionRecoveryData(existing, recoveryData, options?.authoritativeMetadata === true);
+	const mergedRecoveryData = mergeRecentSessionRecoveryData(
+		existing,
+		recoveryData,
+		options?.authoritativeMetadata === true,
+	);
 	const enrichedRecoveryData = await materializeRecentSessionRecoveryData(mergedRecoveryData, {
 		reloadSessionFileMetadata: shouldReloadRecentSessionMetadataFromSessionFile(recoveryData),
 	});
@@ -417,7 +419,11 @@ async function persistRecentSessionRecoveryData(
 }
 
 export function shouldReloadRecentSessionMetadataFromSessionFile(recoveryData: SessionRecoveryData): boolean {
-	return recoveryData.metadata == null && typeof recoveryData.sessionFile === "string" && recoveryData.sessionFile.length > 0;
+	return (
+		recoveryData.metadata == null &&
+		typeof recoveryData.sessionFile === "string" &&
+		recoveryData.sessionFile.length > 0
+	);
 }
 
 function mergeRecentSessionRecoveryData(
@@ -460,9 +466,9 @@ function mergeRecentSessionMetadata(
 	return {
 		firstPrompt:
 			(preferIncomingMetadata
-				? normalizeRecentSessionText(incoming?.firstPrompt) ?? normalizeRecentSessionText(existing?.firstPrompt)
-				: normalizeRecentSessionText(existing?.firstPrompt) ?? normalizeRecentSessionText(incoming?.firstPrompt)) ??
-			undefined,
+				? (normalizeRecentSessionText(incoming?.firstPrompt) ?? normalizeRecentSessionText(existing?.firstPrompt))
+				: (normalizeRecentSessionText(existing?.firstPrompt) ??
+					normalizeRecentSessionText(incoming?.firstPrompt))) ?? undefined,
 		summary:
 			normalizeRecentSessionText(incoming?.summary) ?? normalizeRecentSessionText(existing?.summary) ?? undefined,
 		messageCount: Math.max(incoming?.messageCount ?? 0, existing?.messageCount ?? 0, mergedRecentMessages.length),
@@ -489,7 +495,10 @@ function refreshMetadataFromSessionFile(
 	}
 	return {
 		...existing,
-		summary: normalizeRecentSessionText(sessionFileMetadata.summary) ?? normalizeRecentSessionText(existing?.summary) ?? undefined,
+		summary:
+			normalizeRecentSessionText(sessionFileMetadata.summary) ??
+			normalizeRecentSessionText(existing?.summary) ??
+			undefined,
 		firstPrompt:
 			normalizeRecentSessionText(sessionFileMetadata.firstPrompt) ??
 			normalizeRecentSessionText(existing?.firstPrompt) ??
@@ -497,7 +506,9 @@ function refreshMetadataFromSessionFile(
 		messageCount: Math.max(sessionFileMetadata.messageCount, existing?.messageCount ?? 0),
 		fileSizeBytes: sessionFileMetadata.fileSizeBytes || existing?.fileSizeBytes || 0,
 		recentMessages:
-			sessionFileMetadata.recentMessages.length > 0 ? sessionFileMetadata.recentMessages : (existing?.recentMessages ?? []),
+			sessionFileMetadata.recentMessages.length > 0
+				? sessionFileMetadata.recentMessages
+				: (existing?.recentMessages ?? []),
 		resumeSummary: existing?.resumeSummary ?? null,
 	};
 }

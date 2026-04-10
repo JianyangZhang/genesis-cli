@@ -194,7 +194,9 @@ export function resolveResumeBrowserSelectedIndex(
 	return moveResumeBrowserSelection(fallbackIndex, 0, hits.length);
 }
 
-export function summarizeResumeBrowserHit(hit: RecentSessionSearchHit | null | undefined): Record<string, unknown> | null {
+export function summarizeResumeBrowserHit(
+	hit: RecentSessionSearchHit | null | undefined,
+): Record<string, unknown> | null {
 	if (!hit) {
 		return null;
 	}
@@ -243,10 +245,7 @@ export type ResumeBrowserKeyAction =
 	| { readonly type: "move_selection"; readonly delta: number }
 	| null;
 
-export function resolveResumeBrowserKeyAction(
-	key: ResumeBrowserKey,
-	bodyViewportRows: number,
-): ResumeBrowserKeyAction {
+export function resolveResumeBrowserKeyAction(key: ResumeBrowserKey, bodyViewportRows: number): ResumeBrowserKeyAction {
 	if (key === "esc") {
 		return { type: "close" };
 	}
