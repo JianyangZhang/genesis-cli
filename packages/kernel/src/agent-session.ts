@@ -5,11 +5,7 @@ import type { AssistantMessage, Message, UserMessage } from "@pickle-pee/pi-ai";
 import { AuthStorage } from "./auth-storage.js";
 import { ModelRegistry } from "./model-registry.js";
 import { streamWithKernelProvider } from "./provider-registry.js";
-import type {
-	KernelCreateSessionOptions,
-	KernelSessionContract,
-	KernelSessionSnapshot,
-} from "./session-contract.js";
+import type { KernelCreateSessionOptions, KernelSessionContract, KernelSessionSnapshot } from "./session-contract.js";
 import { SessionManager } from "./session-manager.js";
 import {
 	type GenesisSessionMetadata,

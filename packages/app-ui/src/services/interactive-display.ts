@@ -18,7 +18,9 @@ export function formatFullWidthTranscriptUserLine(content: string, width: number
 	const visibleWidth = measureTerminalDisplayWidth(plain);
 	const safeWidth = Math.max(1, width);
 	const padded =
-		visibleWidth >= safeWidth ? truncatePlainText(plain, safeWidth) : `${plain}${" ".repeat(safeWidth - visibleWidth)}`;
+		visibleWidth >= safeWidth
+			? truncatePlainText(plain, safeWidth)
+			: `${plain}${" ".repeat(safeWidth - visibleWidth)}`;
 	return `${INTERACTIVE_THEME.promptBg}${INTERACTIVE_THEME.userTranscriptFg}${padded}${INTERACTIVE_THEME.reset}`;
 }
 

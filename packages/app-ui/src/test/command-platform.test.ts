@@ -20,7 +20,14 @@ function createMockSession(overrides?: Partial<SessionState>): SessionFacade {
 		get state() {
 			return state;
 		},
-		context: {} as SessionFacade["context"],
+		context: {
+			sessionId: state.id,
+			workingDirectory: "/tmp/repo",
+			mode: "interactive",
+			model: state.model,
+			toolSet: state.toolSet,
+			taskState: state.taskState,
+		},
 		events: {} as SessionFacade["events"],
 		plan: null,
 		prompt: async () => {},
@@ -65,9 +72,9 @@ describe("command-platform registry factories", () => {
 			}),
 			getWorkingTreeSummary: async () => ({
 				changedPaths: [],
-				snapshot: { clean: true, branch: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [] },
+				snapshot: { available: true, statusLines: [], diffStatLines: [] },
 			}),
-			getGitDiff: async () => ({ clean: true, target: null, patch: "" }),
+			getGitDiff: async () => ({ type: "ok", stdout: "" }),
 			getDoctorSnapshot: async () => null,
 		});
 		expect(registry.get("help")).toBeDefined();

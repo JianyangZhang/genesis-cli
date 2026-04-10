@@ -8,7 +8,7 @@ import { createPlanEngine } from "../planning/plan-engine.js";
 import { createRuntimeContext } from "../runtime-context.js";
 import { SessionFacadeImpl } from "../session/session-facade.js";
 import { createInitialSessionState } from "../session/session-state.js";
-import type { ModelDescriptor, SessionId, SessionState } from "../types/index.js";
+import type { ModelDescriptor, SessionId, SessionRecoveryData, SessionState } from "../types/index.js";
 import { expectGovernorProbeAllows } from "./governor-test-helpers.js";
 import { StubKernelSessionAdapter } from "./stubs/stub-kernel-session-adapter.js";
 
@@ -340,7 +340,9 @@ describe("SessionFacade", () => {
 		};
 
 		globalBus.on("session_closed", (event) => {
-			seenRecoveryData = event.recoveryData;
+			if (event.type === "session_closed") {
+				seenRecoveryData = event.recoveryData;
+			}
 		});
 
 		const facade = new SessionFacadeImpl(adapter, state, context, globalBus);

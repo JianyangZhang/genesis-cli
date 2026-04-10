@@ -16,6 +16,7 @@
 		"version:bump:minor": "node ./scripts/bump-version.mjs minor",
 		"version:bump:major": "node ./scripts/bump-version.mjs major",
 		"version:bump:prerelease": "node ./scripts/bump-version.mjs prerelease",
+		"publish:preflight": "./scripts/publish-all.sh preflight",
 		"publish:check": "./scripts/publish-all.sh check",
 		"publish:all": "./scripts/publish-all.sh all",
 		"publish:packages": "./scripts/publish-all.sh publish",
@@ -24,7 +25,7 @@
 		"test:live:pi-mono:openai": "node --env-file=.env.openai.local ./node_modules/vitest/vitest.mjs run packages/app-runtime/src/test/pi-mono-live.test.ts",
 		"test:live:pi-mono:anthropic": "node --env-file=.env.anthropic.local ./node_modules/vitest/vitest.mjs run packages/app-runtime/src/test/pi-mono-live.test.ts",
 		"test:tui": "./scripts/test-tui-regressions.sh",
-		"test": "npm run build && vitest run --passWithNoTests",
+		"test": "npm run check && npm run build && vitest run --passWithNoTests && npm run publish:preflight",
 		"prepare": "husky"
 	},
 	"engines": {

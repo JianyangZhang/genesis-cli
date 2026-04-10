@@ -6,6 +6,7 @@
 	},
 	"include": ["src/**/*.ts"],
 	"references": [
-		{ "path": "../app-runtime" }
+		{ "path": "../app-runtime" },
+		{ "path": "../app-tui-core" }
 	]
 }

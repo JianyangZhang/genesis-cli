@@ -337,7 +337,11 @@ function createReviewCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 		visibility: "public",
 		async execute(ctx: SlashCommandContext): Promise<undefined> {
 			const summary = await deps.getWorkingTreeSummary();
-			if (summary.snapshot.available && summary.snapshot.statusLines.length === 0 && summary.changedPaths.length === 0) {
+			if (
+				summary.snapshot.available &&
+				summary.snapshot.statusLines.length === 0 &&
+				summary.changedPaths.length === 0
+			) {
 				ctx.output.writeLine("Review: clean working tree.");
 				ctx.output.writeLine("Next: continue chatting, or /changes if you want a snapshot.");
 				return undefined;

@@ -24,16 +24,16 @@ export {
 export { computePromptCursorColumn } from "./render/composer-metrics.js";
 export { diffScreenFrames } from "./render/frame-diff.js";
 export {
+	encodeFramePatches,
+	encodeResetScrollRegion,
+	encodeSetScrollRegion,
+} from "./render/frame-patch-encoder.js";
+export {
 	clampScrollOffset,
 	computeBodyViewportRows,
 	computeMaxScrollOffset,
 	ensureVisibleSelectionOffset,
 } from "./render/interactive-viewport.js";
-export {
-	encodeFramePatches,
-	encodeResetScrollRegion,
-	encodeSetScrollRegion,
-} from "./render/frame-patch-encoder.js";
 export {
 	computeEphemeralRows,
 	computeFooterCursorRowsFromEnd,

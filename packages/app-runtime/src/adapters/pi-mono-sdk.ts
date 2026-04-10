@@ -1,9 +1,25 @@
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { KernelSessionContract } from "@pickle-pee/kernel";
 
 export type PiMonoAuthSourceKind = "auth_storage" | "env" | "literal" | "missing";
+
+export interface PiMonoKernelSessionSnapshot {
+	readonly sessionId: string;
+	readonly sessionFile?: string;
+	readonly metadata: unknown;
+}
+
+export interface PiMonoKernelSessionContract {
+	readonly isStreaming: boolean;
+	subscribe(listener: (event: unknown) => void): () => void;
+	prompt(input: string): Promise<void>;
+	followUp(input: string): Promise<void>;
+	compact(customInstructions?: string): Promise<void>;
+	getSnapshot(): Promise<PiMonoKernelSessionSnapshot>;
+	abort(): Promise<void>;
+	dispose(): void;
+}
 
 export interface PiMonoTool {
 	readonly name: string;
@@ -52,7 +68,7 @@ export interface PiMonoSdk {
 		create(cwd: string): unknown;
 		open(sessionPath: string): unknown;
 	};
-	createAgentSession(options: CreateAgentSessionOptions): Promise<{ session: KernelSessionContract }>;
+	createAgentSession(options: CreateAgentSessionOptions): Promise<{ session: PiMonoKernelSessionContract }>;
 	createBashTool(cwd: string): PiMonoTool;
 	createEditTool(cwd: string): PiMonoTool;
 	createFindTool(cwd: string): PiMonoTool;
@@ -82,7 +98,7 @@ export async function loadPiMonoSdk(options: LoadPiMonoSdkOptions = {}): Promise
 	throw new Error("Unable to resolve the vendored Genesis kernel module");
 }
 
-export async function defaultCreateSession(options: CreateAgentSessionOptions): Promise<KernelSessionContract> {
+export async function defaultCreateSession(options: CreateAgentSessionOptions): Promise<PiMonoKernelSessionContract> {
 	const sdk = await loadPiMonoSdk();
 	const result = await sdk.createAgentSession(options);
 	return result.session;
