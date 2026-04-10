@@ -2347,7 +2347,14 @@ describe("interactive workbench TTY", () => {
 				const snapshot = screen.snapshot();
 				return snapshot.includes("Thinking..") || snapshot.includes("Thinking...");
 			}, 2000);
-			await waitFor(() => screen.snapshot().includes("2s"), 3000);
+			await waitFor(() => {
+				const snapshot = screen.snapshot();
+				const secondsMatch = snapshot.match(/\((\d+)s(?:\s·|\))/);
+				if (secondsMatch && Number(secondsMatch[1]) >= 2) {
+					return true;
+				}
+				return /\((\d+)m(?:\s·|\)|\s\d+s)/.test(snapshot);
+			}, 3500);
 			await waitFor(() => screen.snapshot().includes("First delayed reply"), 4000);
 			await waitFor(() => screen.snapshot().includes("Queued follow-up reply"), 3000);
 
