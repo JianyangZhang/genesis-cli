@@ -158,3 +158,24 @@ export interface ResumeBrowserState {
 	readonly previewExpanded: boolean;
 	readonly loading: boolean;
 }
+
+export interface PendingPermissionDetails {
+	readonly toolName: string;
+	readonly toolCallId: string;
+	readonly riskLevel: string;
+	readonly reason?: string;
+	readonly targetPath?: string;
+}
+
+export interface PendingPermissionState {
+	readonly callId: string;
+	readonly details: PendingPermissionDetails;
+	readonly selectedIndex: number;
+}
+
+export interface InteractiveOverlayState {
+	readonly pendingPermission: PendingPermissionState | null;
+	readonly resumeBrowser: ResumeBrowserState | null;
+	readonly resumeBrowserSubmitPending: boolean;
+	readonly resumeSearchRequestId: number;
+}

@@ -56,20 +56,21 @@ import {
 	truncatePlainText as truncatePlainTextFromTuiCore,
 	wrapTranscriptContent as wrapTranscriptContentFromTuiCore,
 } from "@pickle-pee/tui-core";
-import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
+import type { InteractionState, InteractiveOverlayState, OutputSink, SlashCommand } from "@pickle-pee/ui";
 import {
-	beginResumeBrowserSearch,
+	beginResumeBrowserOverlaySearch,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
-	completeResumeBrowserSearch,
+	clearPendingPermissionRequest,
+	closeResumeBrowserOverlay,
+	completeResumeBrowserOverlaySearch,
 	computeInteractiveFooterSeparatorWidth,
 	createInteractiveCommandRegistry,
 	createInteractiveConversationState,
-	createResumeBrowserState,
 	eventToJsonEnvelope,
 	formatEventAsText,
 	formatFullWidthTranscriptUserLine,
@@ -82,14 +83,20 @@ import {
 	formatTranscriptUserBlocks,
 	INTERACTIVE_THEME,
 	initialInteractionState,
+	initialInteractiveOverlayState,
+	markResumeBrowserSubmitPending,
 	materializeAssistantTranscriptBlock,
-	moveResumeBrowserSelection,
+	movePendingPermissionSelection as movePendingPermissionSelectionFromUi,
+	moveResumeBrowserOverlaySelection,
+	openResumeBrowserOverlay,
 	reduceInteractionState,
+	resetInteractiveOverlayState,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSubmitHit,
+	setPendingPermissionRequest,
 	summarizeResumeBrowserHit,
-	toggleResumeBrowserPreviewState,
+	toggleResumeBrowserOverlayPreview,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
@@ -154,14 +161,6 @@ class InteractiveModeHandler implements ModeHandler {
 		private readonly _welcomeProvider?: string,
 	) {}
 
-	private _pendingPermissionCallId: string | null = null;
-	private _pendingPermissionDetails: {
-		toolName: string;
-		toolCallId: string;
-		riskLevel: string;
-		reason?: string;
-		targetPath?: string;
-	} | null = null;
 	private _activeTurn: Promise<void> | null = null;
 	private readonly _prompt = "❯ ";
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
@@ -185,7 +184,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
 	private readonly _queuedInputs: string[] = [];
-	private _pendingPermissionSelection = 0;
+	private _overlayState: InteractiveOverlayState = initialInteractiveOverlayState();
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
 	private _renderedFooterStartRow: number | null = null;
 	private _lastScreenFrame: ScreenFrame | null = null;
@@ -198,10 +197,7 @@ class InteractiveModeHandler implements ModeHandler {
 		focusRow: number;
 		focusColumn: number;
 	} | null = null;
-	private _resumeBrowser: ResumeBrowserState | null = null;
 	private _resumeBrowserScrollOffset = 0;
-	private _resumeBrowserSubmitPending = false;
-	private _resumeSearchRequestId = 0;
 	private _inputLoop: InputLoop | null = null;
 	private _activeLocalCommand: Promise<void> | null = null;
 	private _sessionEngine: SessionEngine | null = null;
@@ -293,8 +289,7 @@ class InteractiveModeHandler implements ModeHandler {
 			detachSessionStateListener = null;
 			sessionRef.current.events.removeAllListeners();
 			sessionRef.current = next;
-			this._pendingPermissionCallId = null;
-			this._pendingPermissionDetails = null;
+			this._overlayState = resetInteractiveOverlayState();
 			this._activeTurn = null;
 			this._historyIndex = null;
 			this._lastError = null;
@@ -315,13 +310,11 @@ class InteractiveModeHandler implements ModeHandler {
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
 			this._queuedInputs.length = 0;
-			this._pendingPermissionSelection = 0;
 			this._renderedFooterUi = null;
 			this._renderedFooterStartRow = null;
 			this._lastScreenFrame = null;
 			this._transcriptScrollOffset = 0;
 			this._resumeBrowserScrollOffset = 0;
-			this._resumeBrowserSubmitPending = false;
 			if (this._recentSessionPersistTimer !== null) {
 				clearTimeout(this._recentSessionPersistTimer);
 				this._recentSessionPersistTimer = null;
@@ -334,20 +327,16 @@ class InteractiveModeHandler implements ModeHandler {
 
 			sessionRef.current.events.onAny((event: RuntimeEvent) => {
 				if (event.type === "permission_requested") {
-					this._pendingPermissionDetails = {
+					this._overlayState = setPendingPermissionRequest(this._overlayState, event.toolCallId, {
 						toolName: event.toolName,
 						toolCallId: event.toolCallId,
 						riskLevel: event.riskLevel,
 						reason: (event as { reason?: string }).reason,
 						targetPath: (event as { targetPath?: string }).targetPath,
-					};
-					this._pendingPermissionSelection = 0;
+					});
 				}
 				if (event.type === "permission_resolved") {
-					if (this._pendingPermissionDetails?.toolCallId === event.toolCallId) {
-						this._pendingPermissionDetails = null;
-						this._pendingPermissionSelection = 0;
-					}
+					this._overlayState = clearPendingPermissionRequest(this._overlayState, event.toolCallId);
 				}
 				if (event.type === "tool_started") {
 					this._toolCalls.set(event.toolCallId, { toolName: event.toolName, parameters: event.parameters });
@@ -374,12 +363,6 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				interactionState = reduceInteractionState(interactionState, event);
-
-				if (interactionState.phase === "waiting_permission" && interactionState.activeToolCallId) {
-					this._pendingPermissionCallId = interactionState.activeToolCallId;
-				} else if (interactionState.phase !== "waiting_permission") {
-					this._pendingPermissionCallId = null;
-				}
 				this.handleTranscriptEvent(event);
 				if (shouldPersistRecentSessionForEvent(event)) {
 					this.scheduleRecentSessionPersist(runtime, sessionRef.current, event, sessionTitle);
@@ -418,7 +401,7 @@ class InteractiveModeHandler implements ModeHandler {
 				inputLoop?.close();
 			},
 			isInteractionBusy: () => handler.isInteractionBusy(),
-			hasPendingPermissionRequest: () => handler._pendingPermissionCallId !== null,
+			hasPendingPermissionRequest: () => handler.pendingPermissionState() !== null,
 			replaceSession: (next) => {
 				switchInteractiveSession(next);
 			},
@@ -426,7 +409,7 @@ class InteractiveModeHandler implements ModeHandler {
 			getInteractionPhase: () => interactionState.phase,
 			getLastError: () => handler._lastError,
 			getChangedFileCount: () => handler._changedPaths.size,
-			getPendingPermissionCallId: () => handler._pendingPermissionCallId,
+			getPendingPermissionCallId: () => handler.pendingPermissionState()?.callId ?? null,
 			getToolUsageSummary: () => {
 				const entries = runtime.governor.audit.getAll();
 				return {
@@ -575,7 +558,7 @@ class InteractiveModeHandler implements ModeHandler {
 			type: "local",
 			visibility: "public",
 			async execute(ctx) {
-				if (handler.isInteractionBusy() || handler._pendingPermissionCallId) {
+				if (handler.isInteractionBusy() || handler.pendingPermissionState() !== null) {
 					ctx.output.writeError("Session is busy.");
 					return undefined;
 				}
@@ -615,9 +598,9 @@ class InteractiveModeHandler implements ModeHandler {
 			submitNewline: false,
 			onInputStateChange: (state) => {
 				this._inputState = state;
-				if (this._resumeBrowser !== null) {
-					if (this._resumeBrowserSubmitPending && state.buffer.length === 0) {
-						this._resumeBrowserSubmitPending = false;
+				if (this.resumeBrowserState() !== null) {
+					if (this._overlayState.resumeBrowserSubmitPending && state.buffer.length === 0) {
+						this._overlayState = markResumeBrowserSubmitPending(this._overlayState, false);
 						this.renderPromptLine();
 						return;
 					}
@@ -629,10 +612,10 @@ class InteractiveModeHandler implements ModeHandler {
 				this.renderPromptLine();
 			},
 			onTabComplete: (state) => {
-				if (this._resumeBrowser !== null) {
+				if (this.resumeBrowserState() !== null) {
 					return null;
 				}
-				if (this._pendingPermissionCallId !== null) {
+				if (this.pendingPermissionState() !== null) {
 					return null;
 				}
 				const nextState = acceptFirstSlashSuggestion(state, this._commandSuggestions);
@@ -645,10 +628,10 @@ class InteractiveModeHandler implements ModeHandler {
 			},
 			onKey: (key) => {
 				if (key === "ctrlc") {
-					if (this._pendingPermissionCallId !== null) {
-						const callId = this._pendingPermissionCallId;
-						this._pendingPermissionCallId = null;
-						this._pendingPermissionDetails = null;
+					const permissionState = this.pendingPermissionState();
+					if (permissionState !== null) {
+						const callId = permissionState.callId;
+						this._overlayState = clearPendingPermissionRequest(this._overlayState, callId);
 						void sessionRef.current.resolvePermission(callId, "deny").catch((err) => {
 							sink.writeError(`Error: ${err}`);
 						});
@@ -670,8 +653,8 @@ class InteractiveModeHandler implements ModeHandler {
 				this.handleSpecialKey(key);
 			},
 			onSubmit: (line) => {
-				if (this._resumeBrowser !== null && line.length >= 0) {
-					this._resumeBrowserSubmitPending = true;
+				if (this.resumeBrowserState() !== null && line.length >= 0) {
+					this._overlayState = markResumeBrowserSubmitPending(this._overlayState, true);
 				}
 			},
 			onMouse: (event) => {
@@ -689,7 +672,7 @@ class InteractiveModeHandler implements ModeHandler {
 			while (line !== null) {
 				const trimmed = line.trim();
 
-				if (this._resumeBrowser !== null) {
+				if (this.resumeBrowserState() !== null) {
 					const handled = await this.handleResumeBrowserSubmit(
 						line,
 						runtime,
@@ -707,17 +690,16 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				// Permission response
-				if (this._pendingPermissionCallId !== null) {
-					const decision = parsePermissionDecision(trimmed, this._pendingPermissionSelection);
+				const permissionState = this.pendingPermissionState();
+				if (permissionState !== null) {
+					const decision = parsePermissionDecision(trimmed, permissionState.selectedIndex);
 					if (!decision) {
 						sink.writeError("Permission: use 1/2/3, Enter, y/Y/n, or arrow keys/Tab to choose.");
 						line = await inputLoop.nextLine();
 						continue;
 					}
-					await sessionRef.current.resolvePermission(this._pendingPermissionCallId, decision);
-					this._pendingPermissionCallId = null;
-					this._pendingPermissionDetails = null;
-					this._pendingPermissionSelection = 0;
+					await sessionRef.current.resolvePermission(permissionState.callId, decision);
+					this._overlayState = clearPendingPermissionRequest(this._overlayState, permissionState.callId);
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -964,7 +946,7 @@ class InteractiveModeHandler implements ModeHandler {
 			| "ctrlo"
 			| "ctrlv",
 	): void {
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			const action = resolveResumeBrowserKeyAction(key, this.currentResumeBrowserBodyViewportRows());
 			if (action?.type === "close") {
 				this.closeResumeBrowser();
@@ -1003,12 +985,12 @@ class InteractiveModeHandler implements ModeHandler {
 			this.scrollTranscript(transcriptScrollDelta);
 			return;
 		}
-		if (this._pendingPermissionCallId !== null) {
+		if (this.pendingPermissionState() !== null) {
 			if (key === "up" || key === "shifttab") {
-				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, -1);
+				this._overlayState = movePendingPermissionSelectionFromUi(this._overlayState, -1);
 				this.renderPermissionUi();
 			} else if (key === "down" || key === "tab") {
-				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, 1);
+				this._overlayState = movePendingPermissionSelectionFromUi(this._overlayState, 1);
 				this.renderPermissionUi();
 			}
 			return;
@@ -1019,7 +1001,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderPermissionUi(): void {
-		if (this._pendingPermissionCallId === null || this._pendingPermissionDetails === null) {
+		if (this.pendingPermissionState() === null) {
 			this.fullRedrawInteractiveScreen();
 			return;
 		}
@@ -1219,12 +1201,11 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private async openResumeBrowser(runtime: AppRuntime, initialQuery: string): Promise<void> {
-		this._resumeBrowser = createResumeBrowserState(initialQuery);
+		this._overlayState = openResumeBrowserOverlay(this._overlayState, initialQuery);
 		this._detailPanelExpanded = false;
 		this._detailPanelScroll = 0;
 		this._transcriptScrollOffset = 0;
 		this._resumeBrowserScrollOffset = 0;
-		this._resumeBrowserSubmitPending = false;
 		this.clearMouseSelection(false);
 		this._commandSuggestions = [];
 		getActiveDebugLogger()?.debug("resume.browser.open", "Opened resume browser", {
@@ -1241,20 +1222,19 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private closeResumeBrowser(): void {
-		if (this._resumeBrowser === null) {
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
 			return;
 		}
 		getActiveDebugLogger()?.debug("resume.browser.close", "Closed resume browser", {
-			query: this._resumeBrowser.query,
-			selectedIndex: this._resumeBrowser.selectedIndex,
-			resultCount: this._resumeBrowser.hits.length,
-			previewExpanded: this._resumeBrowser.previewExpanded,
+			query: browser.query,
+			selectedIndex: browser.selectedIndex,
+			resultCount: browser.hits.length,
+			previewExpanded: browser.previewExpanded,
 		});
-		this._resumeBrowser = null;
-		this._resumeSearchRequestId += 1;
+		this._overlayState = closeResumeBrowserOverlay(this._overlayState);
 		this._transcriptScrollOffset = 0;
 		this._resumeBrowserScrollOffset = 0;
-		this._resumeBrowserSubmitPending = false;
 		this.clearMouseSelection(false);
 		if (this._inputLoop !== null) {
 			this._inputLoop.setState({ buffer: "", cursor: 0 });
@@ -1266,36 +1246,38 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private async refreshResumeBrowserResults(runtime: AppRuntime, query: string): Promise<void> {
-		const browser = this._resumeBrowser;
+		const started = beginResumeBrowserOverlaySearch(this._overlayState, query);
+		if (started === null) {
+			return;
+		}
+		const nextQuery = query;
+		this._overlayState = started.state;
+		this.rerenderInteractiveRegions();
+		const hits = await runtime.searchRecentSessions(nextQuery);
+		if (this.resumeBrowserState() === null || started.requestId !== this._overlayState.resumeSearchRequestId) {
+			return;
+		}
+		this._overlayState = completeResumeBrowserOverlaySearch(this._overlayState, {
+			requestId: started.requestId,
+			nextQuery,
+			hits,
+			selectedSessionId: started.selectedSessionId,
+			fallbackIndex: started.previous.selectedIndex,
+		});
+		if (started.previous.query !== nextQuery) {
+			this._resumeBrowserScrollOffset = 0;
+		}
+		const browser = this.resumeBrowserState();
 		if (browser === null) {
 			return;
 		}
-		const selectedSessionId = browser.hits[browser.selectedIndex]?.entry.recoveryData.sessionId.value ?? null;
-		const requestId = ++this._resumeSearchRequestId;
-		const nextQuery = query;
-		this._resumeBrowser = beginResumeBrowserSearch(browser, nextQuery);
-		this.rerenderInteractiveRegions();
-		const hits = await runtime.searchRecentSessions(nextQuery);
-		if (this._resumeBrowser === null || requestId !== this._resumeSearchRequestId) {
-			return;
-		}
-		this._resumeBrowser = completeResumeBrowserSearch(
-			this._resumeBrowser,
-			nextQuery,
-			hits,
-			selectedSessionId,
-			browser.selectedIndex,
-		);
-		if (browser.query !== nextQuery) {
-			this._resumeBrowserScrollOffset = 0;
-		}
 		getActiveDebugLogger()?.debug("resume.browser.search", "Refreshed resume browser results", {
 			query: nextQuery,
-			requestId,
+			requestId: started.requestId,
 			resultCount: hits.length,
-			selectedIndex: this._resumeBrowser.selectedIndex,
+			selectedIndex: browser.selectedIndex,
 			topHit: summarizeResumeBrowserHit(hits[0]),
-			selectedHit: summarizeResumeBrowserHit(hits[this._resumeBrowser.selectedIndex]),
+			selectedHit: summarizeResumeBrowserHit(hits[browser.selectedIndex]),
 			scrollOffset: this._resumeBrowserScrollOffset,
 		});
 		this.ensureResumeBrowserSelectionVisible();
@@ -1303,25 +1285,20 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private moveResumeBrowserSelection(delta: number): void {
-		if (this._resumeBrowser === null) {
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
 			return;
 		}
-		const nextIndex = moveResumeBrowserSelection(
-			this._resumeBrowser.selectedIndex,
-			delta,
-			this._resumeBrowser.hits.length,
-		);
-		if (nextIndex === this._resumeBrowser.selectedIndex) {
+		const nextState = moveResumeBrowserOverlaySelection(this._overlayState, delta);
+		const nextBrowser = nextState.resumeBrowser;
+		if (nextBrowser === null || nextBrowser.selectedIndex === browser.selectedIndex) {
 			return;
 		}
-		this._resumeBrowser = {
-			...this._resumeBrowser,
-			selectedIndex: nextIndex,
-		};
+		this._overlayState = nextState;
 		getActiveDebugLogger()?.debug("resume.browser.selection", "Moved resume browser selection", {
 			delta,
-			selectedIndex: nextIndex,
-			selectedHit: summarizeResumeBrowserHit(this._resumeBrowser.hits[nextIndex]),
+			selectedIndex: nextBrowser.selectedIndex,
+			selectedHit: summarizeResumeBrowserHit(nextBrowser.hits[nextBrowser.selectedIndex]),
 			scrollOffset: this._resumeBrowserScrollOffset,
 		});
 		this.ensureResumeBrowserSelectionVisible();
@@ -1329,14 +1306,18 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private toggleResumeBrowserPreview(): void {
-		if (this._resumeBrowser === null) {
+		if (this.resumeBrowserState() === null) {
 			return;
 		}
-		this._resumeBrowser = toggleResumeBrowserPreviewState(this._resumeBrowser);
+		this._overlayState = toggleResumeBrowserOverlayPreview(this._overlayState);
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
+			return;
+		}
 		getActiveDebugLogger()?.debug("resume.browser.preview", "Toggled resume browser preview", {
-			previewExpanded: this._resumeBrowser.previewExpanded,
-			selectedIndex: this._resumeBrowser.selectedIndex,
-			selectedHit: summarizeResumeBrowserHit(this._resumeBrowser.hits[this._resumeBrowser.selectedIndex]),
+			previewExpanded: browser.previewExpanded,
+			selectedIndex: browser.selectedIndex,
+			selectedHit: summarizeResumeBrowserHit(browser.hits[browser.selectedIndex]),
 		});
 		this.ensureResumeBrowserSelectionVisible();
 		this.rerenderInteractiveRegions();
@@ -1349,25 +1330,26 @@ class InteractiveModeHandler implements ModeHandler {
 		sink: OutputSink,
 		switchInteractiveSession: (nextSession: SessionFacade) => void,
 	): Promise<boolean> {
-		if (this._resumeBrowser === null) {
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
 			return false;
 		}
 		getActiveDebugLogger()?.debug("resume.browser.submit", "Handling resume browser submit", {
 			line,
-			loading: this._resumeBrowser.loading,
-			selectedIndex: this._resumeBrowser.selectedIndex,
-			hitCount: this._resumeBrowser.hits.length,
+			loading: browser.loading,
+			selectedIndex: browser.selectedIndex,
+			hitCount: browser.hits.length,
 		});
-		if (this._resumeBrowser.loading) {
+		if (browser.loading) {
 			return true;
 		}
-		const hit = resolveResumeBrowserSubmitHit(this._resumeBrowser);
+		const hit = resolveResumeBrowserSubmitHit(browser);
 		if (!hit) {
 			return true;
 		}
 		const data = hit.entry.recoveryData;
 		getActiveDebugLogger()?.debug("resume.browser.resume", "Resuming selected session", {
-			selectedIndex: this._resumeBrowser.selectedIndex,
+			selectedIndex: browser.selectedIndex,
 			selectedHit: summarizeResumeBrowserHit(hit),
 		});
 		this.closeResumeBrowser();
@@ -1441,6 +1423,14 @@ class InteractiveModeHandler implements ModeHandler {
 			throw new Error("Interactive session engine is not initialized");
 		}
 		return this._sessionEngine;
+	}
+
+	private resumeBrowserState() {
+		return this._overlayState.resumeBrowser;
+	}
+
+	private pendingPermissionState() {
+		return this._overlayState.pendingPermission;
 	}
 
 	private drainQueuedInputs(): string | null {
@@ -1545,7 +1535,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private ensureResumeBrowserSelectionVisible(): void {
-		if (this._resumeBrowser === null) {
+		if (this.resumeBrowserState() === null) {
 			return;
 		}
 		this._resumeBrowserScrollOffset = ensureVisibleSelectionOffset({
@@ -1599,6 +1589,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private buildFooterUi(): InteractiveFooterRenderResult {
 		const activeToolLabel = summarizeActiveToolNotice(this._toolCalls);
 		const detailPanel = this.currentDetailPanelViewport();
+		const pendingPermission = this.pendingPermissionState();
 		return formatInteractiveFooter({
 			terminalWidth: process.stdout.columns ?? 80,
 			prompt: this.currentPrompt(),
@@ -1618,10 +1609,10 @@ class InteractiveModeHandler implements ModeHandler {
 			detailPanelSummary: detailPanel.summary,
 			queuedInputs: this._queuedInputs,
 			permission:
-				this._pendingPermissionCallId !== null && this._pendingPermissionDetails !== null
+				pendingPermission !== null
 					? {
-							details: this._pendingPermissionDetails,
-							selectedIndex: this._pendingPermissionSelection,
+							details: pendingPermission.details,
+							selectedIndex: pendingPermission.selectedIndex,
 						}
 					: null,
 		});
@@ -1641,7 +1632,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._startupCheckScreenActive) {
 			return this._lastError ? "Press Enter to retry " : "Running startup checks ";
 		}
-		return this._resumeBrowser === null ? this._prompt : "Search> ";
+		return this.resumeBrowserState() === null ? this._prompt : "Search> ";
 	}
 
 	private shouldShowPendingOutputIndicator(activeToolLabel: string | null): boolean {
@@ -1694,7 +1685,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private rerenderInteractiveRegions(): void {
 		this.clearMouseSelection(false);
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			this.clampResumeBrowserScrollOffset();
 		} else {
 			this.clampTranscriptScrollOffset();
@@ -1759,11 +1750,13 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentResumeBrowserTopLines(): readonly string[] {
-		return this._resumeBrowser === null ? [] : buildResumeBrowserHeaderLines(this._resumeBrowser);
+		const browser = this.resumeBrowserState();
+		return browser === null ? [] : buildResumeBrowserHeaderLines(browser);
 	}
 
 	private currentResumeBrowserBodyBlocks(): readonly string[] {
-		return this._resumeBrowser === null ? [] : buildResumeBrowserBodyBlocks(this._resumeBrowser);
+		const browser = this.resumeBrowserState();
+		return browser === null ? [] : buildResumeBrowserBodyBlocks(browser);
 	}
 
 	private buildResumeBrowserFooterUi(): InteractiveFooterRenderResult {
@@ -1810,22 +1803,23 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentResumeBrowserSelectedRowRange(): { start: number; end: number } | null {
-		if (this._resumeBrowser === null) {
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
 			return null;
 		}
 		const blocks = this.currentResumeBrowserBodyBlocks();
-		const selectedBlock = blocks[this._resumeBrowser.selectedIndex];
+		const selectedBlock = blocks[browser.selectedIndex];
 		if (!selectedBlock) {
 			return null;
 		}
 		let start = 0;
-		for (let index = 0; index < this._resumeBrowser.selectedIndex; index += 1) {
+		for (let index = 0; index < browser.selectedIndex; index += 1) {
 			start += countRenderedTerminalRowsFromTuiCore((blocks[index] ?? "").split("\n"), this.terminalWidth());
 		}
 		let end =
 			start + Math.max(0, countRenderedTerminalRowsFromTuiCore(selectedBlock.split("\n"), this.terminalWidth()) - 1);
-		const previewBlock = blocks[this._resumeBrowser.selectedIndex + 1];
-		if (this._resumeBrowser.previewExpanded && previewBlock?.startsWith("Preview\n")) {
+		const previewBlock = blocks[browser.selectedIndex + 1];
+		if (browser.previewExpanded && previewBlock?.startsWith("Preview\n")) {
 			end += countRenderedTerminalRowsFromTuiCore(previewBlock.split("\n"), this.terminalWidth());
 		}
 		return {
@@ -1843,7 +1837,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private isTranscriptMouseRow(row: number): boolean {
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			return false;
 		}
 		const footerStartRow =
@@ -1918,7 +1912,8 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderInteractiveScreenState(options: { readonly resetScrollRegion?: boolean } = {}): void {
-		if (this._resumeBrowser !== null) {
+		const browser = this.resumeBrowserState();
+		if (browser !== null) {
 			this.clampResumeBrowserScrollOffset();
 		} else {
 			this.clampTranscriptScrollOffset();
@@ -1941,14 +1936,14 @@ class InteractiveModeHandler implements ModeHandler {
 		if (renderDebug !== null) {
 			getActiveDebugLogger()?.debug("tui.render", "Rendered interactive screen frame", renderDebug);
 		}
-		if (this._resumeBrowser !== null) {
+		if (browser !== null) {
 			getActiveDebugLogger()?.debug("resume.browser.layout", "Rendered resume browser layout", {
 				headerLineCount: this.currentResumeBrowserTopLines().length,
 				bodyViewportRows: this.currentResumeBrowserBodyViewportRows(),
 				bodyDisplayRows: this.currentResumeBrowserBodyDisplayRows(),
 				scrollOffset: this._resumeBrowserScrollOffset,
-				selectedIndex: this._resumeBrowser.selectedIndex,
-				previewExpanded: this._resumeBrowser.previewExpanded,
+				selectedIndex: browser.selectedIndex,
+				previewExpanded: browser.previewExpanded,
 				footerStartRow: next.footerStartRow,
 			});
 		}
@@ -2030,7 +2025,7 @@ class InteractiveModeHandler implements ModeHandler {
 	} {
 		const terminalWidth = this.terminalWidth();
 		const terminalHeight = this.terminalHeight();
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			return this.buildResumeBrowserScreenFrame(terminalWidth, terminalHeight);
 		}
 		const footerUi = this.buildFooterUi();
@@ -2140,7 +2135,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentSelectionRange(): TerminalSelectionRange | null {
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			return null;
 		}
 		if (this._mouseSelection === null) {
@@ -2163,14 +2158,15 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentRenderedTranscriptBlocks(): readonly string[] {
-		if (this._resumeBrowser !== null) {
-			return formatResumeBrowserTranscriptBlocks(this._resumeBrowser);
+		const browser = this.resumeBrowserState();
+		if (browser !== null) {
+			return formatResumeBrowserTranscriptBlocks(browser);
 		}
 		return this._conversation.renderedTranscriptBlocks(this._welcomeLines);
 	}
 
 	private currentWelcomeLineCount(): number {
-		return this._resumeBrowser === null ? this._welcomeLines.length : 0;
+		return this.resumeBrowserState() === null ? this._welcomeLines.length : 0;
 	}
 }
 
