@@ -74,12 +74,24 @@ Genesis 面向真实仓库工作流，统一支撑 `Interactive / Print / JSON /
 
 ## 顶层蓝图
 
-Genesis 采用“终端宿主 / 内容语义 / 运行时契约 / 仓库自持内核”分层，首页只保留贡献者最需要的四类信息：分层、边界、入口与当前主线。
+Genesis 当前不再只把自己定义为“普通 CLI”，而是把主线收敛为一个正在演进中的“多入口会话运行时”：交互 TTY、print、json、rpc 与未来宿主入口，都应尽量回收到同一套 session runtime、session authority 与工具治理主链。首页只保留贡献者最需要的五类信息：当前状态、目标状态、最小边界、入口与当前主线。
+
+- Current State：
+  - 现阶段已经共享 `app-runtime -> SessionFacade -> kernel session` 主链，但 interactive 仍保留一部分宿主层会话编排
+  - `Print / JSON / RPC / Interactive` 共享 runtime 与 session API，但还没有完全收敛到统一 `session engine`
+  - `recent-session` 以 `kernel/session file metadata` 为权威源，`app-runtime` 仍保留 catalog 聚合与 fallback
+- Target State：
+  - Genesis 的目标不是继续做“更厚的 CLI mode handler”，而是做“多入口宿主共享的统一会话运行时”
+  - 不同入口的差异尽量停留在宿主层，`prompt / continue / resume / session switch / tool governance / recovery` 尽量回收到同一套 `session runtime / turn engine`
+  - `app-cli` 退回进程入口、TTY 生命周期与 debug 接线；`app-runtime` 承担统一 session orchestration；`kernel` 承担 session authority 与 provider kernel
+- 最小边界：
+  - `host`：进程入口、TTY 生命周期、mode 宿主、宿主特定 I/O 适配
+  - `session engine`：`prompt / continue / resume / session switch / turn lifecycle` 的统一编排入口
+  - `session authority`：`session file / metadata / recoveryData / compact / recent summary` 的唯一权威事实源
 
 - 分层：
   - `packages/app-cli` 负责进程入口、TTY 生命周期、debug 接线与 interactive mode 宿主
   - `packages/app-tui-core` 负责终端能力探测、mode lifecycle、screen frame、patch diff、composer/layout 等渲染内核
-  - `packages/app-ui` 负责 slash commands、resume browser、formatter、interactive theme、footer 内容准备与交互展示语义
   - `packages/app-runtime` 负责 session facade、事件归一化、recent sessions、governance 与 planning
   - `packages/app-tools` 负责工具 catalog、风险分级、权限策略、命令分类与审计
   - `packages/kernel` 负责 vendored kernel、provider 接线与上游 session plumbing
@@ -99,6 +111,8 @@ Genesis 采用“终端宿主 / 内容语义 / 运行时契约 / 仓库自持内
   - 改权限、风险、命令分类、审计：看 `app-tools`
   - 改 provider、auth、底层 session plumbing：看 `kernel`
 - 当前主线：
+  - 先把 Genesis 的顶层叙事从“普通 CLI 分层”升级为“多入口会话运行时”
+  - 先抽出统一 `session runtime / turn engine`，再持续瘦身 `InteractiveModeHandler`
   - 继续把 interactive 渲染规则沉到 `app-tui-core`
   - 继续把内容语义从 `app-cli` 回收到 `app-ui`
   - 明确 `recent-session` 的 metadata 权威源：`kernel/session file` 优先，`app-runtime` 只负责 catalog 聚合与 fallback
