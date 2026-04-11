@@ -897,15 +897,24 @@ function createFakeSessionEngine(
 	recoverSession: (data: SessionRecoveryData) => FakeInteractiveSession,
 	onInput: (session: FakeInteractiveSession, input: string, title?: string) => Promise<void>,
 	onAssistantText: (session: FakeInteractiveSession, text: string, title?: string) => Promise<void>,
+	onEvent: (session: FakeInteractiveSession, event: RuntimeEvent, title?: string) => void,
 	onClosed: (session: FakeInteractiveSession, title?: string) => Promise<void>,
 ): AppRuntime["createSessionEngine"] {
 	return () => {
 		const sessions = new Map<string, FakeInteractiveSession>();
 		const titles = new Map<string, string>();
+		const unsubscribes = new Map<string, () => void>();
 		let activeSessionId: string | null = null;
 
 		const registerSession = (session: FakeInteractiveSession): FakeInteractiveSession => {
 			sessions.set(session.id.value, session);
+			unsubscribes.get(session.id.value)?.();
+			unsubscribes.set(
+				session.id.value,
+				session.events.onAny((event: RuntimeEvent) => {
+					onEvent(session, event, titles.get(session.id.value));
+				}),
+			);
 			activeSessionId = session.id.value;
 			return session;
 		};
@@ -998,6 +1007,8 @@ function createFakeSessionEngine(
 				}
 				await session.close();
 				await onClosed(session, titles.get(session.id.value));
+				unsubscribes.get(session.id.value)?.();
+				unsubscribes.delete(session.id.value);
 				sessions.delete(session.id.value);
 				titles.delete(session.id.value);
 				if (activeSessionId === session.id.value) {
@@ -1009,12 +1020,18 @@ function createFakeSessionEngine(
 				for (const session of [...sessions.values()]) {
 					await session.close();
 					await onClosed(session, titles.get(session.id.value));
+					unsubscribes.get(session.id.value)?.();
+					unsubscribes.delete(session.id.value);
 				}
 				sessions.clear();
 				titles.clear();
 				activeSessionId = null;
 			},
 			dispose(): void {
+				for (const unsubscribe of unsubscribes.values()) {
+					unsubscribe();
+				}
+				unsubscribes.clear();
 				sessions.clear();
 				titles.clear();
 				activeSessionId = null;
@@ -1086,6 +1103,9 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 		},
 		async (liveSession, text, title) => {
 			await runtime.recordRecentSessionAssistantText(liveSession, text, { title });
+		},
+		(liveSession, event, title) => {
+			runtime.scheduleRecentSessionEvent(liveSession, event, { title });
 		},
 		async (closedSession, title) => {
 			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData(), { title });
@@ -1175,6 +1195,9 @@ function createSequencedRuntime(
 		},
 		async (liveSession, text, title) => {
 			await runtime.recordRecentSessionAssistantText(liveSession, text, { title });
+		},
+		(liveSession, event, title) => {
+			runtime.scheduleRecentSessionEvent(liveSession, event, { title });
 		},
 		async (closedSession, title) => {
 			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData(), { title });
@@ -2255,16 +2278,6 @@ describe("interactive workbench TTY", () => {
 	it("runs /compact without crashing and keeps the prompt visible", async () => {
 		const session = new FakeInteractiveSession({ sessionId: "session-compact", compactDelayMs: 150 });
 		const runtime = createFakeRuntime(session);
-		let compactEventCalls = 0;
-		let lastCompactEventType: string | null = null;
-		const baseRecordRecentSessionEvent = runtime.recordRecentSessionEvent.bind(runtime);
-		runtime.recordRecentSessionEvent = async (targetSession, event) => {
-			if (targetSession.id.value === session.id.value && event.type === "compaction_completed") {
-				compactEventCalls += 1;
-				lastCompactEventType = event.type;
-			}
-			return baseRecordRecentSessionEvent(targetSession, event);
-		};
 		const input = new FakeTtyInput();
 		const output = new FakeTtyOutput();
 
@@ -2282,8 +2295,6 @@ describe("interactive workbench TTY", () => {
 			const snapshot = screen.snapshot();
 			expect(snapshot).toContain("Compaction completed.");
 			expect(snapshot).toContain("❯");
-			await waitFor(() => compactEventCalls === 1);
-			expect(lastCompactEventType).toBe("compaction_completed");
 
 			input.write("hello\r");
 			await waitFor(() => countOccurrences(screen.snapshot(), "Hi from Genesis") >= 2);

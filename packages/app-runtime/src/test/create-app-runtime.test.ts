@@ -879,6 +879,49 @@ describe("createAppRuntime", () => {
 		expect(recent[0]?.recoveryData.metadata?.summary).toContain("second compact summary");
 	});
 
+	it("projects runtime events through session engine owned recent-session scheduling", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-events-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine();
+		const session = engine.createSession();
+		engine.setSessionTitle("Engine event title", { sessionId: session.id.value });
+
+		runtime.events.emit({
+			id: "evt-engine-compaction",
+			category: "compaction",
+			type: "compaction_completed",
+			timestamp: Date.now(),
+			sessionId: session.id,
+			summary: {
+				compressedAt: Date.now(),
+				originalMessageCount: 8,
+				retainedMessageCount: 3,
+				estimatedTokensSaved: 144,
+				compactedSummary: "engine scheduled compact summary",
+			},
+		});
+
+		for (let attempt = 0; attempt < 40; attempt += 1) {
+			const recent = await runtime.listRecentSessions();
+			if (recent[0]?.title === "Engine event title") {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Engine event title");
+		expect(recent[0]?.recoveryData.metadata?.summary).toContain("engine scheduled compact summary");
+	});
+
 	it("keeps resume/compact/recent-session behavior consistent across resumed turns", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-resume-compact-"));
 		const historyDir = join(agentDir, "history");

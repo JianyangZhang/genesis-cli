@@ -336,6 +336,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 					recordClosedRecentSession: this.recordClosedRecentSession,
 					recordRecentSessionInput: this.recordRecentSessionInput,
 					recordRecentSessionAssistantText: this.recordRecentSessionAssistantText,
+					scheduleRecentSessionEvent: this.scheduleRecentSessionEvent,
 				},
 				options,
 			);

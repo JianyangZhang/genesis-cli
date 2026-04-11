@@ -1,5 +1,5 @@
 import type { EventBus } from "../events/event-bus.js";
-import type { SessionClosedEvent } from "../events/runtime-event.js";
+import type { RuntimeEvent, SessionClosedEvent } from "../events/runtime-event.js";
 import type { SessionRecoveryData } from "../types/index.js";
 import type { SessionFacade } from "./session-facade.js";
 
@@ -53,6 +53,11 @@ interface SessionEngineDeps {
 		text: string,
 		options?: { readonly title?: string },
 	) => Promise<void>;
+	readonly scheduleRecentSessionEvent: (
+		session: SessionFacade,
+		event: RuntimeEvent,
+		options?: { readonly title?: string },
+	) => void;
 }
 
 export function createSessionEngine(deps: SessionEngineDeps, options: SessionEngineOptions = {}): SessionEngine {
@@ -76,6 +81,15 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 		if (activeSessionId === closed.sessionId.value) {
 			activeSessionId = null;
 		}
+	});
+	const unsubscribeProjectedEvents = deps.runtimeEvents.onAny((event) => {
+		const session = sessions.get(event.sessionId.value);
+		if (!session) {
+			return;
+		}
+		deps.scheduleRecentSessionEvent(session, event, {
+			title: resolveSessionTitle(session),
+		});
 	});
 
 	function registerSession(session: SessionFacade, makeActive = true): SessionFacade {
@@ -217,6 +231,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 
 		dispose(): void {
 			unsubscribeClosed();
+			unsubscribeProjectedEvents();
 			sessions.clear();
 			activeTurns.clear();
 			sessionTitles.clear();

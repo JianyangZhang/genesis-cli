@@ -390,9 +390,6 @@ class InteractiveModeHandler implements ModeHandler {
 
 				interactionState = reduceInteractionState(interactionState, event);
 				this.handleTranscriptEvent(event);
-				runtime.scheduleRecentSessionEvent(sessionRef.current, event, {
-					title: sessionEngine.getSessionTitle(sessionRef.current.id.value),
-				});
 			});
 			detachSessionStateListener = sessionRef.current.onStateChange((state) => {
 				if (
