@@ -134,6 +134,8 @@ import {
 	clearInteractiveToolCall,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
+import { createInteractiveHostState } from "./interactive-host-state.js";
+import { executeInteractiveSlashCommand } from "./interactive-local-command-orchestrator.js";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import { createModelCommandHost, type ModelCommandHostOptions } from "./model-command-host.js";
@@ -215,7 +217,29 @@ class InteractiveModeHandler implements ModeHandler {
 	} | null = null;
 	private _resumeBrowserScrollOffset = 0;
 	private _inputLoop: InputLoop | null = null;
-	private _activeLocalCommand: Promise<void> | null = null;
+	private readonly _hostState = createInteractiveHostState({
+		onBusyLocalCommandFailed: (error) => {
+			if (this._turnPresenterState.notice === "compacting") {
+				this.stopTurnNoticeAnimation();
+				this._turnPresenterState = clearInteractiveTurnNotice(this._turnPresenterState);
+			}
+			this._lastError = error instanceof Error ? error.message : String(error);
+			getActiveDebugLogger()?.error("interactive.local_command", "Local command failed", { error });
+			this._sink?.writeError(this._lastError);
+		},
+		onBusyLocalCommandSettled: () => {
+			if (this._activeTurn !== null || this._turnPresenterState.notice === "compacting") {
+				this.renderFooterRegion();
+				return;
+			}
+			const queuedInputBatch = this.drainQueuedInputs();
+			if (queuedInputBatch !== null && this._sessionRef !== null && this._sink !== null) {
+				this.startQueuedContinueTurn(this._sessionRef.current, queuedInputBatch, this._sink);
+				return;
+			}
+			this.fullRedrawInteractiveScreen();
+		},
+	});
 	private _sessionEngine: SessionEngine | null = null;
 	private _sessionRef: { current: SessionFacade } | null = null;
 	private _sink: OutputSink | null = null;
@@ -315,6 +339,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._turnPresenterState = resetInteractiveTurnPresenterState();
 			this._detailPanelState = resetInteractiveDetailPanelState();
 			this._commandSuggestions = [];
+			this._hostState.reset();
 			this._renderedFooterUi = null;
 			this._renderedFooterStartRow = null;
 			this._lastScreenFrame = null;
@@ -721,35 +746,26 @@ class InteractiveModeHandler implements ModeHandler {
 				// Check for slash commands
 				const resolution = registry.resolve(trimmed);
 				if (resolution && resolution.type === "command") {
-					if (this.isInteractionBusy()) {
-						sink.writeError("Session is busy.");
-						line = await inputLoop.nextLine();
-						continue;
-					}
-					const executeCommand = async (): Promise<void> => {
-						await resolution.command.execute?.({
-							args: resolution.args,
-							runtime,
-							session: sessionRef.current,
-							output: sink,
-							host: commandHost,
-						});
-					};
-					try {
-						if (resolution.command.name === "compact") {
-							this.startLocalBusyCommand(executeCommand(), sessionRef, sink);
-						} else {
-							await executeCommand();
-						}
-					} catch (error) {
-						this._lastError = error instanceof Error ? error.message : String(error);
-						getActiveDebugLogger()?.error("interactive.slash_command", "Slash command failed", {
-							command: resolution.command.name,
-							args: resolution.args,
-							error,
-						});
-						sink.writeError(this._lastError);
-					}
+					await executeInteractiveSlashCommand({
+						resolution,
+						runtime,
+						session: sessionRef.current,
+						output: sink,
+						host: commandHost,
+						isInteractionBusy: () => this.isInteractionBusy(),
+						runLocalBusyCommand: (command) => {
+							this._hostState.runLocalBusyCommand(command);
+						},
+						onError: (error) => {
+							this._lastError = error instanceof Error ? error.message : String(error);
+							getActiveDebugLogger()?.error("interactive.slash_command", "Slash command failed", {
+								command: resolution.command.name,
+								args: resolution.args,
+								error,
+							});
+							sink.writeError(this._lastError);
+						},
+					});
 					if (exitRequested) {
 						break;
 					}
@@ -1055,7 +1071,7 @@ class InteractiveModeHandler implements ModeHandler {
 					formatCompactionDetailText(event.summary),
 				);
 				if (
-					this._activeLocalCommand === null &&
+					!this._hostState.hasActiveLocalCommand() &&
 					this._activeTurn === null &&
 					this._sessionRef !== null &&
 					this._sink !== null
@@ -1424,36 +1440,6 @@ class InteractiveModeHandler implements ModeHandler {
 		return drained.batch;
 	}
 
-	private startLocalBusyCommand(
-		command: Promise<void>,
-		sessionRef: { current: SessionFacade },
-		sink: OutputSink,
-	): void {
-		this._activeLocalCommand = command
-			.catch((error: unknown) => {
-				if (this._turnPresenterState.notice === "compacting") {
-					this.stopTurnNoticeAnimation();
-					this._turnPresenterState = clearInteractiveTurnNotice(this._turnPresenterState);
-				}
-				this._lastError = error instanceof Error ? error.message : String(error);
-				getActiveDebugLogger()?.error("interactive.local_command", "Local command failed", { error });
-				sink.writeError(this._lastError);
-			})
-			.finally(() => {
-				this._activeLocalCommand = null;
-				if (this._activeTurn !== null || this._turnPresenterState.notice === "compacting") {
-					this.renderFooterRegion();
-					return;
-				}
-				const queuedInputBatch = this.drainQueuedInputs();
-				if (queuedInputBatch !== null) {
-					this.startQueuedContinueTurn(sessionRef.current, queuedInputBatch, sink);
-					return;
-				}
-				this.fullRedrawInteractiveScreen();
-			});
-	}
-
 	private preserveThinkingNoticeForQueuedBacklog(): void {
 		if (this._activeTurn === null && this._turnPresenterState.notice !== "compacting") {
 			return;
@@ -1467,7 +1453,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private isInteractionBusy(): boolean {
 		return (
 			this._activeTurn !== null ||
-			this._activeLocalCommand !== null ||
+			this._hostState.hasActiveLocalCommand() ||
 			this._turnPresenterState.notice === "compacting"
 		);
 	}
