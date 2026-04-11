@@ -206,4 +206,11 @@ export interface InteractiveTurnPresenterState {
 	readonly lastTurnUsage: UsageSnapshot | null;
 	readonly sessionUsageTotals: UsageSnapshot;
 	readonly queuedInputs: readonly string[];
+	readonly activeToolCalls: readonly InteractiveActiveToolCall[];
+}
+
+export interface InteractiveActiveToolCall {
+	readonly toolCallId: string;
+	readonly toolName: string;
+	readonly parameters: Readonly<Record<string, unknown>>;
 }

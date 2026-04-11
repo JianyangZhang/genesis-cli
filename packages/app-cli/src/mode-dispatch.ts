@@ -85,6 +85,7 @@ import {
 	computeInteractiveFooterSeparatorWidth,
 	currentInteractiveTurnElapsedMs,
 	currentInteractiveTurnUsage,
+	findInteractiveToolParameters,
 	createInteractiveCommandRegistry,
 	createInteractiveConversationState,
 	drainQueuedInteractiveInputs,
@@ -112,6 +113,7 @@ import {
 	openResumeBrowserOverlay,
 	preserveThinkingNoticeForQueuedBacklog,
 	queueInteractiveInput,
+	registerInteractiveToolCall,
 	reduceInteractionState,
 	resetInteractiveDetailPanelState,
 	resetInteractiveOverlayState,
@@ -123,11 +125,13 @@ import {
 	setInteractiveDetailPanelScroll,
 	setInteractiveTurnNotice,
 	showCompactionDetailSummary,
+	summarizeActiveInteractiveToolLabel,
 	summarizeResumeBrowserHit,
 	tickInteractiveTurnNoticeAnimation,
 	toggleInteractiveDetailPanel,
 	toggleResumeBrowserOverlayPreview,
 	updateInteractiveTurnUsage,
+	clearInteractiveToolCall,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
@@ -196,7 +200,6 @@ class InteractiveModeHandler implements ModeHandler {
 	private _detailPanelState: InteractiveDetailPanelState = initialInteractiveDetailPanelState();
 	private _turnPresenterState: InteractiveTurnPresenterState = initialInteractiveTurnPresenterState();
 	private _commandSuggestions: readonly string[] = [];
-	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
 	private _overlayState: InteractiveOverlayState = initialInteractiveOverlayState();
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
 	private _renderedFooterStartRow: number | null = null;
@@ -312,7 +315,6 @@ class InteractiveModeHandler implements ModeHandler {
 			this._turnPresenterState = resetInteractiveTurnPresenterState();
 			this._detailPanelState = resetInteractiveDetailPanelState();
 			this._commandSuggestions = [];
-			this._toolCalls.clear();
 			this._renderedFooterUi = null;
 			this._renderedFooterStartRow = null;
 			this._lastScreenFrame = null;
@@ -342,7 +344,11 @@ class InteractiveModeHandler implements ModeHandler {
 					this._overlayState = clearPendingPermissionRequest(this._overlayState, event.toolCallId);
 				}
 				if (event.type === "tool_started") {
-					this._toolCalls.set(event.toolCallId, { toolName: event.toolName, parameters: event.parameters });
+					this._turnPresenterState = registerInteractiveToolCall(this._turnPresenterState, {
+						toolCallId: event.toolCallId,
+						toolName: event.toolName,
+						parameters: event.parameters,
+					});
 					const targetPath =
 						typeof event.parameters.file_path === "string"
 							? event.parameters.file_path
@@ -354,15 +360,15 @@ class InteractiveModeHandler implements ModeHandler {
 					}
 				}
 				if (event.type === "tool_denied") {
-					this._toolCalls.delete(event.toolCallId);
+					this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
 					this._lastError = `${event.toolName}: ${event.reason}`;
 				}
 				if (event.type === "tool_completed" && event.status === "failure") {
-					this._toolCalls.delete(event.toolCallId);
+					this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
 					this._lastError = `${event.toolName}: ${event.result ?? "failure"}`;
 				}
 				if (event.type === "tool_completed" && event.status === "success") {
-					this._toolCalls.delete(event.toolCallId);
+					this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
 				}
 
 				interactionState = reduceInteractionState(interactionState, event);
@@ -1021,7 +1027,7 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		if (event.category === "tool") {
-			const text = formatInteractiveToolEvent(event, this._toolCalls.get(event.toolCallId)?.parameters);
+			const text = formatInteractiveToolEvent(event, findInteractiveToolParameters(this._turnPresenterState, event.toolCallId));
 			if (text.length > 0) {
 				this.flushAssistantBuffer(false);
 				this.writeTranscriptText(text, true);
@@ -1560,7 +1566,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private buildFooterUi(): InteractiveFooterRenderResult {
-		const activeToolLabel = summarizeActiveToolNotice(this._toolCalls);
+		const activeToolLabel = summarizeActiveInteractiveToolLabel(this._turnPresenterState);
 		const detailPanel = this.currentDetailPanelViewport();
 		const pendingPermission = this.pendingPermissionState();
 		return formatInteractiveFooter({
@@ -2668,24 +2674,6 @@ function summarizeToolParameters(
 	}
 	return "";
 }
-
-function summarizeActiveToolNotice(
-	toolCalls: ReadonlyMap<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>,
-): string | null {
-	if (toolCalls.size === 0) {
-		return null;
-	}
-	const [first] = toolCalls.values();
-	if (!first) {
-		return "Running tools";
-	}
-	const title = formatInteractiveToolTitle(first.toolName, first.parameters).replace(/^⏺\s+/, "");
-	if (toolCalls.size === 1) {
-		return `Running ${title}`;
-	}
-	return `Running ${toolCalls.size} tools`;
-}
-
 
 function detailPanelScrollDeltaForKey(
 	key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc" | "ctrlo",

@@ -1,6 +1,7 @@
 // services/ — Formatting, event-to-output mapping, interaction state.
 export type { InteractionPhase, InteractionState, JsonEnvelope, OutputMode, RpcEnvelope } from "../types/index.js";
 export type {
+	InteractiveActiveToolCall,
 	InteractiveDetailPanelState,
 	InteractiveOverlayState,
 	InteractiveTurnNotice,
@@ -13,19 +14,23 @@ export {
 	addUsageSnapshots,
 	beginInteractiveTurn,
 	beginInteractiveTurnFeedback,
+	clearInteractiveToolCall,
 	clearInteractiveTurnNotice,
 	completeInteractiveTurn,
 	currentInteractiveTurnElapsedMs,
 	currentInteractiveTurnUsage,
 	drainQueuedInteractiveInputs,
 	emptyUsageSnapshot,
+	findInteractiveToolParameters,
 	hasUsageSnapshot,
 	initialInteractiveTurnPresenterState,
 	normalizeUsageSnapshot,
 	preserveThinkingNoticeForQueuedBacklog,
 	queueInteractiveInput,
+	registerInteractiveToolCall,
 	resetInteractiveTurnPresenterState,
 	setInteractiveTurnNotice,
+	summarizeActiveInteractiveToolLabel,
 	tickInteractiveTurnNoticeAnimation,
 	updateInteractiveTurnUsage,
 } from "./interactive-turn-presenter-state.js";

@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
 	beginInteractiveTurn,
 	beginInteractiveTurnFeedback,
+	clearInteractiveToolCall,
 	clearInteractiveTurnNotice,
 	completeInteractiveTurn,
 	currentInteractiveTurnElapsedMs,
 	currentInteractiveTurnUsage,
 	drainQueuedInteractiveInputs,
+	findInteractiveToolParameters,
 	initialInteractiveTurnPresenterState,
 	preserveThinkingNoticeForQueuedBacklog,
 	queueInteractiveInput,
+	registerInteractiveToolCall,
 	setInteractiveTurnNotice,
+	summarizeActiveInteractiveToolLabel,
 	tickInteractiveTurnNoticeAnimation,
 	updateInteractiveTurnUsage,
 } from "../services/interactive-turn-presenter-state.js";
@@ -63,5 +67,26 @@ describe("interactive turn presenter state", () => {
 		const idlePreserved = preserveThinkingNoticeForQueuedBacklog(initialInteractiveTurnPresenterState(), 50);
 		expect(idlePreserved.notice).toBe("thinking");
 		expect(idlePreserved.startedAt).toBe(50);
+	});
+
+	it("tracks active tool status inside presenter state", () => {
+		let state = initialInteractiveTurnPresenterState();
+		state = registerInteractiveToolCall(state, {
+			toolCallId: "call-1",
+			toolName: "read",
+			parameters: { file_path: "/tmp/readme.md" },
+		});
+		expect(summarizeActiveInteractiveToolLabel(state)).toBe("Running Read(readme.md)");
+		expect(findInteractiveToolParameters(state, "call-1")).toEqual({ file_path: "/tmp/readme.md" });
+
+		state = registerInteractiveToolCall(state, {
+			toolCallId: "call-2",
+			toolName: "bash",
+			parameters: { command: "pwd" },
+		});
+		expect(summarizeActiveInteractiveToolLabel(state)).toBe("Running 2 tools");
+
+		state = clearInteractiveToolCall(state, "call-1");
+		expect(summarizeActiveInteractiveToolLabel(state)).toBe("Running Bash(pwd)");
 	});
 });

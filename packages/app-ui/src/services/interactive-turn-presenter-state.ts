@@ -1,8 +1,10 @@
 import type {
+	InteractiveActiveToolCall,
 	InteractiveTurnNotice,
 	InteractiveTurnPresenterState,
 	UsageSnapshot,
 } from "../types/index.js";
+import { basename } from "node:path";
 
 export function emptyUsageSnapshot(): UsageSnapshot {
 	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
@@ -18,6 +20,7 @@ export function initialInteractiveTurnPresenterState(): InteractiveTurnPresenter
 		lastTurnUsage: null,
 		sessionUsageTotals: emptyUsageSnapshot(),
 		queuedInputs: [],
+		activeToolCalls: [],
 	};
 }
 
@@ -204,4 +207,100 @@ export function preserveThinkingNoticeForQueuedBacklog(
 		return beginInteractiveTurnFeedback(current, now);
 	}
 	return current;
+}
+
+export function registerInteractiveToolCall(
+	current: InteractiveTurnPresenterState,
+	toolCall: InteractiveActiveToolCall,
+): InteractiveTurnPresenterState {
+	return {
+		...current,
+		activeToolCalls: [...current.activeToolCalls.filter((item) => item.toolCallId !== toolCall.toolCallId), toolCall],
+	};
+}
+
+export function clearInteractiveToolCall(
+	current: InteractiveTurnPresenterState,
+	toolCallId: string,
+): InteractiveTurnPresenterState {
+	if (!current.activeToolCalls.some((item) => item.toolCallId === toolCallId)) {
+		return current;
+	}
+	return {
+		...current,
+		activeToolCalls: current.activeToolCalls.filter((item) => item.toolCallId !== toolCallId),
+	};
+}
+
+export function findInteractiveToolParameters(
+	current: InteractiveTurnPresenterState,
+	toolCallId: string,
+): Readonly<Record<string, unknown>> | undefined {
+	return current.activeToolCalls.find((item) => item.toolCallId === toolCallId)?.parameters;
+}
+
+export function summarizeActiveInteractiveToolLabel(current: InteractiveTurnPresenterState): string | null {
+	if (current.activeToolCalls.length === 0) {
+		return null;
+	}
+	const [first] = current.activeToolCalls;
+	if (!first) {
+		return "Running tools";
+	}
+	if (current.activeToolCalls.length === 1) {
+		return `Running ${formatInteractiveToolTitle(first.toolName, first.parameters)}`;
+	}
+	return `Running ${current.activeToolCalls.length} tools`;
+}
+
+function formatInteractiveToolTitle(
+	toolName: string,
+	parameters: Readonly<Record<string, unknown>>,
+): string {
+	const displayName = mapInteractiveToolName(toolName);
+	const summary = summarizeInteractiveToolParameters(toolName, parameters);
+	return summary.length > 0 ? `${displayName}(${summary})` : displayName;
+}
+
+function mapInteractiveToolName(toolName: string): string {
+	switch (toolName) {
+		case "bash":
+			return "Bash";
+		case "write":
+			return "Write";
+		case "edit":
+			return "Edit";
+		case "read":
+			return "Read";
+		case "grep":
+			return "Grep";
+		case "find":
+			return "Find";
+		case "ls":
+			return "LS";
+		default:
+			return toolName;
+	}
+}
+
+function summarizeInteractiveToolParameters(
+	toolName: string,
+	parameters: Readonly<Record<string, unknown>>,
+): string {
+	if (toolName === "bash" && typeof parameters.command === "string") {
+		return parameters.command;
+	}
+	const filePath =
+		typeof parameters.file_path === "string"
+			? parameters.file_path
+			: typeof parameters.path === "string"
+				? parameters.path
+				: undefined;
+	if (filePath) {
+		return basename(filePath);
+	}
+	if (toolName === "grep" && typeof parameters.pattern === "string") {
+		return parameters.pattern;
+	}
+	return "";
 }
