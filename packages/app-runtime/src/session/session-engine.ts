@@ -1,0 +1,180 @@
+import type { EventBus } from "../events/event-bus.js";
+import type { SessionClosedEvent } from "../events/runtime-event.js";
+import type { SessionRecoveryData } from "../types/index.js";
+import type { SessionFacade } from "./session-facade.js";
+
+export type SessionTurnMode = "prompt" | "continue";
+
+export interface SessionEngineOptions {
+	readonly titleResolver?: (session: SessionFacade) => string | undefined;
+}
+
+export interface SessionEngine {
+	readonly activeSession: SessionFacade | null;
+	createSession(options?: { readonly makeActive?: boolean }): SessionFacade;
+	recoverSession(
+		data: SessionRecoveryData,
+		options?: { readonly makeActive?: boolean; readonly closeActive?: boolean },
+	): Promise<SessionFacade>;
+	listSessions(): readonly SessionFacade[];
+	getSession(sessionId: string): SessionFacade | null;
+	selectSession(sessionId: string): SessionFacade | null;
+	isBusy(sessionId?: string): boolean;
+	submit(input: string, options?: { readonly mode?: SessionTurnMode; readonly sessionId?: string }): Promise<void>;
+	resolvePermission(
+		callId: string,
+		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
+		options?: { readonly sessionId?: string },
+	): Promise<void>;
+	closeSession(sessionId?: string): Promise<SessionFacade | null>;
+	closeAllSessions(): Promise<void>;
+	dispose(): void;
+}
+
+interface SessionEngineDeps {
+	readonly runtimeEvents: EventBus;
+	readonly createSession: () => SessionFacade;
+	readonly recoverSession: (data: SessionRecoveryData) => SessionFacade;
+	readonly recordClosedRecentSession: (
+		session: SessionFacade,
+		recoveryData: SessionRecoveryData,
+		options?: { readonly title?: string },
+	) => Promise<void>;
+}
+
+export function createSessionEngine(deps: SessionEngineDeps, options: SessionEngineOptions = {}): SessionEngine {
+	const sessions = new Map<string, SessionFacade>();
+	const activeTurns = new Map<string, Promise<void>>();
+	let activeSessionId: string | null = null;
+
+	const unsubscribeClosed = deps.runtimeEvents.on("session_closed", (event) => {
+		const closed = event as SessionClosedEvent;
+		const session = sessions.get(closed.sessionId.value);
+		if (!session) {
+			return;
+		}
+		void deps.recordClosedRecentSession(session, closed.recoveryData, {
+			title: options.titleResolver?.(session),
+		});
+		sessions.delete(closed.sessionId.value);
+		activeTurns.delete(closed.sessionId.value);
+		if (activeSessionId === closed.sessionId.value) {
+			activeSessionId = null;
+		}
+	});
+
+	function registerSession(session: SessionFacade, makeActive = true): SessionFacade {
+		sessions.set(session.id.value, session);
+		if (makeActive) {
+			activeSessionId = session.id.value;
+		}
+		return session;
+	}
+
+	function resolveSession(sessionId?: string): SessionFacade | null {
+		const effectiveSessionId = sessionId ?? activeSessionId;
+		if (!effectiveSessionId) {
+			return null;
+		}
+		return sessions.get(effectiveSessionId) ?? null;
+	}
+
+	return {
+		get activeSession(): SessionFacade | null {
+			return resolveSession();
+		},
+
+		createSession(optionsInput = {}): SessionFacade {
+			const session = deps.createSession();
+			return registerSession(session, optionsInput.makeActive !== false);
+		},
+
+		async recoverSession(
+			data: SessionRecoveryData,
+			optionsInput = {},
+		): Promise<SessionFacade> {
+			if (optionsInput.closeActive !== false && activeSessionId !== null) {
+				await this.closeSession(activeSessionId);
+			}
+			const session = deps.recoverSession(data);
+			return registerSession(session, optionsInput.makeActive !== false);
+		},
+
+		listSessions(): readonly SessionFacade[] {
+			return [...sessions.values()];
+		},
+
+		getSession(sessionId: string): SessionFacade | null {
+			return sessions.get(sessionId) ?? null;
+		},
+
+		selectSession(sessionId: string): SessionFacade | null {
+			const session = sessions.get(sessionId) ?? null;
+			if (session) {
+				activeSessionId = sessionId;
+			}
+			return session;
+		},
+
+		isBusy(sessionId?: string): boolean {
+			const session = resolveSession(sessionId);
+			return session ? activeTurns.has(session.id.value) : false;
+		},
+
+		submit(
+			input: string,
+			optionsInput = {},
+		): Promise<void> {
+			const session = resolveSession(optionsInput.sessionId);
+			if (!session) {
+				return Promise.reject(new Error("No active session"));
+			}
+			if (activeTurns.has(session.id.value)) {
+				return Promise.reject(new Error("Session is already processing a turn"));
+			}
+			const turn =
+				optionsInput.mode === "continue" ? session.continue(input) : session.prompt(input);
+			activeTurns.set(
+				session.id.value,
+				turn.finally(() => {
+					activeTurns.delete(session.id.value);
+				}),
+			);
+			return activeTurns.get(session.id.value)!;
+		},
+
+		resolvePermission(
+			callId: string,
+			decision: "allow" | "allow_for_session" | "allow_once" | "deny",
+			optionsInput = {},
+		): Promise<void> {
+			const session = resolveSession(optionsInput.sessionId);
+			if (!session) {
+				return Promise.reject(new Error("No active session"));
+			}
+			return session.resolvePermission(callId, decision);
+		},
+
+		async closeSession(sessionId?: string): Promise<SessionFacade | null> {
+			const session = resolveSession(sessionId);
+			if (!session) {
+				return null;
+			}
+			await session.close();
+			return session;
+		},
+
+		async closeAllSessions(): Promise<void> {
+			for (const session of [...sessions.values()]) {
+				await session.close();
+			}
+		},
+
+		dispose(): void {
+			unsubscribeClosed();
+			sessions.clear();
+			activeTurns.clear();
+			activeSessionId = null;
+		},
+	};
+}

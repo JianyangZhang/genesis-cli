@@ -6,7 +6,7 @@
  */
 
 import * as readline from "node:readline";
-import type { AppRuntime, SessionFacade } from "@pickle-pee/runtime";
+import type { AppRuntime, SessionEngine, SessionFacade } from "@pickle-pee/runtime";
 import type { RpcEnvelope } from "@pickle-pee/ui";
 import {
 	createRpcError,
@@ -39,9 +39,7 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 	const input = options.input ?? process.stdin;
 	const output = options.output ?? process.stdout;
 	let running = false;
-	const sessions = new Map<string, SessionFacade>();
-	const activePrompts = new Map<string, Promise<void>>();
-	let activeSessionId: string | null = null;
+	let sessionEngine: SessionEngine | null = null;
 	let unsubscribeRuntime: (() => void) | null = null;
 	const eventFilters: {
 		all: boolean;
@@ -59,12 +57,20 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 		return value as Record<string, unknown>;
 	}
 
+	function requireSessionEngine(): SessionEngine {
+		if (sessionEngine === null) {
+			throw new Error("RPC session engine is not initialized");
+		}
+		return sessionEngine;
+	}
+
 	function getSessionFromParams(
 		params: Record<string, unknown> | null,
 	): { session: SessionFacade; sessionId: string } | null {
-		const sid = typeof params?.sessionId === "string" ? params.sessionId : activeSessionId;
+		const engine = requireSessionEngine();
+		const sid = typeof params?.sessionId === "string" ? params.sessionId : engine.activeSession?.id.value ?? null;
 		if (!sid) return null;
-		const session = sessions.get(sid) ?? null;
+		const session = engine.getSession(sid);
 		if (!session) return null;
 		return { session, sessionId: sid };
 	}
@@ -86,9 +92,7 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 
 		switch (req.method) {
 			case RPC_METHODS.SESSION_CREATE: {
-				const created = runtime.createSession();
-				sessions.set(created.id.value, created);
-				activeSessionId = created.id.value;
+				const created = requireSessionEngine().createSession();
 				send(createRpcResponse(id ?? 0, { sessionId: created.id.value, status: "created" }));
 				break;
 			}
@@ -99,11 +103,10 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'sessionId' parameter"));
 					break;
 				}
-				if (!sessions.has(target)) {
+				if (!requireSessionEngine().selectSession(target)) {
 					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, `Session not found: ${target}`));
 					break;
 				}
-				activeSessionId = target;
 				send(createRpcResponse(id ?? 0, { sessionId: target, status: "selected" }));
 				break;
 			}
@@ -114,8 +117,8 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, "No active session"));
 					break;
 				}
-				const { session, sessionId } = resolved;
-				if (activePrompts.has(sessionId)) {
+				const { sessionId } = resolved;
+				if (requireSessionEngine().isBusy(sessionId)) {
 					send(createRpcError(id, RPC_ERRORS.SESSION_BUSY, "Session is already processing a prompt"));
 					break;
 				}
@@ -124,15 +127,11 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'text' parameter"));
 					break;
 				}
-				const runningPrompt = session
-					.prompt(text)
+				void requireSessionEngine()
+					.submit(text, { sessionId, mode: "prompt" })
 					.catch(() => {
 						// Prompt failures are surfaced through session events; keep the RPC loop responsive.
-					})
-					.finally(() => {
-						activePrompts.delete(sessionId);
 					});
-				activePrompts.set(sessionId, runningPrompt);
 				send(createRpcResponse(id ?? 0, { status: "prompt_sent" }));
 				break;
 			}
@@ -155,19 +154,14 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 					send(createRpcError(id, RPC_ERRORS.SESSION_NOT_FOUND, "No active session"));
 					break;
 				}
-				const { session, sessionId } = resolved;
-				await session.close();
-				sessions.delete(sessionId);
-				activePrompts.delete(sessionId);
-				if (activeSessionId === sessionId) {
-					activeSessionId = null;
-				}
+				const { sessionId } = resolved;
+				await requireSessionEngine().closeSession(sessionId);
 				send(createRpcResponse(id ?? 0, { sessionId, status: "closed" }));
 				break;
 			}
 
 			case RPC_METHODS.SESSION_LIST: {
-				const result = [...sessions.values()].map((s) => ({
+				const result = requireSessionEngine().listSessions().map((s) => ({
 					sessionId: s.id.value,
 					status: s.state.status,
 					model: s.state.model,
@@ -226,9 +220,10 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 					send(createRpcError(id, RPC_ERRORS.INVALID_PARAMS, "Missing 'callId' or 'decision'"));
 					break;
 				}
-				await resolved.session.resolvePermission(
+				await requireSessionEngine().resolvePermission(
 					callId,
 					decision as "allow" | "allow_for_session" | "allow_once" | "deny",
+					{ sessionId: resolved.sessionId },
 				);
 				send(createRpcResponse(id ?? 0, { status: "resolved" }));
 				break;
@@ -309,6 +304,7 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 	return {
 		async start(runtime: AppRuntime): Promise<void> {
 			running = true;
+			sessionEngine = runtime.createSessionEngine();
 			const rl = readline.createInterface({ input: input as NodeJS.ReadableStream });
 
 			unsubscribeRuntime?.();
@@ -334,14 +330,11 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 			running = false;
 			unsubscribeRuntime?.();
 			unsubscribeRuntime = null;
-			for (const [sid, s] of sessions) {
-				try {
-					await s.close();
-				} catch {}
-				activePrompts.delete(sid);
+			if (sessionEngine !== null) {
+				await sessionEngine.closeAllSessions();
+				sessionEngine.dispose();
+				sessionEngine = null;
 			}
-			sessions.clear();
-			activeSessionId = null;
 		},
 	};
 }

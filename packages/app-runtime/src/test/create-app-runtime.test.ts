@@ -1704,6 +1704,69 @@ describe("createAppRuntime", () => {
 		expect(session.plan).not.toBeNull();
 	});
 
+	it("creates a host-scoped session engine that drives prompt, continue, and session switching", async () => {
+		const adapters: StubKernelSessionAdapter[] = [];
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => {
+				const adapter = new StubKernelSessionAdapter();
+				adapters.push(adapter);
+				return adapter;
+			},
+		});
+		const engine = runtime.createSessionEngine();
+
+		const first = engine.createSession();
+		await engine.submit("first turn");
+		expect(adapters[0]?.lastInput).toBe("first turn");
+		expect(engine.activeSession?.id.value).toBe(first.id.value);
+
+		await engine.submit("carry on", { mode: "continue" });
+		expect(adapters[0]?.lastInput).toBe("carry on");
+
+		const recovered = await engine.recoverSession(
+			{
+				sessionId: { value: "engine-recovered" },
+				model: stubModel,
+				toolSet: ["read", "edit"],
+				planSummary: null,
+				compactionSummary: null,
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			},
+			{ closeActive: true },
+		);
+		expect(first.state.status).toBe("closed");
+		expect(engine.activeSession?.id.value).toBe(recovered.id.value);
+		expect(engine.listSessions().map((session) => session.id.value)).toEqual(["engine-recovered"]);
+	});
+
+	it("records closed sessions through session engine using the shared runtime authority path", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-close-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/engine-close",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine({
+			titleResolver: () => "Engine Session",
+		});
+		const session = engine.createSession();
+
+		await runtime.recordRecentSessionInput(session, "session engine close path");
+		await engine.closeSession();
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBeTruthy();
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("session engine close path");
+	});
+
 	it("same runtime can drive multiple modes (print + json)", () => {
 		const adapter = new StubKernelSessionAdapter();
 

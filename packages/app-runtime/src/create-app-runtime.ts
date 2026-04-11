@@ -22,6 +22,8 @@ import {
 	recordRecentSession,
 	searchRecentSessions,
 } from "./services/recent-session-catalog.js";
+import type { SessionEngine } from "./session/session-engine.js";
+import { createSessionEngine } from "./session/session-engine.js";
 import { sessionCreated, sessionResumed } from "./session/session-events.js";
 import type { SessionFacade } from "./session/session-facade.js";
 import { SessionFacadeImpl } from "./session/session-facade.js";
@@ -82,6 +84,11 @@ export interface AppRuntime {
 
 	/** Recover a previous session from serialized data. */
 	recoverSession(data: SessionRecoveryData): SessionFacade;
+
+	/** Create a host-scoped session engine on top of the shared session/runtime contracts. */
+	createSessionEngine(options?: {
+		readonly titleResolver?: (session: SessionFacade) => string | undefined;
+	}): SessionEngine;
 
 	/** Global event bus — receives events from all sessions. */
 	readonly events: EventBus;
@@ -390,6 +397,18 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 
 			sessions.add(facade);
 			return facade;
+		},
+
+		createSessionEngine(options = {}): SessionEngine {
+			return createSessionEngine(
+				{
+					runtimeEvents: globalBus,
+					createSession: () => this.createSession(),
+					recoverSession: (data) => this.recoverSession(data),
+					recordClosedRecentSession: this.recordClosedRecentSession,
+				},
+				options,
+			);
 		},
 
 		async shutdown(): Promise<void> {

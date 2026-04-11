@@ -14,7 +14,7 @@ import type {
 	CliMode,
 	CompactionSummary,
 	RuntimeEvent,
-	SessionClosedEvent,
+	SessionEngine,
 	SessionFacade,
 } from "@pickle-pee/runtime";
 import {
@@ -204,6 +204,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _resumeSearchRequestId = 0;
 	private _inputLoop: InputLoop | null = null;
 	private _activeLocalCommand: Promise<void> | null = null;
+	private _sessionEngine: SessionEngine | null = null;
 	private _sessionRef: { current: SessionFacade } | null = null;
 	private _sink: OutputSink | null = null;
 	private _runtime: AppRuntime | null = null;
@@ -220,7 +221,11 @@ class InteractiveModeHandler implements ModeHandler {
 			throw new Error("Interactive mode requires a TTY. Use --mode print|json|rpc instead.");
 		}
 
-		const sessionRef: { current: SessionFacade } = { current: runtime.createSession() };
+		let sessionTitle: string | undefined;
+		const sessionEngine = runtime.createSessionEngine({
+			titleResolver: () => sessionTitle,
+		});
+		const sessionRef: { current: SessionFacade } = { current: sessionEngine.createSession() };
 		const sink: OutputSink = {
 			write: (text) => {
 				this.writeTranscriptText(text, false);
@@ -233,11 +238,11 @@ class InteractiveModeHandler implements ModeHandler {
 			},
 		};
 		this._sessionRef = sessionRef;
+		this._sessionEngine = sessionEngine;
 		this._sink = sink;
 		this._runtime = runtime;
 
 		let interactionState: InteractionState = initialInteractionState();
-		let sessionTitle: string | undefined;
 		let exitRequested = false;
 		let inputLoop: InputLoop | null = null;
 		const terminalCapabilities = detectTerminalCapabilities({
@@ -327,14 +332,6 @@ class InteractiveModeHandler implements ModeHandler {
 			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
-			sessionRef.current.events.on("session_closed", (event) => {
-				try {
-					void runtime.recordClosedRecentSession(sessionRef.current, (event as SessionClosedEvent).recoveryData, {
-						title: sessionTitle,
-					});
-				} catch {}
-			});
-
 			sessionRef.current.events.onAny((event: RuntimeEvent) => {
 				if (event.type === "permission_requested") {
 					this._pendingPermissionDetails = {
@@ -411,6 +408,10 @@ class InteractiveModeHandler implements ModeHandler {
 			getSessionTitle: () => sessionTitle,
 			setSessionTitle: (next) => {
 				sessionTitle = next;
+			},
+			createSession: () => sessionEngine.createSession(),
+			closeCurrentSession: async () => {
+				await sessionEngine.closeSession(sessionRef.current.id.value);
 			},
 			requestExit: () => {
 				exitRequested = true;
@@ -593,9 +594,7 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				const data = directMatch.recoveryData;
 
-				await sessionRef.current.close();
-
-				const recovered = runtime.recoverSession(data);
+				const recovered = await sessionEngine.recoverSession(data, { closeActive: true });
 				switchInteractiveSession(recovered);
 				handler.closeResumeBrowser();
 				for (const line of buildRestoredContextLines(directMatch)) {
@@ -793,7 +792,9 @@ class InteractiveModeHandler implements ModeHandler {
 			process.stdout.write(encodeResetScrollRegion());
 			ttySession.restore();
 			sessionRef.current.events.removeAllListeners();
-			await sessionRef.current.close();
+			await sessionEngine.closeAllSessions();
+			sessionEngine.dispose();
+			this._sessionEngine = null;
 		}
 	}
 
@@ -1370,8 +1371,7 @@ class InteractiveModeHandler implements ModeHandler {
 			selectedHit: summarizeResumeBrowserHit(hit),
 		});
 		this.closeResumeBrowser();
-		await sessionRef.current.close();
-		const recovered = runtime.recoverSession(data);
+		const recovered = await this.requireSessionEngine().recoverSession(data, { closeActive: true });
 		switchInteractiveSession(recovered);
 		for (const line of buildResumeBrowserResumedLines(hit)) {
 			sink.writeLine(line);
@@ -1404,9 +1404,8 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._runtime !== null) {
 			void this._runtime.recordRecentSessionInput(session, input);
 		}
-		const sendTurn =
-			mode === "continue" ? (value: string) => session.continue(value) : (value: string) => session.prompt(value);
-		this._activeTurn = sendTurn(input)
+		this._activeTurn = this.requireSessionEngine()
+			.submit(input, { mode, sessionId: session.id.value })
 			.catch((err: unknown) => {
 				sink.writeError(`Error: ${err}`);
 			})
@@ -1435,6 +1434,13 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				this.fullRedrawInteractiveScreen();
 			});
+	}
+
+	private requireSessionEngine(): SessionEngine {
+		if (this._sessionEngine === null) {
+			throw new Error("Interactive session engine is not initialized");
+		}
+		return this._sessionEngine;
 	}
 
 	private drainQueuedInputs(): string | null {
@@ -2174,7 +2180,8 @@ class InteractiveModeHandler implements ModeHandler {
 
 class PrintModeHandler implements ModeHandler {
 	async start(runtime: AppRuntime): Promise<void> {
-		const session = runtime.createSession();
+		const sessionEngine = runtime.createSessionEngine();
+		const session = sessionEngine.createSession();
 
 		// Subscribe to events and format as text
 		session.events.onAny((event: RuntimeEvent) => {
@@ -2189,11 +2196,12 @@ class PrintModeHandler implements ModeHandler {
 		try {
 			const line = await inputLoop.nextLine();
 			if (line && line.trim().length > 0) {
-				await session.prompt(line.trim());
+				await sessionEngine.submit(line.trim(), { sessionId: session.id.value, mode: "prompt" });
 			}
 		} finally {
 			inputLoop.close();
-			await session.close();
+			await sessionEngine.closeAllSessions();
+			sessionEngine.dispose();
 		}
 	}
 }
@@ -2204,7 +2212,8 @@ class PrintModeHandler implements ModeHandler {
 
 class JsonModeHandler implements ModeHandler {
 	async start(runtime: AppRuntime): Promise<void> {
-		const session = runtime.createSession();
+		const sessionEngine = runtime.createSessionEngine();
+		const session = sessionEngine.createSession();
 
 		// Subscribe to events and emit JSON envelopes
 		session.events.onAny((event: RuntimeEvent) => {
@@ -2223,11 +2232,12 @@ class JsonModeHandler implements ModeHandler {
 		try {
 			const line = await inputLoop.nextLine();
 			if (line && line.trim().length > 0) {
-				await session.prompt(line.trim());
+				await sessionEngine.submit(line.trim(), { sessionId: session.id.value, mode: "prompt" });
 			}
 		} finally {
 			inputLoop.close();
-			await session.close();
+			await sessionEngine.closeAllSessions();
+			sessionEngine.dispose();
 		}
 	}
 }

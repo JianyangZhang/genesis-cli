@@ -73,6 +73,8 @@ export interface InteractiveLocalCommandDeps {
 	readonly getCurrentSession: () => SessionFacade;
 	readonly getSessionTitle: () => string | undefined;
 	readonly setSessionTitle: (title: string) => void;
+	readonly createSession: () => Promise<SessionFacade> | SessionFacade;
+	readonly closeCurrentSession: () => Promise<void>;
 	readonly requestExit: () => void;
 	readonly isInteractionBusy: () => boolean;
 	readonly hasPendingPermissionRequest: () => boolean;
@@ -432,9 +434,9 @@ function createClearCommand(deps: InteractiveLocalCommandDeps): SlashCommand {
 			const currentSession = deps.getCurrentSession();
 			const previousSessionId = currentSession.state.id.value;
 			const previousTitleSuffix = deps.getSessionTitle() ? ` — ${deps.getSessionTitle()}` : "";
-			await currentSession.close();
+			await deps.closeCurrentSession();
 
-			const next = ctx.runtime.createSession();
+			const next = await deps.createSession();
 			deps.replaceSession(next);
 			ctx.output.writeLine(`Started a new session: ${next.state.id.value}`);
 			ctx.output.writeLine(`Previous session saved: ${previousSessionId}${previousTitleSuffix}`);

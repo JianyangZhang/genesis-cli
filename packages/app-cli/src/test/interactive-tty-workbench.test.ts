@@ -892,13 +892,122 @@ class FakeInteractiveSession implements SessionFacade {
 	}
 }
 
+function createFakeSessionEngine(
+	createSession: () => FakeInteractiveSession,
+	recoverSession: (data: SessionRecoveryData) => FakeInteractiveSession,
+	onClosed: (session: FakeInteractiveSession) => Promise<void>,
+): AppRuntime["createSessionEngine"] {
+	return () => {
+		const sessions = new Map<string, FakeInteractiveSession>();
+		let activeSessionId: string | null = null;
+
+		const registerSession = (session: FakeInteractiveSession): FakeInteractiveSession => {
+			sessions.set(session.id.value, session);
+			activeSessionId = session.id.value;
+			return session;
+		};
+
+		const resolveSession = (sessionId?: string): FakeInteractiveSession | null => {
+			const resolvedSessionId = sessionId ?? activeSessionId;
+			if (!resolvedSessionId) {
+				return null;
+			}
+			return sessions.get(resolvedSessionId) ?? null;
+		};
+
+		const engine = {
+			get activeSession(): SessionFacade | null {
+				return resolveSession();
+			},
+			createSession(): SessionFacade {
+				return registerSession(createSession());
+			},
+			async recoverSession(data: SessionRecoveryData, options?: { readonly closeActive?: boolean }): Promise<SessionFacade> {
+				if (options?.closeActive !== false && activeSessionId !== null) {
+					await engine.closeSession(activeSessionId);
+				}
+				return registerSession(recoverSession(data));
+			},
+			listSessions(): readonly SessionFacade[] {
+				return [...sessions.values()];
+			},
+			getSession(sessionId: string): SessionFacade | null {
+				return resolveSession(sessionId);
+			},
+			selectSession(sessionId: string): SessionFacade | null {
+				const session = resolveSession(sessionId);
+				if (session) {
+					activeSessionId = sessionId;
+				}
+				return session;
+			},
+			isBusy(): boolean {
+				return false;
+			},
+			async submit(
+				input: string,
+				options?: { readonly mode?: "prompt" | "continue"; readonly sessionId?: string },
+			): Promise<void> {
+				const session = resolveSession(options?.sessionId);
+				if (!session) {
+					throw new Error("No active session");
+				}
+				if (options?.mode === "continue") {
+					await session.continue(input);
+					return;
+				}
+				await session.prompt(input);
+			},
+			async resolvePermission(
+				callId: string,
+				decision: "allow" | "allow_for_session" | "allow_once" | "deny",
+				options?: { readonly sessionId?: string },
+			): Promise<void> {
+				const session = resolveSession(options?.sessionId);
+				if (!session) {
+					throw new Error("No active session");
+				}
+				await session.resolvePermission(callId, decision);
+			},
+			async closeSession(sessionId?: string): Promise<SessionFacade | null> {
+				const session = resolveSession(sessionId);
+				if (!session) {
+					return null;
+				}
+				await session.close();
+				await onClosed(session);
+				sessions.delete(session.id.value);
+				if (activeSessionId === session.id.value) {
+					activeSessionId = null;
+				}
+				return session;
+			},
+			async closeAllSessions(): Promise<void> {
+				for (const session of [...sessions.values()]) {
+					await session.close();
+					await onClosed(session);
+				}
+				sessions.clear();
+				activeSessionId = null;
+			},
+			dispose(): void {
+				sessions.clear();
+				activeSessionId = null;
+			},
+		};
+
+		return engine;
+	};
+}
+
 function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 	const events = createEventBus();
 	const recentSessions: RecentSessionEntry[] = [];
 	let defaultModel = session.state.model;
-	return {
+	const runtime: AppRuntime = {
 		createSession: () => session,
 		recoverSession: () => session,
+		createSessionEngine: undefined as unknown as AppRuntime["createSessionEngine"],
 		events,
 		governor: createToolGovernor(),
 		planEngine: createPlanEngine(),
@@ -941,6 +1050,14 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 		},
 		shutdown: async () => {},
 	};
+	runtime.createSessionEngine = createFakeSessionEngine(
+		() => session,
+		() => session,
+		async (closedSession) => {
+			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData());
+		},
+	);
+	return runtime;
 }
 
 function createSequencedRuntime(
@@ -952,22 +1069,25 @@ function createSequencedRuntime(
 	let createIndex = 0;
 	const recentSessions = [...initialRecentSessions];
 	let defaultModel = sessions[0]?.state.model ?? { id: "glm-5.1", provider: "zai", displayName: "GLM 5.1" };
-	return {
-		createSession: () => {
-			const next = sessions[createIndex];
-			createIndex += 1;
-			if (!next) {
-				throw new Error("No fake session available for createSession()");
-			}
-			return next;
-		},
-		recoverSession: (data) => {
-			const recovered = recoveredSessions[data.sessionId.value];
-			if (!recovered) {
-				throw new Error(`No fake session available for recoverSession(${data.sessionId.value})`);
-			}
-			return recovered;
-		},
+	const nextCreatedSession = (): FakeInteractiveSession => {
+		const next = sessions[createIndex];
+		createIndex += 1;
+		if (!next) {
+			throw new Error("No fake session available for createSession()");
+		}
+		return next;
+	};
+	const nextRecoveredSession = (data: SessionRecoveryData): FakeInteractiveSession => {
+		const recovered = recoveredSessions[data.sessionId.value];
+		if (!recovered) {
+			throw new Error(`No fake session available for recoverSession(${data.sessionId.value})`);
+		}
+		return recovered;
+	};
+	const runtime: AppRuntime = {
+		createSession: nextCreatedSession,
+		recoverSession: nextRecoveredSession,
+		createSessionEngine: undefined as unknown as AppRuntime["createSessionEngine"],
 		events,
 		governor: createToolGovernor(),
 		planEngine: createPlanEngine(),
@@ -1010,6 +1130,14 @@ function createSequencedRuntime(
 		},
 		shutdown: async () => {},
 	};
+	runtime.createSessionEngine = createFakeSessionEngine(
+		nextCreatedSession,
+		nextRecoveredSession,
+		async (closedSession) => {
+			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData());
+		},
+	);
+	return runtime;
 }
 
 function upsertRecentSessionForTest(recentSessions: RecentSessionEntry[], recoveryData: SessionRecoveryData): void {

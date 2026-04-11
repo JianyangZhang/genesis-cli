@@ -65,6 +65,20 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 	return {
 		createSession: () => session,
 		recoverSession: () => session,
+		createSessionEngine: () => ({
+			activeSession: session,
+			createSession: () => session,
+			recoverSession: async () => session,
+			listSessions: () => [session],
+			getSession: () => session,
+			selectSession: () => session,
+			isBusy: () => false,
+			submit: async () => {},
+			resolvePermission: async () => {},
+			closeSession: async () => session,
+			closeAllSessions: async () => {},
+			dispose: () => {},
+		}),
 		events: {} as AppRuntime["events"],
 		governor: {
 			catalog: {
