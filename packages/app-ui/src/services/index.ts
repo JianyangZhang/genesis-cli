@@ -3,6 +3,7 @@ export type { InteractionPhase, InteractionState, JsonEnvelope, OutputMode, RpcE
 export type {
 	InteractiveActiveToolCall,
 	InteractiveDetailPanelState,
+	InteractiveInputAssistState,
 	InteractiveOverlayState,
 	InteractiveTurnNotice,
 	InteractiveTurnPresenterState,
@@ -10,6 +11,15 @@ export type {
 	PendingPermissionState,
 	UsageSnapshot,
 } from "../types/index.js";
+export {
+	acceptFirstSlashSuggestion,
+	clearInteractiveInputAssistState,
+	computeSlashSuggestions,
+	formatSlashSuggestionHint,
+	initialInteractiveInputAssistState,
+	resetInteractiveInputAssistState,
+	updateSlashCommandSuggestions,
+} from "./interactive-input-assist-state.js";
 export {
 	addUsageSnapshots,
 	beginInteractiveTurn,

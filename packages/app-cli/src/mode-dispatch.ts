@@ -59,6 +59,7 @@ import {
 import type {
 	InteractionState,
 	InteractiveDetailPanelState,
+	InteractiveInputAssistState,
 	InteractiveOverlayState,
 	InteractiveTurnPresenterState,
 	OutputSink,
@@ -66,6 +67,7 @@ import type {
 	UsageSnapshot,
 } from "@pickle-pee/ui";
 import {
+	acceptFirstSlashSuggestion,
 	beginInteractiveTurn,
 	beginInteractiveTurnFeedback,
 	appendThinkingDetailText,
@@ -76,6 +78,7 @@ import {
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
+	clearInteractiveInputAssistState,
 	clearPendingPermissionRequest,
 	clearInteractiveTurnNotice,
 	collapseInteractiveDetailPanel,
@@ -85,7 +88,9 @@ import {
 	computeInteractiveFooterSeparatorWidth,
 	currentInteractiveTurnElapsedMs,
 	currentInteractiveTurnUsage,
+	formatSlashSuggestionHint,
 	findInteractiveToolParameters,
+	initialInteractiveInputAssistState,
 	createInteractiveCommandRegistry,
 	createInteractiveConversationState,
 	drainQueuedInteractiveInputs,
@@ -116,6 +121,7 @@ import {
 	registerInteractiveToolCall,
 	reduceInteractionState,
 	resetInteractiveDetailPanelState,
+	resetInteractiveInputAssistState,
 	resetInteractiveOverlayState,
 	resetInteractiveTurnPresenterState,
 	resolveRecentSessionDirectSelection,
@@ -131,6 +137,7 @@ import {
 	toggleInteractiveDetailPanel,
 	toggleResumeBrowserOverlayPreview,
 	updateInteractiveTurnUsage,
+	updateSlashCommandSuggestions,
 	clearInteractiveToolCall,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
@@ -200,8 +207,8 @@ class InteractiveModeHandler implements ModeHandler {
 	private readonly _conversation = createInteractiveConversationState();
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
 	private _detailPanelState: InteractiveDetailPanelState = initialInteractiveDetailPanelState();
+	private _inputAssistState: InteractiveInputAssistState = initialInteractiveInputAssistState();
 	private _turnPresenterState: InteractiveTurnPresenterState = initialInteractiveTurnPresenterState();
-	private _commandSuggestions: readonly string[] = [];
 	private _overlayState: InteractiveOverlayState = initialInteractiveOverlayState();
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
 	private _renderedFooterStartRow: number | null = null;
@@ -338,7 +345,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.stopTurnNoticeAnimation();
 			this._turnPresenterState = resetInteractiveTurnPresenterState();
 			this._detailPanelState = resetInteractiveDetailPanelState();
-			this._commandSuggestions = [];
+			this._inputAssistState = resetInteractiveInputAssistState();
 			this._hostState.reset();
 			this._renderedFooterUi = null;
 			this._renderedFooterStartRow = null;
@@ -638,11 +645,11 @@ class InteractiveModeHandler implements ModeHandler {
 						this.renderPromptLine();
 						return;
 					}
-					this._commandSuggestions = [];
+					this._inputAssistState = clearInteractiveInputAssistState(this._inputAssistState);
 					void this.refreshResumeBrowserResults(runtime, state.buffer);
 					return;
 				}
-				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listPublic());
+				this._inputAssistState = updateSlashCommandSuggestions(this._inputAssistState, state.buffer, registry.listPublic());
 				this.renderPromptLine();
 			},
 			onTabComplete: (state) => {
@@ -652,10 +659,14 @@ class InteractiveModeHandler implements ModeHandler {
 				if (this.pendingPermissionState() !== null) {
 					return null;
 				}
-				const nextState = acceptFirstSlashSuggestion(state, this._commandSuggestions);
+				const nextState = acceptFirstSlashSuggestion(state, this._inputAssistState.commandSuggestions);
 				if (nextState) {
 					this._inputState = nextState;
-					this._commandSuggestions = computeSlashSuggestions(nextState.buffer, registry.listPublic());
+					this._inputAssistState = updateSlashCommandSuggestions(
+						this._inputAssistState,
+						nextState.buffer,
+						registry.listPublic(),
+					);
 					this.renderPromptLine();
 				}
 				return nextState;
@@ -813,7 +824,7 @@ class InteractiveModeHandler implements ModeHandler {
 		this._startupCheckScreenActive = true;
 		this._lastError = null;
 		this._inputState = { buffer: "", cursor: 0 };
-		this._commandSuggestions = [];
+		this._inputAssistState = resetInteractiveInputAssistState();
 		this._welcomeLines = buildWelcomeLines({
 			terminalWidth: process.stdout.columns ?? 80,
 			version: readInteractiveCliPackageVersion(),
@@ -1226,7 +1237,7 @@ class InteractiveModeHandler implements ModeHandler {
 		this._transcriptScrollOffset = 0;
 		this._resumeBrowserScrollOffset = 0;
 		this.clearMouseSelection(false);
-		this._commandSuggestions = [];
+		this._inputAssistState = resetInteractiveInputAssistState();
 		getActiveDebugLogger()?.debug("resume.browser.open", "Opened resume browser", {
 			initialQuery,
 			transcriptScrollOffset: this._transcriptScrollOffset,
@@ -1259,7 +1270,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._inputLoop.setState({ buffer: "", cursor: 0 });
 		} else {
 			this._inputState = { buffer: "", cursor: 0 };
-			this._commandSuggestions = [];
+			this._inputAssistState = resetInteractiveInputAssistState();
 		}
 		this.rerenderInteractiveRegions();
 	}
@@ -1560,7 +1571,7 @@ class InteractiveModeHandler implements ModeHandler {
 			prompt: this.currentPrompt(),
 			buffer: this._inputState.buffer,
 			cursor: this._inputState.cursor,
-			suggestions: this._commandSuggestions,
+			suggestions: this._inputAssistState.commandSuggestions,
 			turnNotice: activeToolLabel !== null ? "tool" : this._turnPresenterState.notice,
 			turnNoticeAnimationFrame: this._turnPresenterState.noticeAnimationFrame,
 			elapsedMs: this.currentTurnElapsedMs(),
@@ -2806,50 +2817,6 @@ function formatMiniDiffPreview(oldString: string, newString: string): string {
 	lines.push(...removed.map((line) => `  - ${truncatePreviewLine(line)}`));
 	lines.push(...added.map((line) => `  + ${truncatePreviewLine(line)}`));
 	return lines.join("\n");
-}
-
-export function computeSlashSuggestions(input: string, commands: readonly SlashCommand[]): readonly string[] {
-	const trimmed = input.trimStart();
-	if (!trimmed.startsWith("/")) return [];
-	const body = trimmed.slice(1);
-	if (body.includes(" ")) return [];
-	const query = body.toLowerCase();
-	return commands
-		.map((command) => command.name)
-		.filter((name) => query.length === 0 || name.startsWith(query))
-		.sort((a, b) => a.localeCompare(b))
-		.slice(0, 6);
-}
-
-export function formatSlashSuggestionHint(suggestions: readonly string[], remainingWidth: number): string {
-	if (suggestions.length === 0 || remainingWidth < 6) return "";
-	const DIM = "\x1b[2m";
-	const RESET = "\x1b[0m";
-	let hint = "";
-	for (const name of suggestions) {
-		const segment = `${hint.length === 0 ? "  " : "  "}/${name}`;
-		if (measureTerminalDisplayWidth(hint + segment) > remainingWidth) {
-			break;
-		}
-		hint += segment;
-	}
-	return hint.length > 0 ? `${DIM}${hint}${RESET}` : "";
-}
-
-export function acceptFirstSlashSuggestion(
-	state: { buffer: string; cursor: number },
-	suggestions: readonly string[],
-): { buffer: string; cursor: number } | null {
-	if (suggestions.length === 0) return null;
-	if (state.cursor !== state.buffer.length) return null;
-	const trimmed = state.buffer.trimStart();
-	if (!trimmed.startsWith("/")) return null;
-	if (trimmed.slice(1).includes(" ")) return null;
-	const nextBuffer = `/${suggestions[0]} `;
-	return {
-		buffer: nextBuffer,
-		cursor: nextBuffer.length,
-	};
 }
 
 function truncatePlainTerminalText(text: string, width: number): string {

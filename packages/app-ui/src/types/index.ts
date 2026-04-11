@@ -214,3 +214,7 @@ export interface InteractiveActiveToolCall {
 	readonly toolName: string;
 	readonly parameters: Readonly<Record<string, unknown>>;
 }
+
+export interface InteractiveInputAssistState {
+	readonly commandSuggestions: readonly string[];
+}
