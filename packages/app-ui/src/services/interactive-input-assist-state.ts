@@ -75,5 +75,20 @@ export function acceptFirstSlashSuggestion(
 }
 
 function segmentDisplayWidth(text: string): number {
-	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").length;
+	let width = 0;
+	for (let index = 0; index < text.length; index += 1) {
+		if (text.charCodeAt(index) === 27 && text[index + 1] === "[") {
+			index += 2;
+			while (index < text.length) {
+				const code = text.charCodeAt(index);
+				if (code >= 0x40 && code <= 0x7e) {
+					break;
+				}
+				index += 1;
+			}
+			continue;
+		}
+		width += 1;
+	}
+	return width;
 }

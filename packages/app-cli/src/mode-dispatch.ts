@@ -12,7 +12,6 @@ import { basename, join, resolve } from "node:path";
 import type {
 	AppRuntime,
 	CliMode,
-	CompactionSummary,
 	RuntimeEvent,
 	SessionEngine,
 	SessionFacade,
@@ -63,7 +62,6 @@ import type {
 	InteractiveOverlayState,
 	InteractiveTurnPresenterState,
 	OutputSink,
-	SlashCommand,
 	UsageSnapshot,
 } from "@pickle-pee/ui";
 import {
@@ -94,7 +92,6 @@ import {
 	createInteractiveCommandRegistry,
 	createInteractiveConversationState,
 	drainQueuedInteractiveInputs,
-	emptyUsageSnapshot,
 	eventToJsonEnvelope,
 	formatCompactionDetailText,
 	formatEventAsText,
@@ -711,8 +708,6 @@ class InteractiveModeHandler implements ModeHandler {
 				if (this.resumeBrowserState() !== null) {
 					const handled = await this.handleResumeBrowserSubmit(
 						line,
-						runtime,
-						sessionRef,
 						sink,
 						switchInteractiveSession,
 					);
@@ -1346,8 +1341,6 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private async handleResumeBrowserSubmit(
 		line: string,
-		runtime: AppRuntime,
-		sessionRef: { current: SessionFacade },
 		sink: OutputSink,
 		switchInteractiveSession: (nextSession: SessionFacade) => void,
 	): Promise<boolean> {
