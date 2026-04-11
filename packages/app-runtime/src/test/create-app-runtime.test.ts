@@ -815,6 +815,70 @@ describe("createAppRuntime", () => {
 		expect(results[0]?.matchSource).toBe("title");
 	});
 
+	it("debounces scheduled recent-session projection events inside runtime authority", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-debounced-events-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+
+		runtime.scheduleRecentSessionEvent(
+			session,
+			{
+				id: "evt-compaction-first",
+				category: "compaction",
+				type: "compaction_completed",
+				timestamp: Date.now(),
+				sessionId: session.id,
+				summary: {
+					compressedAt: Date.now(),
+					originalMessageCount: 10,
+					retainedMessageCount: 4,
+					estimatedTokensSaved: 128,
+					compactedSummary: "first compact summary",
+				},
+			},
+			{ title: "First title" },
+		);
+		runtime.scheduleRecentSessionEvent(
+			session,
+			{
+				id: "evt-compaction-second",
+				category: "compaction",
+				type: "compaction_completed",
+				timestamp: Date.now(),
+				sessionId: session.id,
+				summary: {
+					compressedAt: Date.now(),
+					originalMessageCount: 12,
+					retainedMessageCount: 5,
+					estimatedTokensSaved: 256,
+					compactedSummary: "second compact summary",
+				},
+			},
+			{ title: "Second title" },
+		);
+
+		for (let attempt = 0; attempt < 40; attempt += 1) {
+			const recent = await runtime.listRecentSessions();
+			if (recent[0]?.title === "Second title") {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.title).toBe("Second title");
+		expect(recent[0]?.recoveryData.metadata?.summary).toContain("second compact summary");
+	});
+
 	it("keeps resume/compact/recent-session behavior consistent across resumed turns", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-resume-compact-"));
 		const historyDir = join(agentDir, "history");

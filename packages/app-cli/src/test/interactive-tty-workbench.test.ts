@@ -1052,6 +1052,9 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 			});
 		},
 		recordRecentSessionEvent: async () => {},
+		scheduleRecentSessionEvent: (liveSession, event, options) => {
+			void runtime.recordRecentSessionEvent(liveSession, event, options);
+		},
 		listRecentSessions: async () => recentSessions,
 		searchRecentSessions: async (query) => searchRecentSessionsForTest(recentSessions, query),
 		pruneRecentSessions: async (maxEntries = 10) => {
@@ -1132,6 +1135,9 @@ function createSequencedRuntime(
 			});
 		},
 		recordRecentSessionEvent: async () => {},
+		scheduleRecentSessionEvent: (liveSession, event, options) => {
+			void runtime.recordRecentSessionEvent(liveSession, event, options);
+		},
 		listRecentSessions: async () => recentSessions,
 		searchRecentSessions: async (query) => searchRecentSessionsForTest(recentSessions, query),
 		pruneRecentSessions: async (maxEntries = 10) => {

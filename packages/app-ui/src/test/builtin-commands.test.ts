@@ -98,6 +98,7 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 		recordRecentSessionInput: async () => {},
 		recordRecentSessionAssistantText: async () => {},
 		recordRecentSessionEvent: async () => {},
+		scheduleRecentSessionEvent: () => {},
 		listRecentSessions: async () => [],
 		searchRecentSessions: async () => [],
 		pruneRecentSessions: async () => ({ before: 0, after: 0, removed: 0 }),

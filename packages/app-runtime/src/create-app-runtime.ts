@@ -123,6 +123,13 @@ export interface AppRuntime {
 		options?: { readonly title?: string },
 	): Promise<void>;
 
+	/** Schedule a debounced event-derived session history update owned by the runtime authority. */
+	scheduleRecentSessionEvent(
+		session: SessionFacade,
+		event: RuntimeEvent,
+		options?: { readonly title?: string },
+	): void;
+
 	/** List recent recoverable sessions for resume flows. */
 	listRecentSessions(): Promise<readonly RecentSessionEntry[]>;
 
@@ -233,6 +240,14 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 			options?: { readonly title?: string },
 		): Promise<void> {
 			return recentSessionAuthority.recordEvent(session, event, options);
+		},
+
+		scheduleRecentSessionEvent(
+			session: SessionFacade,
+			event: RuntimeEvent,
+			options?: { readonly title?: string },
+		): void {
+			recentSessionAuthority.scheduleEvent(session, event, options);
 		},
 
 		listRecentSessions(): Promise<readonly RecentSessionEntry[]> {

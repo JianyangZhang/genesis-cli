@@ -24,6 +24,7 @@ export interface RecentSessionAuthority {
 	recordInput(session: SessionFacade, input: string, options?: { readonly title?: string }): Promise<void>;
 	recordAssistantText(session: SessionFacade, text: string, options?: { readonly title?: string }): Promise<void>;
 	recordEvent(session: SessionFacade, event: RuntimeEvent, options?: { readonly title?: string }): Promise<void>;
+	scheduleEvent(session: SessionFacade, event: RuntimeEvent, options?: { readonly title?: string }): void;
 	listSessions(): Promise<readonly RecentSessionEntry[]>;
 	searchSessions(query: string): Promise<readonly RecentSessionSearchHit[]>;
 	pruneSessions(maxEntries?: number): Promise<{ readonly before: number; readonly after: number; readonly removed: number }>;
@@ -34,6 +35,7 @@ export interface RecentSessionAuthority {
 export function createRecentSessionAuthority(historyDir: string | undefined): RecentSessionAuthority {
 	let writeChain: Promise<void> = Promise.resolve();
 	const overlays = new Map<string, SessionRecoveryMetadata>();
+	const pendingEventTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	function enqueue(task: () => Promise<void>): Promise<void> {
 		const run = writeChain.then(task, task);
@@ -63,12 +65,21 @@ export function createRecentSessionAuthority(historyDir: string | undefined): Re
 		overlays.delete(session.id.value);
 	}
 
+	function clearPendingEventTimer(session: SessionFacade): void {
+		const timer = pendingEventTimers.get(session.id.value);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+			pendingEventTimers.delete(session.id.value);
+		}
+	}
+
 	return {
 		recordSession(recoveryData, options): Promise<void> {
 			return enqueue(() => recordRecentSession(historyDir, recoveryData, options));
 		},
 
 		recordClosedSession(session, recoveryData, options): Promise<void> {
+			clearPendingEventTimer(session);
 			return enqueue(async () => {
 				const merged = mergeRecoveryDataWithOverlay(withRecentSessionContext(session, recoveryData), getOverlay(session));
 				await recordRecentSession(historyDir, merged, {
@@ -112,6 +123,19 @@ export function createRecentSessionAuthority(historyDir: string | undefined): Re
 			});
 		},
 
+		scheduleEvent(session, event, options): void {
+			if (!shouldScheduleRecentSessionProjectionEvent(event)) {
+				return;
+			}
+			clearPendingEventTimer(session);
+			const timer = setTimeout(() => {
+				pendingEventTimers.delete(session.id.value);
+				void this.recordEvent(session, event, options);
+			}, 120);
+			timer.unref?.();
+			pendingEventTimers.set(session.id.value, timer);
+		},
+
 		listSessions(): Promise<readonly RecentSessionEntry[]> {
 			return listRecentSessions(historyDir);
 		},
@@ -125,13 +149,29 @@ export function createRecentSessionAuthority(historyDir: string | undefined): Re
 		},
 
 		clearSessionOverlay(session: SessionFacade): void {
+			clearPendingEventTimer(session);
 			clearOverlay(session);
 		},
 
 		dispose(): void {
+			for (const timer of pendingEventTimers.values()) {
+				clearTimeout(timer);
+			}
+			pendingEventTimers.clear();
 			overlays.clear();
 		},
 	};
+}
+
+function shouldScheduleRecentSessionProjectionEvent(event: RuntimeEvent): boolean {
+	switch (event.category) {
+		case "compaction":
+			return event.type === "compaction_completed";
+		case "session":
+			return event.type === "session_resumed";
+		default:
+			return false;
+	}
 }
 
 function withRecentSessionContext(session: SessionFacade, recoveryData: SessionRecoveryData): SessionRecoveryData {

@@ -251,7 +251,6 @@ class InteractiveModeHandler implements ModeHandler {
 	private _sessionRef: { current: SessionFacade } | null = null;
 	private _sink: OutputSink | null = null;
 	private _runtime: AppRuntime | null = null;
-	private _recentSessionPersistTimer: ReturnType<typeof setTimeout> | null = null;
 	private _startupCheckScreenActive = false;
 	private _lastRenderDebugKey: string | null = null;
 	private _lastRenderDebugLoggedAt = 0;
@@ -349,10 +348,6 @@ class InteractiveModeHandler implements ModeHandler {
 			this._lastScreenFrame = null;
 			this._transcriptScrollOffset = 0;
 			this._resumeBrowserScrollOffset = 0;
-			if (this._recentSessionPersistTimer !== null) {
-				clearTimeout(this._recentSessionPersistTimer);
-				this._recentSessionPersistTimer = null;
-			}
 			this._sessionRef = sessionRef;
 			this._sink = sink;
 			this._runtime = runtime;
@@ -401,14 +396,9 @@ class InteractiveModeHandler implements ModeHandler {
 
 				interactionState = reduceInteractionState(interactionState, event);
 				this.handleTranscriptEvent(event);
-				if (shouldPersistRecentSessionForEvent(event)) {
-					this.scheduleRecentSessionPersist(
-						runtime,
-						sessionRef.current,
-						event,
-						sessionEngine.getSessionTitle(sessionRef.current.id.value),
-					);
-				}
+				runtime.scheduleRecentSessionEvent(sessionRef.current, event, {
+					title: sessionEngine.getSessionTitle(sessionRef.current.id.value),
+				});
 			});
 			detachSessionStateListener = sessionRef.current.onStateChange((state) => {
 				if (
@@ -1468,48 +1458,6 @@ class InteractiveModeHandler implements ModeHandler {
 			this._hostState.hasActiveLocalCommand() ||
 			this._turnPresenterState.notice === "compacting"
 		);
-	}
-
-	private scheduleRecentSessionPersist(
-		runtime: AppRuntime,
-		session: SessionFacade,
-		event: RuntimeEvent,
-		title?: string,
-	): void {
-		if (this._recentSessionPersistTimer !== null) {
-			clearTimeout(this._recentSessionPersistTimer);
-		}
-		this._recentSessionPersistTimer = setTimeout(() => {
-			this._recentSessionPersistTimer = null;
-			void this.enqueueRecentSessionPersist(runtime, session, event, title);
-		}, 120);
-	}
-
-	private async enqueueRecentSessionPersist(
-		runtime: AppRuntime,
-		session: SessionFacade,
-		event: RuntimeEvent,
-		title?: string,
-	): Promise<void> {
-		try {
-			await runtime.recordRecentSessionEvent(session, event, { title });
-			getActiveDebugLogger()?.debug("resume.history.persist", "Persisted runtime-owned session history update", {
-				sessionId: session.id.value,
-				category: event.category,
-				type: event.type,
-			});
-		} catch (error) {
-			getActiveDebugLogger()?.error(
-				"resume.history.persist",
-				"Failed to persist runtime-owned session history update",
-				{
-					error,
-					sessionId: session.id.value,
-					category: event.category,
-					type: event.type,
-				},
-			);
-		}
 	}
 
 	private ensureResumeBrowserSelectionVisible(): void {
@@ -2708,17 +2656,6 @@ function transcriptScrollDeltaForKey(
 			return -3;
 		default:
 			return 0;
-	}
-}
-
-function shouldPersistRecentSessionForEvent(event: RuntimeEvent): boolean {
-	switch (event.category) {
-		case "compaction":
-			return event.type === "compaction_completed";
-		case "session":
-			return event.type === "session_resumed";
-		default:
-			return false;
 	}
 }
 
