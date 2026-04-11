@@ -264,10 +264,7 @@ class InteractiveModeHandler implements ModeHandler {
 			throw new Error("Interactive mode requires a TTY. Use --mode print|json|rpc instead.");
 		}
 
-		let sessionTitle: string | undefined;
-		const sessionEngine = runtime.createSessionEngine({
-			titleResolver: () => sessionTitle,
-		});
+		const sessionEngine = runtime.createSessionEngine();
 		const sessionRef: { current: SessionFacade } = { current: sessionEngine.createSession() };
 		const sink: OutputSink = {
 			write: (text) => {
@@ -359,7 +356,6 @@ class InteractiveModeHandler implements ModeHandler {
 			this._sessionRef = sessionRef;
 			this._sink = sink;
 			this._runtime = runtime;
-			sessionTitle = undefined;
 			interactionState = initialInteractionState();
 
 			sessionRef.current.events.onAny((event: RuntimeEvent) => {
@@ -406,7 +402,12 @@ class InteractiveModeHandler implements ModeHandler {
 				interactionState = reduceInteractionState(interactionState, event);
 				this.handleTranscriptEvent(event);
 				if (shouldPersistRecentSessionForEvent(event)) {
-					this.scheduleRecentSessionPersist(runtime, sessionRef.current, event, sessionTitle);
+					this.scheduleRecentSessionPersist(
+						runtime,
+						sessionRef.current,
+						event,
+						sessionEngine.getSessionTitle(sessionRef.current.id.value),
+					);
 				}
 			});
 			detachSessionStateListener = sessionRef.current.onStateChange((state) => {
@@ -429,9 +430,9 @@ class InteractiveModeHandler implements ModeHandler {
 
 		const registry = createInteractiveCommandRegistry({
 			getCurrentSession: () => sessionRef.current,
-			getSessionTitle: () => sessionTitle,
+			getSessionTitle: () => sessionEngine.getSessionTitle(sessionRef.current.id.value),
 			setSessionTitle: (next) => {
-				sessionTitle = next;
+				sessionEngine.setSessionTitle(next, { sessionId: sessionRef.current.id.value });
 			},
 			createSession: () => sessionEngine.createSession(),
 			closeCurrentSession: async () => {

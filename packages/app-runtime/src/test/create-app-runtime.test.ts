@@ -1767,6 +1767,31 @@ describe("createAppRuntime", () => {
 		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("session engine close path");
 	});
 
+	it("prefers session-engine owned titles over cli-local fallback when closing sessions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-title-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/engine-title",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine({
+			titleResolver: () => "Fallback Title",
+		});
+		const session = engine.createSession();
+		engine.setSessionTitle("Engine Owned Title");
+
+		await runtime.recordRecentSessionInput(session, "session title owned by engine");
+		await engine.closeSession();
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Engine Owned Title");
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("session title owned by engine");
+	});
+
 	it("same runtime can drive multiple modes (print + json)", () => {
 		const adapter = new StubKernelSessionAdapter();
 

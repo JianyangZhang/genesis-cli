@@ -71,6 +71,8 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 			recoverSession: async () => session,
 			listSessions: () => [session],
 			getSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
 			selectSession: () => session,
 			isBusy: () => false,
 			submit: async () => {},

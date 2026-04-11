@@ -18,6 +18,8 @@ export interface SessionEngine {
 	): Promise<SessionFacade>;
 	listSessions(): readonly SessionFacade[];
 	getSession(sessionId: string): SessionFacade | null;
+	getSessionTitle(sessionId?: string): string | undefined;
+	setSessionTitle(title: string, options?: { readonly sessionId?: string }): void;
 	selectSession(sessionId: string): SessionFacade | null;
 	isBusy(sessionId?: string): boolean;
 	submit(input: string, options?: { readonly mode?: SessionTurnMode; readonly sessionId?: string }): Promise<void>;
@@ -45,6 +47,7 @@ interface SessionEngineDeps {
 export function createSessionEngine(deps: SessionEngineDeps, options: SessionEngineOptions = {}): SessionEngine {
 	const sessions = new Map<string, SessionFacade>();
 	const activeTurns = new Map<string, Promise<void>>();
+	const sessionTitles = new Map<string, string>();
 	let activeSessionId: string | null = null;
 
 	const unsubscribeClosed = deps.runtimeEvents.on("session_closed", (event) => {
@@ -54,10 +57,11 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			return;
 		}
 		void deps.recordClosedRecentSession(session, closed.recoveryData, {
-			title: options.titleResolver?.(session),
+			title: sessionTitles.get(session.id.value) ?? options.titleResolver?.(session),
 		});
 		sessions.delete(closed.sessionId.value);
 		activeTurns.delete(closed.sessionId.value);
+		sessionTitles.delete(closed.sessionId.value);
 		if (activeSessionId === closed.sessionId.value) {
 			activeSessionId = null;
 		}
@@ -106,6 +110,19 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 
 		getSession(sessionId: string): SessionFacade | null {
 			return sessions.get(sessionId) ?? null;
+		},
+
+		getSessionTitle(sessionId?: string): string | undefined {
+			const session = resolveSession(sessionId);
+			return session ? sessionTitles.get(session.id.value) : undefined;
+		},
+
+		setSessionTitle(title: string, optionsInput = {}): void {
+			const session = resolveSession(optionsInput.sessionId);
+			if (!session) {
+				throw new Error("No active session");
+			}
+			sessionTitles.set(session.id.value, title);
 		},
 
 		selectSession(sessionId: string): SessionFacade | null {
@@ -174,6 +191,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			unsubscribeClosed();
 			sessions.clear();
 			activeTurns.clear();
+			sessionTitles.clear();
 			activeSessionId = null;
 		},
 	};

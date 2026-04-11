@@ -895,10 +895,11 @@ class FakeInteractiveSession implements SessionFacade {
 function createFakeSessionEngine(
 	createSession: () => FakeInteractiveSession,
 	recoverSession: (data: SessionRecoveryData) => FakeInteractiveSession,
-	onClosed: (session: FakeInteractiveSession) => Promise<void>,
+	onClosed: (session: FakeInteractiveSession, title?: string) => Promise<void>,
 ): AppRuntime["createSessionEngine"] {
 	return () => {
 		const sessions = new Map<string, FakeInteractiveSession>();
+		const titles = new Map<string, string>();
 		let activeSessionId: string | null = null;
 
 		const registerSession = (session: FakeInteractiveSession): FakeInteractiveSession => {
@@ -933,6 +934,17 @@ function createFakeSessionEngine(
 			},
 			getSession(sessionId: string): SessionFacade | null {
 				return resolveSession(sessionId);
+			},
+			getSessionTitle(sessionId?: string): string | undefined {
+				const session = resolveSession(sessionId);
+				return session ? titles.get(session.id.value) : undefined;
+			},
+			setSessionTitle(title: string, options?: { readonly sessionId?: string }): void {
+				const session = resolveSession(options?.sessionId);
+				if (!session) {
+					throw new Error("No active session");
+				}
+				titles.set(session.id.value, title);
 			},
 			selectSession(sessionId: string): SessionFacade | null {
 				const session = resolveSession(sessionId);
@@ -975,8 +987,9 @@ function createFakeSessionEngine(
 					return null;
 				}
 				await session.close();
-				await onClosed(session);
+				await onClosed(session, titles.get(session.id.value));
 				sessions.delete(session.id.value);
+				titles.delete(session.id.value);
 				if (activeSessionId === session.id.value) {
 					activeSessionId = null;
 				}
@@ -985,13 +998,15 @@ function createFakeSessionEngine(
 			async closeAllSessions(): Promise<void> {
 				for (const session of [...sessions.values()]) {
 					await session.close();
-					await onClosed(session);
+					await onClosed(session, titles.get(session.id.value));
 				}
 				sessions.clear();
+				titles.clear();
 				activeSessionId = null;
 			},
 			dispose(): void {
 				sessions.clear();
+				titles.clear();
 				activeSessionId = null;
 			},
 		};
@@ -1053,8 +1068,8 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 	runtime.createSessionEngine = createFakeSessionEngine(
 		() => session,
 		() => session,
-		async (closedSession) => {
-			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData());
+		async (closedSession, title) => {
+			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData(), { title });
 		},
 	);
 	return runtime;
@@ -1133,8 +1148,8 @@ function createSequencedRuntime(
 	runtime.createSessionEngine = createFakeSessionEngine(
 		nextCreatedSession,
 		nextRecoveredSession,
-		async (closedSession) => {
-			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData());
+		async (closedSession, title) => {
+			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData(), { title });
 		},
 	);
 	return runtime;
@@ -1683,6 +1698,28 @@ describe("interactive workbench TTY", () => {
 			input.write("/exit\r");
 			await startPromise;
 		});
+	}, 10000);
+
+	it("persists /title through session engine owned session metadata on exit", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-title-owned" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("/title Engine owned title\r");
+			await waitFor(() => output.getRawOutput().includes("Title: Engine owned title"));
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Engine owned title");
+		expect(recent[0]?.recoveryData.sessionId.value).toBe("session-title-owned");
 	}, 10000);
 
 	it("treats soft-deleted slash commands as unavailable in /help", async () => {
