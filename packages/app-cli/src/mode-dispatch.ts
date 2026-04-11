@@ -247,7 +247,6 @@ class InteractiveModeHandler implements ModeHandler {
 	private _sessionEngine: SessionEngine | null = null;
 	private _sessionRef: { current: SessionFacade } | null = null;
 	private _sink: OutputSink | null = null;
-	private _runtime: AppRuntime | null = null;
 	private _startupCheckScreenActive = false;
 	private _lastRenderDebugKey: string | null = null;
 	private _lastRenderDebugLoggedAt = 0;
@@ -276,7 +275,6 @@ class InteractiveModeHandler implements ModeHandler {
 		this._sessionRef = sessionRef;
 		this._sessionEngine = sessionEngine;
 		this._sink = sink;
-		this._runtime = runtime;
 
 		let interactionState: InteractionState = initialInteractionState();
 		let exitRequested = false;
@@ -347,7 +345,6 @@ class InteractiveModeHandler implements ModeHandler {
 			this._resumeBrowserScrollOffset = 0;
 			this._sessionRef = sessionRef;
 			this._sink = sink;
-			this._runtime = runtime;
 			interactionState = initialInteractionState();
 
 			sessionRef.current.events.onAny((event: RuntimeEvent) => {
@@ -1140,8 +1137,10 @@ class InteractiveModeHandler implements ModeHandler {
 			const previousRows = this.currentTranscriptDisplayRows();
 			this.rememberAssistantTranscriptBlock(assistantBlock);
 			this.adjustTranscriptScrollForGrowth(previousRows, this.currentTranscriptDisplayRows());
-			if (this._runtime !== null && this._sessionRef !== null) {
-				void this._runtime.recordRecentSessionAssistantText(this._sessionRef.current, assistantText);
+			if (this._sessionRef !== null) {
+				this.requireSessionEngine().recordAssistantText(assistantText, {
+					sessionId: this._sessionRef.current.id.value,
+				});
 			}
 		}
 		if (redrawPrompt) {
@@ -1391,9 +1390,6 @@ class InteractiveModeHandler implements ModeHandler {
 		this._turnPresenterState = beginInteractiveTurn(this._turnPresenterState, Date.now());
 		this._detailPanelState = resetInteractiveDetailPanelState();
 		this.rememberHistory(input);
-		if (this._runtime !== null) {
-			void this._runtime.recordRecentSessionInput(session, input);
-		}
 		this._activeTurn = this.requireSessionEngine()
 			.submit(input, { mode, sessionId: session.id.value })
 			.catch((err: unknown) => {

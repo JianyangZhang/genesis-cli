@@ -895,6 +895,8 @@ class FakeInteractiveSession implements SessionFacade {
 function createFakeSessionEngine(
 	createSession: () => FakeInteractiveSession,
 	recoverSession: (data: SessionRecoveryData) => FakeInteractiveSession,
+	onInput: (session: FakeInteractiveSession, input: string, title?: string) => Promise<void>,
+	onAssistantText: (session: FakeInteractiveSession, text: string, title?: string) => Promise<void>,
 	onClosed: (session: FakeInteractiveSession, title?: string) => Promise<void>,
 ): AppRuntime["createSessionEngine"] {
 	return () => {
@@ -964,11 +966,19 @@ function createFakeSessionEngine(
 				if (!session) {
 					throw new Error("No active session");
 				}
+				await onInput(session, input, titles.get(session.id.value));
 				if (options?.mode === "continue") {
 					await session.continue(input);
 					return;
 				}
 				await session.prompt(input);
+			},
+			recordAssistantText(text: string, options?: { readonly sessionId?: string }): void {
+				const session = resolveSession(options?.sessionId);
+				if (!session) {
+					throw new Error("No active session");
+				}
+				void onAssistantText(session, text, titles.get(session.id.value));
 			},
 			async resolvePermission(
 				callId: string,
@@ -1071,6 +1081,12 @@ function createFakeRuntime(session: FakeInteractiveSession): AppRuntime {
 	runtime.createSessionEngine = createFakeSessionEngine(
 		() => session,
 		() => session,
+		async (liveSession, input, title) => {
+			await runtime.recordRecentSessionInput(liveSession, input, { title });
+		},
+		async (liveSession, text, title) => {
+			await runtime.recordRecentSessionAssistantText(liveSession, text, { title });
+		},
 		async (closedSession, title) => {
 			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData(), { title });
 		},
@@ -1154,6 +1170,12 @@ function createSequencedRuntime(
 	runtime.createSessionEngine = createFakeSessionEngine(
 		nextCreatedSession,
 		nextRecoveredSession,
+		async (liveSession, input, title) => {
+			await runtime.recordRecentSessionInput(liveSession, input, { title });
+		},
+		async (liveSession, text, title) => {
+			await runtime.recordRecentSessionAssistantText(liveSession, text, { title });
+		},
 		async (closedSession, title) => {
 			await runtime.recordClosedRecentSession(closedSession, await closedSession.snapshotRecoveryData(), { title });
 		},

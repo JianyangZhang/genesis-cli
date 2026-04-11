@@ -334,6 +334,8 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 					createSession: () => this.createSession(),
 					recoverSession: (data) => this.recoverSession(data),
 					recordClosedRecentSession: this.recordClosedRecentSession,
+					recordRecentSessionInput: this.recordRecentSessionInput,
+					recordRecentSessionAssistantText: this.recordRecentSessionAssistantText,
 				},
 				options,
 			);

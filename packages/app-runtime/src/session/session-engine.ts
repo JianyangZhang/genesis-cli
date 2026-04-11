@@ -23,6 +23,7 @@ export interface SessionEngine {
 	selectSession(sessionId: string): SessionFacade | null;
 	isBusy(sessionId?: string): boolean;
 	submit(input: string, options?: { readonly mode?: SessionTurnMode; readonly sessionId?: string }): Promise<void>;
+	recordAssistantText(text: string, options?: { readonly sessionId?: string }): void;
 	resolvePermission(
 		callId: string,
 		decision: "allow" | "allow_for_session" | "allow_once" | "deny",
@@ -40,6 +41,16 @@ interface SessionEngineDeps {
 	readonly recordClosedRecentSession: (
 		session: SessionFacade,
 		recoveryData: SessionRecoveryData,
+		options?: { readonly title?: string },
+	) => Promise<void>;
+	readonly recordRecentSessionInput: (
+		session: SessionFacade,
+		input: string,
+		options?: { readonly title?: string },
+	) => Promise<void>;
+	readonly recordRecentSessionAssistantText: (
+		session: SessionFacade,
+		text: string,
 		options?: { readonly title?: string },
 	) => Promise<void>;
 }
@@ -81,6 +92,10 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			return null;
 		}
 		return sessions.get(effectiveSessionId) ?? null;
+	}
+
+	function resolveSessionTitle(session: SessionFacade): string | undefined {
+		return sessionTitles.get(session.id.value) ?? options.titleResolver?.(session);
 	}
 
 	return {
@@ -149,6 +164,9 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			if (activeTurns.has(session.id.value)) {
 				return Promise.reject(new Error("Session is already processing a turn"));
 			}
+			void deps.recordRecentSessionInput(session, input, {
+				title: resolveSessionTitle(session),
+			});
 			const turn =
 				optionsInput.mode === "continue" ? session.continue(input) : session.prompt(input);
 			activeTurns.set(
@@ -158,6 +176,16 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 				}),
 			);
 			return activeTurns.get(session.id.value)!;
+		},
+
+		recordAssistantText(text: string, optionsInput = {}): void {
+			const session = resolveSession(optionsInput.sessionId);
+			if (!session) {
+				throw new Error("No active session");
+			}
+			void deps.recordRecentSessionAssistantText(session, text, {
+				title: resolveSessionTitle(session),
+			});
 		},
 
 		resolvePermission(

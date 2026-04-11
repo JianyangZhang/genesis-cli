@@ -1856,6 +1856,42 @@ describe("createAppRuntime", () => {
 		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("session title owned by engine");
 	});
 
+	it("records input and assistant projections through session engine owned recent-session writes", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-projections-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/engine-projections",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine();
+		const session = engine.createSession();
+		engine.setSessionTitle("Engine projection title", { sessionId: session.id.value });
+
+		await engine.submit("engine owned input", { sessionId: session.id.value });
+		engine.recordAssistantText("engine owned assistant", { sessionId: session.id.value });
+
+		for (let attempt = 0; attempt < 40; attempt += 1) {
+			const recent = await runtime.listRecentSessions();
+			if (recent[0]?.recoveryData.metadata?.recentMessages?.some((item) => item.text === "engine owned assistant")) {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Engine projection title");
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("engine owned input");
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ role: "assistant", text: "engine owned assistant" }),
+			]),
+		);
+	});
+
 	it("same runtime can drive multiple modes (print + json)", () => {
 		const adapter = new StubKernelSessionAdapter();
 

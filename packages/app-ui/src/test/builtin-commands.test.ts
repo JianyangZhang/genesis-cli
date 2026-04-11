@@ -76,6 +76,7 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 			selectSession: () => session,
 			isBusy: () => false,
 			submit: async () => {},
+			recordAssistantText: () => {},
 			resolvePermission: async () => {},
 			closeSession: async () => session,
 			closeAllSessions: async () => {},

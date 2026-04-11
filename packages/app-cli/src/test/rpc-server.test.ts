@@ -98,6 +98,7 @@ function createMockRuntime(sessionOrFactory: SessionFacade | (() => SessionFacad
 				}
 				await session.prompt(text);
 			},
+			recordAssistantText(): void {},
 			async resolvePermission(
 				callId: string,
 				decision: "allow" | "allow_for_session" | "allow_once" | "deny",
