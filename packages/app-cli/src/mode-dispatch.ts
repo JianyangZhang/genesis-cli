@@ -56,8 +56,9 @@ import {
 	truncatePlainText as truncatePlainTextFromTuiCore,
 	wrapTranscriptContent as wrapTranscriptContentFromTuiCore,
 } from "@pickle-pee/tui-core";
-import type { InteractionState, InteractiveOverlayState, OutputSink, SlashCommand } from "@pickle-pee/ui";
+import type { InteractionState, InteractiveDetailPanelState, InteractiveOverlayState, OutputSink, SlashCommand } from "@pickle-pee/ui";
 import {
+	appendThinkingDetailText,
 	beginResumeBrowserOverlaySearch,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	buildRestoredContextLines,
@@ -66,12 +67,14 @@ import {
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
 	clearPendingPermissionRequest,
+	collapseInteractiveDetailPanel,
 	closeResumeBrowserOverlay,
 	completeResumeBrowserOverlaySearch,
 	computeInteractiveFooterSeparatorWidth,
 	createInteractiveCommandRegistry,
 	createInteractiveConversationState,
 	eventToJsonEnvelope,
+	formatCompactionDetailText,
 	formatEventAsText,
 	formatFullWidthTranscriptUserLine,
 	formatInteractiveErrorDetailLine,
@@ -82,6 +85,7 @@ import {
 	formatResumeBrowserTranscriptBlocks,
 	formatTranscriptUserBlocks,
 	INTERACTIVE_THEME,
+	initialInteractiveDetailPanelState,
 	initialInteractionState,
 	initialInteractiveOverlayState,
 	markResumeBrowserSubmitPending,
@@ -90,12 +94,16 @@ import {
 	moveResumeBrowserOverlaySelection,
 	openResumeBrowserOverlay,
 	reduceInteractionState,
+	resetInteractiveDetailPanelState,
 	resetInteractiveOverlayState,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSubmitHit,
 	setPendingPermissionRequest,
+	setInteractiveDetailPanelScroll,
+	showCompactionDetailSummary,
 	summarizeResumeBrowserHit,
+	toggleInteractiveDetailPanel,
 	toggleResumeBrowserOverlayPreview,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
@@ -173,10 +181,7 @@ class InteractiveModeHandler implements ModeHandler {
 	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
 	private _turnStartedAt: number | null = null;
-	private _detailPanelExpanded = false;
-	private _detailPanelScroll = 0;
-	private _thinkingBuffer = "";
-	private _compactionDetailText = "";
+	private _detailPanelState: InteractiveDetailPanelState = initialInteractiveDetailPanelState();
 	private _activeTurnUsageTotals: UsageSnapshot = emptyUsageSnapshot();
 	private _currentMessageUsage: UsageSnapshot = emptyUsageSnapshot();
 	private _lastTurnUsage: UsageSnapshot | null = null;
@@ -299,10 +304,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this._turnNotice = null;
 			this._turnNoticeAnimationFrame = 0;
 			this._turnStartedAt = null;
-			this._detailPanelExpanded = false;
-			this._detailPanelScroll = 0;
-			this._thinkingBuffer = "";
-			this._compactionDetailText = "";
+			this._detailPanelState = resetInteractiveDetailPanelState();
 			this._activeTurnUsageTotals = emptyUsageSnapshot();
 			this._currentMessageUsage = emptyUsageSnapshot();
 			this._lastTurnUsage = null;
@@ -968,12 +970,12 @@ class InteractiveModeHandler implements ModeHandler {
 		if (key === "ctrlv") {
 			return;
 		}
-		if (key === "esc" && this._detailPanelExpanded) {
-			this._detailPanelExpanded = false;
+		if (key === "esc" && this._detailPanelState.expanded) {
+			this._detailPanelState = collapseInteractiveDetailPanel(this._detailPanelState);
 			this.renderFooterRegion();
 			return;
 		}
-		if (this._detailPanelExpanded) {
+		if (this._detailPanelState.expanded) {
 			const detailScrollDelta = detailPanelScrollDeltaForKey(key, this.currentDetailPanelViewport().viewportSize);
 			if (detailScrollDelta !== 0) {
 				this.scrollDetailPanel(detailScrollDelta);
@@ -1043,9 +1045,10 @@ class InteractiveModeHandler implements ModeHandler {
 				this._turnNotice = null;
 				this._turnNoticeAnimationFrame = 0;
 				this._turnStartedAt = null;
-				this._detailPanelExpanded = false;
-				this._detailPanelScroll = 0;
-				this._compactionDetailText = formatCompactionDetailText(event.summary);
+				this._detailPanelState = showCompactionDetailSummary(
+					this._detailPanelState,
+					formatCompactionDetailText(event.summary),
+				);
 				if (
 					this._activeLocalCommand === null &&
 					this._activeTurn === null &&
@@ -1081,7 +1084,7 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		if (event.category === "text" && event.type === "thinking_delta") {
-			this._thinkingBuffer += event.content;
+			this._detailPanelState = appendThinkingDetailText(this._detailPanelState, event.content);
 			if (this._turnNotice === null) {
 				this.startTurnFeedback();
 			}
@@ -1202,8 +1205,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private async openResumeBrowser(runtime: AppRuntime, initialQuery: string): Promise<void> {
 		this._overlayState = openResumeBrowserOverlay(this._overlayState, initialQuery);
-		this._detailPanelExpanded = false;
-		this._detailPanelScroll = 0;
+		this._detailPanelState = resetInteractiveDetailPanelState();
 		this._transcriptScrollOffset = 0;
 		this._resumeBrowserScrollOffset = 0;
 		this.clearMouseSelection(false);
@@ -1375,10 +1377,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.writeTranscriptText(block, true, false);
 		}
 		this._turnStartedAt = Date.now();
-		this._detailPanelExpanded = false;
-		this._detailPanelScroll = 0;
-		this._thinkingBuffer = "";
-		this._compactionDetailText = "";
+		this._detailPanelState = resetInteractiveDetailPanelState();
 		this._activeTurnUsageTotals = emptyUsageSnapshot();
 		this._currentMessageUsage = emptyUsageSnapshot();
 		this.startTurnFeedback();
@@ -1399,10 +1398,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this._turnNotice = null;
 				this._turnNoticeAnimationFrame = 0;
 				this._turnStartedAt = null;
-				this._detailPanelExpanded = false;
-				this._detailPanelScroll = 0;
-				this._thinkingBuffer = "";
-				this._compactionDetailText = "";
+				this._detailPanelState = resetInteractiveDetailPanelState();
 				if (hasUsageSnapshot(completedTurnUsage)) {
 					this._lastTurnUsage = completedTurnUsage;
 					this._sessionUsageTotals = addUsageSnapshots(this._sessionUsageTotals, completedTurnUsage);
@@ -1550,10 +1546,9 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this.currentDetailPanelContentLines().length === 0) {
 			return;
 		}
-		this._detailPanelExpanded = !this._detailPanelExpanded;
-		if (this._detailPanelExpanded) {
-			this._detailPanelScroll = 0;
-		}
+		this._detailPanelState = toggleInteractiveDetailPanel(this._detailPanelState, {
+			hasContent: this.currentDetailPanelContentLines().length > 0,
+		});
 		this.renderFooterRegion();
 	}
 
@@ -1563,11 +1558,11 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		const maxScroll = Math.max(0, viewport.totalLines - viewport.viewportSize);
-		const next = Math.max(0, Math.min(maxScroll, this._detailPanelScroll + delta));
-		if (next === this._detailPanelScroll) {
+		const next = Math.max(0, Math.min(maxScroll, this._detailPanelState.scrollOffset + delta));
+		if (next === this._detailPanelState.scrollOffset) {
 			return;
 		}
-		this._detailPanelScroll = next;
+		this._detailPanelState = setInteractiveDetailPanelScroll(this._detailPanelState, next);
 		this.renderFooterRegion();
 	}
 
@@ -1604,7 +1599,7 @@ class InteractiveModeHandler implements ModeHandler {
 			sessionUsage: this._sessionUsageTotals,
 			activeToolLabel,
 			showPendingOutputIndicator: this.shouldShowPendingOutputIndicator(activeToolLabel),
-			detailPanelExpanded: this._detailPanelExpanded,
+			detailPanelExpanded: this._detailPanelState.expanded,
 			detailPanelLines: detailPanel.lines,
 			detailPanelSummary: detailPanel.summary,
 			queuedInputs: this._queuedInputs,
@@ -1619,11 +1614,11 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentDetailPanelContentLines(): readonly string[] {
-		if (this._thinkingBuffer.trim().length > 0) {
-			return wrapTranscriptContentFromTuiCore(this._thinkingBuffer.trim(), this.terminalWidth());
+		if (this._detailPanelState.thinkingText.trim().length > 0) {
+			return wrapTranscriptContentFromTuiCore(this._detailPanelState.thinkingText.trim(), this.terminalWidth());
 		}
-		if (this._compactionDetailText.trim().length > 0) {
-			return wrapTranscriptContentFromTuiCore(this._compactionDetailText.trim(), this.terminalWidth());
+		if (this._detailPanelState.compactionDetailText.trim().length > 0) {
+			return wrapTranscriptContentFromTuiCore(this._detailPanelState.compactionDetailText.trim(), this.terminalWidth());
 		}
 		return [];
 	}
@@ -1659,7 +1654,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (lines.length === 0) {
 			return { lines: [], summary: null, viewportSize: 0, totalLines: 0 };
 		}
-		if (!this._detailPanelExpanded) {
+		if (!this._detailPanelState.expanded) {
 			return {
 				lines: [],
 				summary: "ctrl+o to expand",
@@ -1669,7 +1664,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		const viewportSize = Math.max(3, this.terminalHeight() - 8);
 		const maxScroll = Math.max(0, lines.length - viewportSize);
-		const start = Math.max(0, Math.min(this._detailPanelScroll, maxScroll));
+		const start = Math.max(0, Math.min(this._detailPanelState.scrollOffset, maxScroll));
 		const end = Math.min(lines.length, start + viewportSize);
 		const summary =
 			lines.length <= viewportSize
@@ -2723,17 +2718,6 @@ function summarizeActiveToolNotice(
 	return `Running ${toolCalls.size} tools`;
 }
 
-function formatCompactionDetailText(summary: CompactionSummary): string {
-	const lines = [
-		"Compaction summary",
-		`- Messages: ${summary.originalMessageCount} -> ${summary.retainedMessageCount}`,
-		`- Estimated tokens saved: ${summary.estimatedTokensSaved}`,
-	];
-	if (summary.compactedSummary && summary.compactedSummary.trim().length > 0) {
-		lines.push("", summary.compactedSummary.trim());
-	}
-	return lines.join("\n");
-}
 
 function detailPanelScrollDeltaForKey(
 	key: "up" | "down" | "pageup" | "pagedown" | "wheelup" | "wheeldown" | "tab" | "shifttab" | "esc" | "ctrlo",

@@ -179,3 +179,10 @@ export interface InteractiveOverlayState {
 	readonly resumeBrowserSubmitPending: boolean;
 	readonly resumeSearchRequestId: number;
 }
+
+export interface InteractiveDetailPanelState {
+	readonly expanded: boolean;
+	readonly scrollOffset: number;
+	readonly thinkingText: string;
+	readonly compactionDetailText: string;
+}

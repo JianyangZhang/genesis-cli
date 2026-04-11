@@ -75,6 +75,7 @@ export {
 } from "./domain/index.js";
 // Services (formatters + interaction state)
 export {
+	appendThinkingDetailText,
 	beginResumeBrowserOverlaySearch,
 	appendAssistantTranscriptBlock,
 	appendTranscriptBlockWithSpacer,
@@ -86,6 +87,7 @@ export {
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
+	collapseInteractiveDetailPanel,
 	completeResumeBrowserSearch,
 	computeInteractiveFooterSeparatorWidth,
 	createInteractiveConversationState,
@@ -95,6 +97,7 @@ export {
 	createRpcResponse,
 	eventToJsonEnvelope,
 	eventToRpcNotification,
+	formatCompactionDetailText,
 	formatEventAsText,
 	formatFullWidthTranscriptUserLine,
 	formatInteractiveErrorDetailLine,
@@ -111,6 +114,7 @@ export {
 	formatTranscriptUserLine,
 	formatTurnNotice,
 	INTERACTIVE_THEME,
+	initialInteractiveDetailPanelState,
 	initialInteractionState,
 	initialInteractiveOverlayState,
 	materializeAssistantTranscriptBlock,
@@ -125,20 +129,25 @@ export {
 	RPC_ERRORS,
 	RPC_METHODS,
 	reduceInteractionState,
+	resetInteractiveDetailPanelState,
 	resetInteractiveOverlayState,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSelectedIndex,
 	resolveResumeBrowserSubmitHit,
 	setPendingPermissionRequest,
+	setInteractiveDetailPanelScroll,
 	completeResumeBrowserOverlaySearch,
+	showCompactionDetailSummary,
 	sanitizeForJson,
+	toggleInteractiveDetailPanel,
 	toggleResumeBrowserOverlayPreview,
 	summarizeResumeBrowserHit,
 	toggleResumeBrowserPreviewState,
 } from "./services/index.js";
 // Types
 export type {
+	InteractiveDetailPanelState,
 	InteractionPhase,
 	InteractionState,
 	InteractiveOverlayState,

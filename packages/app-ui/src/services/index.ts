@@ -1,10 +1,24 @@
 // services/ — Formatting, event-to-output mapping, interaction state.
 export type { InteractionPhase, InteractionState, JsonEnvelope, OutputMode, RpcEnvelope } from "../types/index.js";
 export type {
+	InteractiveDetailPanelState,
 	InteractiveOverlayState,
 	PendingPermissionDetails,
 	PendingPermissionState,
 } from "../types/index.js";
+export {
+	appendThinkingDetailText,
+	clearInteractiveDetailPanelState,
+	collapseInteractiveDetailPanel,
+	formatCompactionDetailText,
+	hasInteractiveDetailPanelContent,
+	initialInteractiveDetailPanelState,
+	readInteractiveDetailPanelText,
+	resetInteractiveDetailPanelState,
+	setInteractiveDetailPanelScroll,
+	showCompactionDetailSummary,
+	toggleInteractiveDetailPanel,
+} from "./interactive-detail-panel-state.js";
 export { formatEventAsText, formatPermissionPrompt, formatPlanSummaryText, formatToolStep } from "./event-formatter.js";
 export { initialInteractionState, reduceInteractionState } from "./interaction-state.js";
 export {
