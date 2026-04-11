@@ -3,9 +3,32 @@ export type { InteractionPhase, InteractionState, JsonEnvelope, OutputMode, RpcE
 export type {
 	InteractiveDetailPanelState,
 	InteractiveOverlayState,
+	InteractiveTurnNotice,
+	InteractiveTurnPresenterState,
 	PendingPermissionDetails,
 	PendingPermissionState,
+	UsageSnapshot,
 } from "../types/index.js";
+export {
+	addUsageSnapshots,
+	beginInteractiveTurn,
+	beginInteractiveTurnFeedback,
+	clearInteractiveTurnNotice,
+	completeInteractiveTurn,
+	currentInteractiveTurnElapsedMs,
+	currentInteractiveTurnUsage,
+	drainQueuedInteractiveInputs,
+	emptyUsageSnapshot,
+	hasUsageSnapshot,
+	initialInteractiveTurnPresenterState,
+	normalizeUsageSnapshot,
+	preserveThinkingNoticeForQueuedBacklog,
+	queueInteractiveInput,
+	resetInteractiveTurnPresenterState,
+	setInteractiveTurnNotice,
+	tickInteractiveTurnNoticeAnimation,
+	updateInteractiveTurnUsage,
+} from "./interactive-turn-presenter-state.js";
 export {
 	appendThinkingDetailText,
 	clearInteractiveDetailPanelState,

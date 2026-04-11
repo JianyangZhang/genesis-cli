@@ -56,8 +56,18 @@ import {
 	truncatePlainText as truncatePlainTextFromTuiCore,
 	wrapTranscriptContent as wrapTranscriptContentFromTuiCore,
 } from "@pickle-pee/tui-core";
-import type { InteractionState, InteractiveDetailPanelState, InteractiveOverlayState, OutputSink, SlashCommand } from "@pickle-pee/ui";
+import type {
+	InteractionState,
+	InteractiveDetailPanelState,
+	InteractiveOverlayState,
+	InteractiveTurnPresenterState,
+	OutputSink,
+	SlashCommand,
+	UsageSnapshot,
+} from "@pickle-pee/ui";
 import {
+	beginInteractiveTurn,
+	beginInteractiveTurnFeedback,
 	appendThinkingDetailText,
 	beginResumeBrowserOverlaySearch,
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
@@ -67,12 +77,18 @@ import {
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
 	clearPendingPermissionRequest,
+	clearInteractiveTurnNotice,
 	collapseInteractiveDetailPanel,
 	closeResumeBrowserOverlay,
 	completeResumeBrowserOverlaySearch,
+	completeInteractiveTurn,
 	computeInteractiveFooterSeparatorWidth,
+	currentInteractiveTurnElapsedMs,
+	currentInteractiveTurnUsage,
 	createInteractiveCommandRegistry,
 	createInteractiveConversationState,
+	drainQueuedInteractiveInputs,
+	emptyUsageSnapshot,
 	eventToJsonEnvelope,
 	formatCompactionDetailText,
 	formatEventAsText,
@@ -88,23 +104,30 @@ import {
 	initialInteractiveDetailPanelState,
 	initialInteractionState,
 	initialInteractiveOverlayState,
+	initialInteractiveTurnPresenterState,
 	markResumeBrowserSubmitPending,
 	materializeAssistantTranscriptBlock,
 	movePendingPermissionSelection as movePendingPermissionSelectionFromUi,
 	moveResumeBrowserOverlaySelection,
 	openResumeBrowserOverlay,
+	preserveThinkingNoticeForQueuedBacklog,
+	queueInteractiveInput,
 	reduceInteractionState,
 	resetInteractiveDetailPanelState,
 	resetInteractiveOverlayState,
+	resetInteractiveTurnPresenterState,
 	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSubmitHit,
 	setPendingPermissionRequest,
 	setInteractiveDetailPanelScroll,
+	setInteractiveTurnNotice,
 	showCompactionDetailSummary,
 	summarizeResumeBrowserHit,
+	tickInteractiveTurnNoticeAnimation,
 	toggleInteractiveDetailPanel,
 	toggleResumeBrowserOverlayPreview,
+	updateInteractiveTurnUsage,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
@@ -148,14 +171,6 @@ export async function runInteractiveStartupChecks(check: () => Promise<void>): P
 	await handler.startStartupCheckScreen(check);
 }
 
-interface UsageSnapshot {
-	readonly input: number;
-	readonly output: number;
-	readonly cacheRead: number;
-	readonly cacheWrite: number;
-	readonly totalTokens: number;
-}
-
 const RESIZE_REDRAW_DEBOUNCE_MS = 120;
 const RENDER_DEBUG_SAME_FRAME_THROTTLE_MS = 250;
 
@@ -177,18 +192,11 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private readonly _conversation = createInteractiveConversationState();
-	private _turnNotice: "thinking" | "responding" | "compacting" | null = null;
-	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
-	private _turnStartedAt: number | null = null;
 	private _detailPanelState: InteractiveDetailPanelState = initialInteractiveDetailPanelState();
-	private _activeTurnUsageTotals: UsageSnapshot = emptyUsageSnapshot();
-	private _currentMessageUsage: UsageSnapshot = emptyUsageSnapshot();
-	private _lastTurnUsage: UsageSnapshot | null = null;
-	private _sessionUsageTotals: UsageSnapshot = emptyUsageSnapshot();
+	private _turnPresenterState: InteractiveTurnPresenterState = initialInteractiveTurnPresenterState();
 	private _commandSuggestions: readonly string[] = [];
 	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
-	private readonly _queuedInputs: string[] = [];
 	private _overlayState: InteractiveOverlayState = initialInteractiveOverlayState();
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
 	private _renderedFooterStartRow: number | null = null;
@@ -301,17 +309,10 @@ class InteractiveModeHandler implements ModeHandler {
 			this._changedPaths.clear();
 			this._conversation.clear();
 			this.stopTurnNoticeAnimation();
-			this._turnNotice = null;
-			this._turnNoticeAnimationFrame = 0;
-			this._turnStartedAt = null;
+			this._turnPresenterState = resetInteractiveTurnPresenterState();
 			this._detailPanelState = resetInteractiveDetailPanelState();
-			this._activeTurnUsageTotals = emptyUsageSnapshot();
-			this._currentMessageUsage = emptyUsageSnapshot();
-			this._lastTurnUsage = null;
-			this._sessionUsageTotals = emptyUsageSnapshot();
 			this._commandSuggestions = [];
 			this._toolCalls.clear();
-			this._queuedInputs.length = 0;
 			this._renderedFooterUi = null;
 			this._renderedFooterStartRow = null;
 			this._lastScreenFrame = null;
@@ -757,7 +758,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 				// Regular prompt
 				if (this.isInteractionBusy()) {
-					this._queuedInputs.push(trimmed);
+					this._turnPresenterState = queueInteractiveInput(this._turnPresenterState, trimmed);
 					this.preserveThinkingNoticeForQueuedBacklog();
 					this.renderFooterRegion();
 					line = await inputLoop.nextLine();
@@ -1036,15 +1037,13 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		if (event.category === "compaction") {
 			if (event.type === "compaction_started") {
-				this._turnNotice = "compacting";
-				this._turnNoticeAnimationFrame = 0;
-				this._turnStartedAt = Date.now();
+				this._turnPresenterState = setInteractiveTurnNotice(this._turnPresenterState, "compacting", {
+					startedAt: Date.now(),
+				});
 				this.startTurnNoticeAnimation();
 			} else {
 				this.stopTurnNoticeAnimation();
-				this._turnNotice = null;
-				this._turnNoticeAnimationFrame = 0;
-				this._turnStartedAt = null;
+				this._turnPresenterState = clearInteractiveTurnNotice(this._turnPresenterState);
 				this._detailPanelState = showCompactionDetailSummary(
 					this._detailPanelState,
 					formatCompactionDetailText(event.summary),
@@ -1067,9 +1066,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		if (event.category === "session" && event.type === "session_error") {
 			this._lastError = event.message;
-			this._turnNotice = null;
-			this._turnNoticeAnimationFrame = 0;
-			this._turnStartedAt = null;
+			this._turnPresenterState = clearInteractiveTurnNotice(this._turnPresenterState);
 			getActiveDebugLogger()?.error("interactive.session_error", "Interactive session reported an upstream error", {
 				message: event.message,
 				source: event.source,
@@ -1085,16 +1082,15 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		if (event.category === "text" && event.type === "thinking_delta") {
 			this._detailPanelState = appendThinkingDetailText(this._detailPanelState, event.content);
-			if (this._turnNotice === null) {
+			if (this._turnPresenterState.notice === null) {
 				this.startTurnFeedback();
 			}
 			this.renderPromptLine();
 			return;
 		}
 		if (event.category === "text" && event.type === "text_delta") {
-			if (this._turnNotice !== "responding") {
-				this._turnNoticeAnimationFrame = 0;
-				this._turnNotice = "responding";
+			if (this._turnPresenterState.notice !== "responding") {
+				this._turnPresenterState = setInteractiveTurnNotice(this._turnPresenterState, "responding");
 				this.startTurnNoticeAnimation();
 			}
 			const previousRows = this.currentTranscriptDisplayRows();
@@ -1135,11 +1131,10 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private startTurnFeedback(): void {
-		if (this._turnNotice !== null) {
+		if (this._turnPresenterState.notice !== null) {
 			return;
 		}
-		this._turnNotice = "thinking";
-		this._turnNoticeAnimationFrame = 0;
+		this._turnPresenterState = beginInteractiveTurnFeedback(this._turnPresenterState, Date.now());
 		this.startTurnNoticeAnimation();
 		this.renderPromptLine();
 	}
@@ -1149,10 +1144,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this._turnNoticeTimer = setInterval(() => {
-			if (this._turnNotice === null) {
+			if (this._turnPresenterState.notice === null) {
 				return;
 			}
-			this._turnNoticeAnimationFrame = (this._turnNoticeAnimationFrame + 1) % 3;
+			this._turnPresenterState = tickInteractiveTurnNoticeAnimation(this._turnPresenterState);
 			this.renderFooterRegion();
 		}, 400);
 		this._turnNoticeTimer.unref?.();
@@ -1376,11 +1371,8 @@ class InteractiveModeHandler implements ModeHandler {
 		for (const block of formatTranscriptUserBlocks(input)) {
 			this.writeTranscriptText(block, true, false);
 		}
-		this._turnStartedAt = Date.now();
+		this._turnPresenterState = beginInteractiveTurn(this._turnPresenterState, Date.now());
 		this._detailPanelState = resetInteractiveDetailPanelState();
-		this._activeTurnUsageTotals = emptyUsageSnapshot();
-		this._currentMessageUsage = emptyUsageSnapshot();
-		this.startTurnFeedback();
 		this.rememberHistory(input);
 		if (this._runtime !== null) {
 			void this._runtime.recordRecentSessionInput(session, input);
@@ -1392,19 +1384,10 @@ class InteractiveModeHandler implements ModeHandler {
 			})
 			.finally(() => {
 				this.stopTurnNoticeAnimation();
-				const completedTurnUsage = this.currentTurnUsage();
 				this._activeTurn = null;
 				this.flushAssistantBuffer(false);
-				this._turnNotice = null;
-				this._turnNoticeAnimationFrame = 0;
-				this._turnStartedAt = null;
+				this._turnPresenterState = completeInteractiveTurn(this._turnPresenterState);
 				this._detailPanelState = resetInteractiveDetailPanelState();
-				if (hasUsageSnapshot(completedTurnUsage)) {
-					this._lastTurnUsage = completedTurnUsage;
-					this._sessionUsageTotals = addUsageSnapshots(this._sessionUsageTotals, completedTurnUsage);
-				}
-				this._activeTurnUsageTotals = emptyUsageSnapshot();
-				this._currentMessageUsage = emptyUsageSnapshot();
 				const queuedInputBatch = this.drainQueuedInputs();
 				if (queuedInputBatch !== null) {
 					this.startQueuedContinueTurn(session, queuedInputBatch, sink);
@@ -1430,12 +1413,9 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private drainQueuedInputs(): string | null {
-		if (this._queuedInputs.length === 0) {
-			return null;
-		}
-		const queued = [...this._queuedInputs];
-		this._queuedInputs.length = 0;
-		return queued.join("\n\n");
+		const drained = drainQueuedInteractiveInputs(this._turnPresenterState);
+		this._turnPresenterState = drained.state;
+		return drained.batch;
 	}
 
 	private startLocalBusyCommand(
@@ -1445,11 +1425,9 @@ class InteractiveModeHandler implements ModeHandler {
 	): void {
 		this._activeLocalCommand = command
 			.catch((error: unknown) => {
-				if (this._turnNotice === "compacting") {
+				if (this._turnPresenterState.notice === "compacting") {
 					this.stopTurnNoticeAnimation();
-					this._turnNotice = null;
-					this._turnNoticeAnimationFrame = 0;
-					this._turnStartedAt = null;
+					this._turnPresenterState = clearInteractiveTurnNotice(this._turnPresenterState);
 				}
 				this._lastError = error instanceof Error ? error.message : String(error);
 				getActiveDebugLogger()?.error("interactive.local_command", "Local command failed", { error });
@@ -1457,7 +1435,7 @@ class InteractiveModeHandler implements ModeHandler {
 			})
 			.finally(() => {
 				this._activeLocalCommand = null;
-				if (this._activeTurn !== null || this._turnNotice === "compacting") {
+				if (this._activeTurn !== null || this._turnPresenterState.notice === "compacting") {
 					this.renderFooterRegion();
 					return;
 				}
@@ -1471,21 +1449,21 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private preserveThinkingNoticeForQueuedBacklog(): void {
-		if (this._activeTurn === null && this._turnNotice !== "compacting") {
+		if (this._activeTurn === null && this._turnPresenterState.notice !== "compacting") {
 			return;
 		}
-		if (this._turnNotice === "responding") {
-			this._turnNotice = "thinking";
+		this._turnPresenterState = preserveThinkingNoticeForQueuedBacklog(this._turnPresenterState, Date.now());
+		if (this._turnPresenterState.notice !== null) {
 			this.startTurnNoticeAnimation();
-			return;
-		}
-		if (this._turnNotice === null) {
-			this.startTurnFeedback();
 		}
 	}
 
 	private isInteractionBusy(): boolean {
-		return this._activeTurn !== null || this._activeLocalCommand !== null || this._turnNotice === "compacting";
+		return (
+			this._activeTurn !== null ||
+			this._activeLocalCommand !== null ||
+			this._turnPresenterState.notice === "compacting"
+		);
 	}
 
 	private scheduleRecentSessionPersist(
@@ -1591,18 +1569,18 @@ class InteractiveModeHandler implements ModeHandler {
 			buffer: this._inputState.buffer,
 			cursor: this._inputState.cursor,
 			suggestions: this._commandSuggestions,
-			turnNotice: activeToolLabel !== null ? "tool" : this._turnNotice,
-			turnNoticeAnimationFrame: this._turnNoticeAnimationFrame,
+			turnNotice: activeToolLabel !== null ? "tool" : this._turnPresenterState.notice,
+			turnNoticeAnimationFrame: this._turnPresenterState.noticeAnimationFrame,
 			elapsedMs: this.currentTurnElapsedMs(),
 			currentTurnUsage: this.currentTurnUsage(),
-			lastTurnUsage: this._lastTurnUsage,
-			sessionUsage: this._sessionUsageTotals,
+			lastTurnUsage: this._turnPresenterState.lastTurnUsage,
+			sessionUsage: this._turnPresenterState.sessionUsageTotals,
 			activeToolLabel,
 			showPendingOutputIndicator: this.shouldShowPendingOutputIndicator(activeToolLabel),
 			detailPanelExpanded: this._detailPanelState.expanded,
 			detailPanelLines: detailPanel.lines,
 			detailPanelSummary: detailPanel.summary,
-			queuedInputs: this._queuedInputs,
+			queuedInputs: this._turnPresenterState.queuedInputs,
 			permission:
 				pendingPermission !== null
 					? {
@@ -1703,25 +1681,15 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private updateTurnUsage(usage: UsageSnapshot, isFinal: boolean): void {
-		const normalized = normalizeUsageSnapshot(usage);
-		if (isFinal) {
-			this._activeTurnUsageTotals = addUsageSnapshots(this._activeTurnUsageTotals, normalized);
-			this._currentMessageUsage = emptyUsageSnapshot();
-			return;
-		}
-		this._currentMessageUsage = normalized;
+		this._turnPresenterState = updateInteractiveTurnUsage(this._turnPresenterState, usage, isFinal);
 	}
 
 	private currentTurnUsage(): UsageSnapshot | null {
-		const usage = addUsageSnapshots(this._activeTurnUsageTotals, this._currentMessageUsage);
-		return hasUsageSnapshot(usage) ? usage : null;
+		return currentInteractiveTurnUsage(this._turnPresenterState);
 	}
 
 	private currentTurnElapsedMs(): number | null {
-		if (this._turnNotice === null || this._turnStartedAt === null) {
-			return null;
-		}
-		return Math.max(0, Date.now() - this._turnStartedAt);
+		return currentInteractiveTurnElapsedMs(this._turnPresenterState, Date.now());
 	}
 
 	private terminalWidth(): number {
@@ -2912,37 +2880,6 @@ export function acceptFirstSlashSuggestion(
 
 function truncatePlainTerminalText(text: string, width: number): string {
 	return truncatePlainTextFromTuiCore(text, width);
-}
-
-function emptyUsageSnapshot(): UsageSnapshot {
-	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
-}
-
-function normalizeUsageSnapshot(usage: UsageSnapshot): UsageSnapshot {
-	return {
-		input: Math.max(0, usage.input),
-		output: Math.max(0, usage.output),
-		cacheRead: Math.max(0, usage.cacheRead),
-		cacheWrite: Math.max(0, usage.cacheWrite),
-		totalTokens: Math.max(0, usage.totalTokens),
-	};
-}
-
-function addUsageSnapshots(left: UsageSnapshot, right: UsageSnapshot): UsageSnapshot {
-	return {
-		input: left.input + right.input,
-		output: left.output + right.output,
-		cacheRead: left.cacheRead + right.cacheRead,
-		cacheWrite: left.cacheWrite + right.cacheWrite,
-		totalTokens: left.totalTokens + right.totalTokens,
-	};
-}
-
-function hasUsageSnapshot(usage: UsageSnapshot | null | undefined): usage is UsageSnapshot {
-	if (!usage) {
-		return false;
-	}
-	return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0 || usage.totalTokens > 0;
 }
 
 export function computeVisibleTranscriptLines(

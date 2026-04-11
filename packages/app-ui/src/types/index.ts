@@ -186,3 +186,24 @@ export interface InteractiveDetailPanelState {
 	readonly thinkingText: string;
 	readonly compactionDetailText: string;
 }
+
+export interface UsageSnapshot {
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead: number;
+	readonly cacheWrite: number;
+	readonly totalTokens: number;
+}
+
+export type InteractiveTurnNotice = "thinking" | "responding" | "compacting" | null;
+
+export interface InteractiveTurnPresenterState {
+	readonly notice: InteractiveTurnNotice;
+	readonly noticeAnimationFrame: number;
+	readonly startedAt: number | null;
+	readonly activeTurnUsageTotals: UsageSnapshot;
+	readonly currentMessageUsage: UsageSnapshot;
+	readonly lastTurnUsage: UsageSnapshot | null;
+	readonly sessionUsageTotals: UsageSnapshot;
+	readonly queuedInputs: readonly string[];
+}
