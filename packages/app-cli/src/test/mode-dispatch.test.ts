@@ -38,22 +38,24 @@ import {
 	buildWelcomeLines,
 	computeVisibleTranscriptLines,
 	createDebouncedCallback,
+	formatWelcomeBottomBorder,
+	formatWelcomeCenteredLine,
+	formatWelcomeFilledLine,
+	formatWelcomeTopBorder,
+	pickWelcomeGreeting,
+	readInteractiveCliPackageVersion,
+	WELCOME_BIBLE_GREETINGS,
+} from "../mode-dispatch.js";
+import {
 	formatInteractiveFooter,
 	formatInteractivePermissionBlock,
 	formatInteractiveToolEvent,
 	formatInteractiveToolResult,
 	formatInteractiveToolTitle,
-	formatWelcomeBottomBorder,
-	formatWelcomeCenteredLine,
-	formatWelcomeFilledLine,
-	formatWelcomeTopBorder,
 	movePermissionSelection,
 	permissionDecisionFromSelection,
-	pickWelcomeGreeting,
-	readInteractiveCliPackageVersion,
 	shouldRenderInteractiveTranscriptEvent,
-	WELCOME_BIBLE_GREETINGS,
-} from "../mode-dispatch.js";
+} from "../interactive-formatting.js";
 
 function formatLocalTraceTimestamp(value: Date): string {
 	const padTwo = (part: number): string => String(part).padStart(2, "0");

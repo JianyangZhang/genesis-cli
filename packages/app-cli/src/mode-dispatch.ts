@@ -5,10 +5,9 @@
  * from it. Mode-specific behavior is isolated to how events are rendered.
  */
 
-import { execFile, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type {
 	AppRuntime,
 	CliMode,
@@ -21,12 +20,10 @@ import {
 	clampScrollOffset,
 	composePromptBlock,
 	composeScreenWithFooter,
-	composeSectionBlock,
 	computeBodyViewportRows,
 	computeFooterCursorColumn as computeFooterCursorColumnFromTuiCore,
 	computeFooterStartRow as computeFooterStartRowFromTuiCore,
 	computeMaxScrollOffset,
-	computePromptCursorColumn as computePromptCursorColumnFromTuiCore,
 	computeSelectionColumnsForRow,
 	computeTranscriptDisplayRows as computeTranscriptDisplayRowsFromTuiCore,
 	computeVisibleViewportLines,
@@ -42,8 +39,6 @@ import {
 	extractPlainTextSelection as extractPlainTextSelectionFromTuiCore,
 	fitTerminalLine as fitTerminalLineFromTuiCore,
 	materializeComposerBlock,
-	materializeTextBlock,
-	type RenderedComposerBlock,
 	renderSelectedPlainLine,
 	type ScreenFrame,
 	stripAnsiControlSequences,
@@ -52,7 +47,6 @@ import {
 	summarizeTerminalCapabilities,
 	summarizeTerminalModePlan,
 	type TerminalSelectionRange,
-	truncatePlainText as truncatePlainTextFromTuiCore,
 	wrapTranscriptContent as wrapTranscriptContentFromTuiCore,
 } from "@pickle-pee/tui-core";
 import type {
@@ -70,8 +64,6 @@ import {
 	beginInteractiveTurnFeedback,
 	appendThinkingDetailText,
 	beginResumeBrowserOverlaySearch,
-	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
-	buildRestoredContextLines,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
@@ -86,10 +78,8 @@ import {
 	computeInteractiveFooterSeparatorWidth,
 	currentInteractiveTurnElapsedMs,
 	currentInteractiveTurnUsage,
-	formatSlashSuggestionHint,
 	findInteractiveToolParameters,
 	initialInteractiveInputAssistState,
-	createInteractiveCommandRegistry,
 	createInteractiveConversationState,
 	drainQueuedInteractiveInputs,
 	eventToJsonEnvelope,
@@ -121,7 +111,6 @@ import {
 	resetInteractiveInputAssistState,
 	resetInteractiveOverlayState,
 	resetInteractiveTurnPresenterState,
-	resolveRecentSessionDirectSelection,
 	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSubmitHit,
 	setPendingPermissionRequest,
@@ -140,6 +129,18 @@ import {
 import { getActiveDebugLogger } from "./debug-logger.js";
 import { createInteractiveHostState } from "./interactive-host-state.js";
 import { executeInteractiveSlashCommand } from "./interactive-local-command-orchestrator.js";
+import { createInteractiveCommandWiring, createInteractiveExitSignal } from "./interactive-command-wiring.js";
+import {
+	formatInteractiveFooter,
+	formatInteractivePermissionBlock,
+	formatInteractiveToolEvent,
+	formatInteractiveToolResult,
+	formatInteractiveToolTitle,
+	movePermissionSelection,
+	permissionDecisionFromSelection,
+	shouldRenderInteractiveTranscriptEvent,
+	type InteractiveFooterRenderResult,
+} from "./interactive-formatting.js";
 import { createInteractiveSessionBinding } from "./interactive-session-binding.js";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
@@ -148,6 +149,18 @@ import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { createTtySession } from "./tty-session.js";
+
+export {
+	formatInteractiveFooter,
+	formatInteractivePermissionBlock,
+	formatInteractiveToolEvent,
+	formatInteractiveToolResult,
+	formatInteractiveToolTitle,
+	movePermissionSelection,
+	permissionDecisionFromSelection,
+	shouldRenderInteractiveTranscriptEvent,
+};
+export type { InteractiveFooterRenderResult } from "./interactive-formatting.js";
 
 // ---------------------------------------------------------------------------
 // Mode handler interface
@@ -254,7 +267,6 @@ class InteractiveModeHandler implements ModeHandler {
 	private _suppressedRenderDebugCount = 0;
 
 	async start(runtime: AppRuntime): Promise<void> {
-		const handler = this;
 		const commandHost = createModelCommandHost(this._modelHostOptions ?? {});
 		if (!process.stdin.isTTY || !process.stdout.isTTY) {
 			throw new Error("Interactive mode requires a TTY. Use --mode print|json|rpc instead.");
@@ -278,8 +290,10 @@ class InteractiveModeHandler implements ModeHandler {
 		this._sink = sink;
 
 		let interactionState: InteractionState = initialInteractionState();
-		let exitRequested = false;
 		let inputLoop: InputLoop | null = null;
+		const exitSignal = createInteractiveExitSignal(() => {
+			inputLoop?.close();
+		});
 		const terminalCapabilities = detectTerminalCapabilities({
 			term: process.env.TERM,
 			termProgram: process.env.TERM_PROGRAM,
@@ -397,206 +411,26 @@ class InteractiveModeHandler implements ModeHandler {
 			this.fullRedrawInteractiveScreen();
 		};
 
-		const registry = createInteractiveCommandRegistry({
+		const { registry } = createInteractiveCommandWiring({
+			runtime,
+			sessionEngine,
+			sessionBinding,
 			getCurrentSession: () => sessionRef.current,
-			getSessionTitle: () => sessionEngine.getSessionTitle(sessionRef.current.id.value),
-			setSessionTitle: (next) => {
-				sessionEngine.setSessionTitle(next, { sessionId: sessionRef.current.id.value });
-			},
-			createSession: () => sessionEngine.createSession(),
-			closeCurrentSession: async () => {
-				await sessionEngine.closeSession(sessionRef.current.id.value);
-			},
-			requestExit: () => {
-				exitRequested = true;
-				inputLoop?.close();
-			},
-			isInteractionBusy: () => handler.isInteractionBusy(),
-			hasPendingPermissionRequest: () => handler.pendingPermissionState() !== null,
 			replaceSession: (next) => {
 				switchInteractiveSession(next);
 			},
-			getAgentDir: () => sessionBinding.resolveAgentDir(),
+			exitSignal,
+			isInteractionBusy: () => this.isInteractionBusy(),
+			hasPendingPermissionRequest: () => this.pendingPermissionState() !== null,
 			getInteractionPhase: () => interactionState.phase,
-			getLastError: () => handler._lastError,
-			getChangedFileCount: () => handler._changedPaths.size,
-			getPendingPermissionCallId: () => handler.pendingPermissionState()?.callId ?? null,
-			getToolUsageSummary: () => {
-				const entries = runtime.governor.audit.getAll();
-				return {
-					total: entries.length,
-					success: entries.filter((e) => e.status === "success").length,
-					failure: entries.filter((e) => e.status === "failure").length,
-					denied: entries.filter((e) => e.status === "denied").length,
-					recent: entries.slice(-10).map((entry) => ({
-						status: entry.status,
-						toolName: entry.toolName,
-						riskLevel: entry.riskLevel,
-						targetPath: entry.targetPath,
-						durationMs: entry.durationMs,
-					})),
-				};
+			getLastError: () => this._lastError,
+			getChangedPaths: () => [...this._changedPaths],
+			getPendingPermissionCallId: () => this.pendingPermissionState()?.callId ?? null,
+			openResumeBrowser: async (query) => {
+				await this.openResumeBrowser(runtime, query);
 			},
-			getConfigSnapshot: async (ctx) => {
-				const sources = ctx.session.context.configSources ?? {};
-				const agentDir = sessionBinding.resolveAgentDir();
-				const modelsPath = join(agentDir, "models.json");
-				let raw = "";
-				try {
-					raw = await readFile(modelsPath, "utf8");
-				} catch {
-					return {
-						sources: Object.keys(sources)
-							.sort((a, b) => a.localeCompare(b))
-							.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
-						agentDir,
-						modelsPath,
-						error: "models.json not found. Run Genesis once or pass --agent-dir.",
-					};
-				}
-
-				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
-				const providerKey = ctx.session.state.model.provider;
-				const provider = parsed.providers?.[providerKey];
-				if (!provider) {
-					return {
-						sources: Object.keys(sources)
-							.sort((a, b) => a.localeCompare(b))
-							.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
-						agentDir,
-						modelsPath,
-						providerKey,
-					};
-				}
-
-				const models = Array.isArray(provider.models) ? provider.models : [];
-				const active = models.find((m: any) => m?.id === ctx.session.state.model.id);
-				const apiKeyEnv = typeof provider.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
-				return {
-					sources: Object.keys(sources)
-						.sort((a, b) => a.localeCompare(b))
-						.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
-					agentDir,
-					modelsPath,
-					providerKey,
-					provider: {
-						api: provider.api ?? "(missing)",
-						baseUrl: provider.baseUrl ?? "(missing)",
-						apiKeyEnv,
-						apiKeyPresent: Boolean(process.env[apiKeyEnv]),
-					},
-					activeModel: active
-						? {
-								name: active.name ?? active.id,
-								id: active.id,
-								reasoning: Boolean(active.reasoning),
-							}
-						: null,
-					modelError: active ? null : `Model not configured: ${ctx.session.state.model.id}`,
-				};
-			},
-			getWorkingTreeSummary: async () => ({
-				changedPaths: [...handler._changedPaths],
-				snapshot: await inspectGitWorkingTree(sessionRef.current.context.workingDirectory),
-			}),
-			getGitDiff: async (target) => readGitDiff(sessionRef.current.context.workingDirectory, target),
-			getDoctorSnapshot: async (ctx) => {
-				const agentDir = sessionBinding.resolveAgentDir();
-				const modelsPath = join(agentDir, "models.json");
-				let raw = "";
-				try {
-					raw = await readFile(modelsPath, "utf8");
-				} catch {
-					return null;
-				}
-				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
-				const providerKey = ctx.session.state.model.provider;
-				const provider = parsed.providers?.[providerKey];
-				const baseUrl = typeof provider?.baseUrl === "string" ? provider.baseUrl : "";
-				const api = typeof provider?.api === "string" ? provider.api : "";
-				const apiKeyEnv = typeof provider?.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
-				const apiKey = process.env[apiKeyEnv];
-				const snapshot = {
-					providerKey,
-					api,
-					baseUrl,
-					apiKeyEnv,
-					apiKeyPresent: Boolean(apiKey),
-				};
-				if (!apiKey || !baseUrl || api !== "openai-completions") {
-					return snapshot;
-				}
-				const controller = new AbortController();
-				const timeout = setTimeout(() => controller.abort(), 3000);
-				try {
-					const response = await fetch(
-						new URL("chat/completions", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`),
-						{
-							method: "POST",
-							headers: {
-								"content-type": "application/json",
-								authorization: `Bearer ${apiKey}`,
-							},
-							body: JSON.stringify({
-								model: ctx.session.state.model.id,
-								stream: false,
-								messages: [{ role: "user", content: "Reply exactly DOCTOR_OK" }],
-							}),
-							signal: controller.signal,
-						},
-					);
-					if (!response.ok) {
-						return { ...snapshot, httpStatus: response.status, errorText: await response.text() };
-					}
-					const payload = (await response.json()) as any;
-					const text = payload?.choices?.[0]?.message?.content;
-					return {
-						...snapshot,
-						httpStatus: response.status,
-						responseText: typeof text === "string" ? text.trim() : null,
-					};
-				} catch (err) {
-					return { ...snapshot, errorText: `  error: ${err instanceof Error ? err.message : String(err)}` };
-				} finally {
-					clearTimeout(timeout);
-				}
-			},
-		});
-
-		registry.register({
-			name: "resume",
-			description: "Show recent sessions or resume one",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				if (handler.isInteractionBusy() || handler.pendingPermissionState() !== null) {
-					ctx.output.writeError("Session is busy.");
-					return undefined;
-				}
-
-				const recent = await runtime.listRecentSessions();
-				const selector = ctx.args.trim();
-				if (selector.length === 0) {
-					await handler.openResumeBrowser(runtime, "");
-					return undefined;
-				}
-
-				const directMatch = resolveRecentSessionDirectSelection(selector, recent, recent);
-				if (!directMatch) {
-					await handler.openResumeBrowser(runtime, selector);
-					return undefined;
-				}
-				const data = directMatch.recoveryData;
-
-				const recovered = await sessionEngine.recoverSession(data, { closeActive: true });
-				switchInteractiveSession(recovered);
-				handler.closeResumeBrowser();
-				for (const line of buildRestoredContextLines(directMatch)) {
-					ctx.output.writeLine(line);
-				}
-				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
-				ctx.output.writeLine("Next: continue this session, or /resume to view history again.");
-				return undefined;
+			closeResumeBrowser: () => {
+				this.closeResumeBrowser();
 			},
 		});
 
@@ -658,9 +492,8 @@ class InteractiveModeHandler implements ModeHandler {
 						sink.writeLine("Aborted.");
 						return;
 					}
-					exitRequested = true;
+					exitSignal.requestExit();
 					sink.writeLine("Bye.");
-					inputLoop?.close();
 					return;
 				}
 				this.handleSpecialKey(key);
@@ -692,7 +525,7 @@ class InteractiveModeHandler implements ModeHandler {
 						switchInteractiveSession,
 					);
 					if (handled) {
-						if (exitRequested) {
+						if (exitSignal.isExitRequested()) {
 							break;
 						}
 						line = await inputLoop.nextLine();
@@ -743,7 +576,7 @@ class InteractiveModeHandler implements ModeHandler {
 							sink.writeError(this._lastError);
 						},
 					});
-					if (exitRequested) {
+					if (exitSignal.isExitRequested()) {
 						break;
 					}
 					line = await inputLoop.nextLine();
@@ -2156,61 +1989,6 @@ function parsePermissionDecision(input: string, selectedIndex = 0): "allow_once"
 	return null;
 }
 
-function runGit(
-	cwd: string,
-	args: readonly string[],
-): Promise<{ type: "ok"; stdout: string; stderr: string } | { type: "error" }> {
-	return new Promise((resolve) => {
-		execFile("git", [...args], { cwd }, (error, stdout, stderr) => {
-			if (error) {
-				resolve({ type: "error" });
-				return;
-			}
-			resolve({ type: "ok", stdout: String(stdout), stderr: String(stderr) });
-		});
-	});
-}
-
-interface GitWorkingTreeSnapshot {
-	readonly available: boolean;
-	readonly statusLines: readonly string[];
-	readonly diffStatLines: readonly string[];
-}
-
-async function inspectGitWorkingTree(cwd: string): Promise<GitWorkingTreeSnapshot> {
-	const [status, diffStat] = await Promise.all([
-		runGit(cwd, ["status", "--porcelain"]),
-		runGit(cwd, ["diff", "--stat"]),
-	]);
-	if (status.type === "error" || diffStat.type === "error") {
-		return {
-			available: false,
-			statusLines: [],
-			diffStatLines: [],
-		};
-	}
-	return {
-		available: true,
-		statusLines: splitNonEmptyLines(status.stdout),
-		diffStatLines: splitNonEmptyLines(diffStat.stdout),
-	};
-}
-
-function readGitDiff(
-	cwd: string,
-	target: string | null,
-): Promise<{ type: "ok"; stdout: string; stderr: string } | { type: "error" }> {
-	return runGit(cwd, target ? ["diff", "--", target] : ["diff"]);
-}
-
-function splitNonEmptyLines(text: string): readonly string[] {
-	return text
-		.trim()
-		.split("\n")
-		.map((line) => line.trimEnd())
-		.filter((line) => line.length > 0);
-}
-
 function stripAnsiWelcome(text: string): string {
 	return stripAnsiControlSequences(text);
 }
@@ -2319,57 +2097,6 @@ export function formatWelcomeCenteredLine(contentWidth: number, text: string): s
 	return `${applyWelcomeBorderColor("│")}${" ".repeat(left)}${text}${" ".repeat(right)}${applyWelcomeBorderColor("│")}`;
 }
 
-export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boolean {
-	if (event.category === "session") return false;
-	if (event.category === "tool") return false;
-	if (event.category === "compaction") return false;
-	if (event.category === "permission") return false;
-	return true;
-}
-
-export function formatInteractiveToolEvent(
-	event: RuntimeEvent,
-	startedParameters?: Readonly<Record<string, unknown>>,
-): string {
-	if (event.category !== "tool") return "";
-	if (event.type === "tool_started") {
-		return [
-			formatInteractiveToolTitle(event.toolName, event.parameters),
-			formatInteractiveToolPreview(event.toolName, event.parameters),
-		]
-			.filter((part) => part.length > 0)
-			.join("\n");
-	}
-	if (event.type === "tool_completed") {
-		return formatInteractiveToolResult(event.toolName, event.result, startedParameters);
-	}
-	if (event.type === "tool_denied") {
-		return "";
-	}
-	return "";
-}
-
-export function formatInteractivePermissionBlock(
-	details: {
-		toolName: string;
-		riskLevel: string;
-		reason?: string;
-		targetPath?: string;
-	},
-	selectedIndex = 0,
-): string {
-	const bodyLines = formatInteractivePermissionBodyLines(details, selectedIndex);
-	return materializeTextBlock(
-		composeSectionBlock({
-			leadingLines: bodyLines.slice(0, 1),
-			separator: "────────────────────────────────────────",
-			bodyLines: bodyLines.slice(1),
-		}),
-	).block;
-}
-
-export type InteractiveFooterRenderResult = RenderedComposerBlock;
-
 function materializeInteractiveScreenFrame(
 	composed: ComposedScreen,
 	footerUi: InteractiveFooterRenderResult,
@@ -2393,197 +2120,6 @@ export interface InteractiveStreamingRenderResult {
 	readonly renderedWidth: number;
 	readonly startRow: number;
 	readonly reservedRows: number;
-}
-
-export function formatInteractiveFooter(state: {
-	readonly terminalWidth: number;
-	readonly prompt: string;
-	readonly buffer: string;
-	readonly cursor: number;
-	readonly suggestions: readonly string[];
-	readonly turnNotice: "thinking" | "responding" | "tool" | "compacting" | null;
-	readonly turnNoticeAnimationFrame?: number;
-	readonly elapsedMs?: number | null;
-	readonly currentTurnUsage?: UsageSnapshot | null;
-	readonly lastTurnUsage?: UsageSnapshot | null;
-	readonly sessionUsage?: UsageSnapshot | null;
-	readonly activeToolLabel?: string | null;
-	readonly showPendingOutputIndicator?: boolean;
-	readonly detailPanelExpanded?: boolean;
-	readonly detailPanelSummary?: string | null;
-	readonly detailPanelLines?: readonly string[];
-	readonly queuedInputs?: readonly string[];
-	readonly permission: {
-		readonly details: {
-			toolName: string;
-			riskLevel: string;
-			reason?: string;
-			targetPath?: string;
-		};
-		readonly selectedIndex: number;
-	} | null;
-}): InteractiveFooterRenderResult {
-	const separator = formatInteractiveInputSeparator(computeInteractiveFooterSeparatorWidth(state.terminalWidth));
-	const leadingLines = buildInteractiveFooterLeadingLinesFromUi({
-		...state,
-		truncateText: truncatePlainTerminalText,
-	});
-	if (state.permission !== null) {
-		const prompt = "choice [Enter/1/2/3]> ";
-		const layout = composePromptBlock({
-			leadingLines,
-			separator,
-			bodyLines: formatInteractivePermissionBodyLines(state.permission.details, state.permission.selectedIndex),
-			prompt,
-			buffer: state.buffer,
-			cursor: state.cursor,
-		});
-		return materializeComposerBlock(layout, state.terminalWidth);
-	}
-	const hint = formatSlashSuggestionHint(
-		state.suggestions,
-		state.terminalWidth - computePromptCursorColumnFromTuiCore(state.prompt, state.buffer, state.buffer.length),
-	);
-	const layout = composePromptBlock({
-		leadingLines,
-		separator,
-		prompt: state.prompt,
-		buffer: formatInteractivePromptBuffer(state.buffer, false),
-		cursor: state.cursor,
-		hint,
-	});
-	return materializeComposerBlock(layout, state.terminalWidth);
-}
-
-export function movePermissionSelection(current: number, direction: -1 | 1): number {
-	const size = 3;
-	return (current + direction + size) % size;
-}
-
-export function permissionDecisionFromSelection(selectedIndex: number): "allow_once" | "allow_for_session" | "deny" {
-	if (selectedIndex === 1) return "allow_for_session";
-	if (selectedIndex === 2) return "deny";
-	return "allow_once";
-}
-
-function formatPermissionChoiceLine(index: number, selectedIndex: number, label: string): string {
-	const prefix = index === selectedIndex ? "❯" : " ";
-	if (index === selectedIndex) {
-		return `${prefix} ${INTERACTIVE_THEME.selectedBg}${INTERACTIVE_THEME.selectedFg}${index + 1}. ${label}${INTERACTIVE_THEME.reset}`;
-	}
-	return `${prefix} ${index + 1}. ${label}`;
-}
-
-function formatInteractivePermissionBodyLines(
-	details: {
-		toolName: string;
-		riskLevel: string;
-		reason?: string;
-		targetPath?: string;
-	},
-	selectedIndex: number,
-): string[] {
-	return [
-		formatInteractiveToolTitle(details.toolName, details.targetPath ? { file_path: details.targetPath } : {}),
-		formatPermissionQuestion(details),
-		formatPermissionChoiceLine(0, selectedIndex, "Yes"),
-		formatPermissionChoiceLine(1, selectedIndex, "Yes, allow during this session"),
-		formatPermissionChoiceLine(2, selectedIndex, "No"),
-	];
-}
-
-function formatPermissionQuestion(details: {
-	toolName: string;
-	riskLevel: string;
-	reason?: string;
-	targetPath?: string;
-}): string {
-	if (details.toolName === "write" || details.toolName === "edit") {
-		const target = details.targetPath ? basename(details.targetPath) : "this file";
-		const action = details.toolName === "write" ? "create or overwrite" : "edit";
-		return `Do you want to ${action} ${target}?`;
-	}
-	return `Allow ${details.toolName} (${details.riskLevel})${details.reason ? ` — ${details.reason}` : ""}?`;
-}
-
-export function formatInteractiveToolTitle(
-	toolName: string,
-	parameters: Readonly<Record<string, unknown>> | { file_path?: string; path?: string } = {},
-): string {
-	const name = interactiveToolDisplayName(toolName);
-	const summary = summarizeToolParameters(toolName, parameters);
-	return summary.length > 0 ? `⏺ ${name}(${summary})` : `⏺ ${name}`;
-}
-
-export function formatInteractiveToolResult(
-	toolName: string,
-	result?: string,
-	startedParameters?: Readonly<Record<string, unknown>>,
-): string {
-	const lines = normalizeToolResultLines(toolName, result, startedParameters);
-	if (lines.length === 0) return "";
-	return lines.map((line, index) => `${index === 0 ? "  ⎿" : "   "} ${line}`).join("\n");
-}
-
-function formatInteractiveToolPreview(toolName: string, parameters: Readonly<Record<string, unknown>>): string {
-	if (toolName !== "write" && toolName !== "edit") return "";
-	if (toolName === "edit") {
-		const oldString = typeof parameters.old_string === "string" ? parameters.old_string : "";
-		const newString = typeof parameters.new_string === "string" ? parameters.new_string : "";
-		const diff = formatMiniDiffPreview(oldString, newString);
-		if (diff.length > 0) {
-			return diff;
-		}
-	}
-	const previewSource = typeof parameters.content === "string" ? parameters.content : "";
-	if (previewSource.trim().length === 0) return "";
-	const previewLines = previewSource.trimEnd().split("\n").slice(0, 4);
-	return ["  │ Preview", ...previewLines.map((line) => `  │ ${truncatePreviewLine(line)}`)]
-		.filter((line) => line.length > 0)
-		.join("\n");
-}
-
-function interactiveToolDisplayName(toolName: string): string {
-	switch (toolName) {
-		case "bash":
-			return "Bash";
-		case "write":
-			return "Write";
-		case "edit":
-			return "Edit";
-		case "read":
-			return "Read";
-		case "grep":
-			return "Grep";
-		case "find":
-			return "Find";
-		case "ls":
-			return "LS";
-		default:
-			return toolName;
-	}
-}
-
-function summarizeToolParameters(
-	toolName: string,
-	parameters: Readonly<Record<string, unknown>> | { file_path?: string; path?: string },
-): string {
-	if (toolName === "bash" && typeof (parameters as Record<string, unknown>).command === "string") {
-		return (parameters as Record<string, unknown>).command as string;
-	}
-	const filePath =
-		typeof parameters.file_path === "string"
-			? parameters.file_path
-			: typeof parameters.path === "string"
-				? parameters.path
-				: undefined;
-	if (filePath) {
-		return basename(filePath);
-	}
-	if (toolName === "grep" && typeof (parameters as Record<string, unknown>).pattern === "string") {
-		return (parameters as Record<string, unknown>).pattern as string;
-	}
-	return "";
 }
 
 function detailPanelScrollDeltaForKey(
@@ -2653,77 +2189,8 @@ export function createDebouncedCallback(
 	};
 }
 
-function normalizeToolResultLines(
-	toolName: string,
-	result?: string,
-	startedParameters?: Readonly<Record<string, unknown>>,
-): readonly string[] {
-	if ((!result || result.trim().length === 0) && startedParameters) {
-		if (toolName === "write" || toolName === "edit") {
-			const target =
-				typeof startedParameters.file_path === "string"
-					? basename(startedParameters.file_path)
-					: typeof startedParameters.path === "string"
-						? basename(startedParameters.path)
-						: "file";
-			const previewSource =
-				typeof startedParameters.content === "string"
-					? startedParameters.content
-					: typeof startedParameters.new_string === "string"
-						? startedParameters.new_string
-						: "";
-			const lineCount = previewSource.length > 0 ? previewSource.split("\n").length : null;
-			if (toolName === "write") {
-				return [`Wrote ${lineCount ?? 1} lines to ${target}`];
-			}
-			const replacementCount =
-				typeof startedParameters.old_string === "string" || typeof startedParameters.new_string === "string"
-					? 1
-					: null;
-			return [
-				`Applied edit to ${target}${replacementCount ? ` (${replacementCount} change)` : lineCount ? ` (${lineCount} lines)` : ""}`,
-			];
-		}
-		if (toolName === "bash" && typeof startedParameters.command === "string") {
-			return [`Ran: ${startedParameters.command}`];
-		}
-	}
-	if (!result || result.trim().length === 0) return [];
-	if (toolName === "write" || toolName === "edit") {
-		const lines = result.trimEnd().split("\n");
-		return lines.slice(0, 4);
-	}
-	return result.trimEnd().split("\n").slice(0, 6);
-}
-
-function truncatePreviewLine(line: string): string {
-	return measureTerminalDisplayWidth(line) <= 72 ? line : `${line.slice(0, 69)}...`;
-}
-
 function ansiShowCursor(): string {
 	return "\x1b[?25h";
-}
-
-function formatMiniDiffPreview(oldString: string, newString: string): string {
-	if (oldString.trim().length === 0 && newString.trim().length === 0) return "";
-	const removed = oldString
-		.trimEnd()
-		.split("\n")
-		.filter((line) => line.length > 0)
-		.slice(0, 2);
-	const added = newString
-		.trimEnd()
-		.split("\n")
-		.filter((line) => line.length > 0)
-		.slice(0, 2);
-	const lines = ["  │ Diff"];
-	lines.push(...removed.map((line) => `  - ${truncatePreviewLine(line)}`));
-	lines.push(...added.map((line) => `  + ${truncatePreviewLine(line)}`));
-	return lines.join("\n");
-}
-
-function truncatePlainTerminalText(text: string, width: number): string {
-	return truncatePlainTextFromTuiCore(text, width);
 }
 
 export function computeVisibleTranscriptLines(

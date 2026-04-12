@@ -879,6 +879,76 @@ describe("createAppRuntime", () => {
 		expect(recent[0]?.recoveryData.metadata?.summary).toContain("second compact summary");
 	});
 
+	it("keeps authoritative close metadata when a debounced projection flushes later", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-close-vs-debounce-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+
+		runtime.scheduleRecentSessionEvent(
+			session,
+			{
+				id: "evt-pending-compaction",
+				category: "compaction",
+				type: "compaction_completed",
+				timestamp: Date.now(),
+				sessionId: session.id,
+				summary: {
+					compressedAt: Date.now(),
+					originalMessageCount: 10,
+					retainedMessageCount: 4,
+					estimatedTokensSaved: 128,
+					compactedSummary: "pending debounced summary",
+				},
+			},
+			{ title: "Pending Debounce Title" },
+		);
+
+		await runtime.recordClosedRecentSession(session, {
+			sessionId: session.id,
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "kernel authoritative summary",
+				firstPrompt: "kernel authoritative prompt",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user", text: "kernel authoritative prompt" },
+					{ role: "assistant", text: "kernel authoritative answer" },
+				],
+			},
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+		});
+
+		for (let attempt = 0; attempt < 50; attempt += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.title).toBe("kernel authoritative prompt");
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "kernel authoritative summary",
+			firstPrompt: "kernel authoritative prompt",
+		});
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "kernel authoritative prompt" },
+			{ role: "assistant", text: "kernel authoritative answer" },
+		]);
+	});
+
 	it("projects runtime events through session engine owned recent-session scheduling", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-events-"));
 		const historyDir = join(agentDir, "history");
@@ -1160,6 +1230,93 @@ describe("createAppRuntime", () => {
 		expect(storedEntry.metadata?.recentMessages).toEqual([
 			{ role: "user", text: "新问题" },
 			{ role: "assistant", text: "新回答" },
+		]);
+	});
+
+	it("keeps runtime-owned metadata stable even when sessionFile changes", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-runtime-metadata-stable-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const sessionFile = join(agentDir, "session.jsonl");
+		await writeFile(
+			sessionFile,
+			`${[
+				JSON.stringify({ type: "session_info", name: "文件标题A" }),
+				JSON.stringify({ type: "message", message: { role: "user", content: "文件问题A" } }),
+				JSON.stringify({ type: "message", message: { role: "assistant", content: "文件回答A" } }),
+			].join("\n")}\n`,
+			"utf8",
+		);
+
+		await runtime.recordRecentSession({
+			sessionId: { value: "runtime-metadata-stable" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "runtime summary A",
+				firstPrompt: "runtime prompt A",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user", text: "runtime prompt A" },
+					{ role: "assistant", text: "runtime answer A" },
+				],
+			},
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+			sessionFile,
+		});
+
+		await writeFile(
+			sessionFile,
+			`${[
+				JSON.stringify({ type: "session_info", name: "文件标题B" }),
+				JSON.stringify({ type: "message", message: { role: "user", content: "文件问题B" } }),
+				JSON.stringify({ type: "message", message: { role: "assistant", content: "文件回答B" } }),
+			].join("\n")}\n`,
+			"utf8",
+		);
+
+		await runtime.recordRecentSession({
+			sessionId: { value: "runtime-metadata-stable" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "runtime summary B",
+				firstPrompt: "runtime prompt A",
+				messageCount: 3,
+				fileSizeBytes: 256,
+				recentMessages: [
+					{ role: "user", text: "runtime prompt A" },
+					{ role: "assistant", text: "runtime answer A" },
+					{ role: "assistant", text: "runtime answer B" },
+				],
+			},
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+			sessionFile,
+		});
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "runtime summary B",
+			firstPrompt: "runtime prompt A",
+		});
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "runtime prompt A" },
+			{ role: "assistant", text: "runtime answer A" },
+			{ role: "assistant", text: "runtime answer B" },
 		]);
 	});
 
