@@ -1,5 +1,5 @@
-import { createEventBus } from "@pickle-pee/runtime";
 import type { SessionFacade } from "@pickle-pee/runtime";
+import { createEventBus } from "@pickle-pee/runtime";
 import { describe, expect, it, vi } from "vitest";
 import { createInteractiveSessionBinding } from "../interactive-session-binding.js";
 

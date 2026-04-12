@@ -2086,9 +2086,7 @@ describe("createAppRuntime", () => {
 		expect(recent[0]?.title).toBe("Engine projection title");
 		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("engine owned input");
 		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ role: "assistant", text: "engine owned assistant" }),
-			]),
+			expect.arrayContaining([expect.objectContaining({ role: "assistant", text: "engine owned assistant" })]),
 		);
 	});
 

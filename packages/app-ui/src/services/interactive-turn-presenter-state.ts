@@ -1,10 +1,10 @@
+import { basename } from "node:path";
 import type {
 	InteractiveActiveToolCall,
 	InteractiveTurnNotice,
 	InteractiveTurnPresenterState,
 	UsageSnapshot,
 } from "../types/index.js";
-import { basename } from "node:path";
 
 export function emptyUsageSnapshot(): UsageSnapshot {
 	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
@@ -145,10 +145,7 @@ export function currentInteractiveTurnUsage(current: InteractiveTurnPresenterSta
 	return hasUsageSnapshot(usage) ? usage : null;
 }
 
-export function currentInteractiveTurnElapsedMs(
-	current: InteractiveTurnPresenterState,
-	now: number,
-): number | null {
+export function currentInteractiveTurnElapsedMs(current: InteractiveTurnPresenterState, now: number): number | null {
 	if (current.notice === null || current.startedAt === null) {
 		return null;
 	}
@@ -178,9 +175,10 @@ export function queueInteractiveInput(
 	};
 }
 
-export function drainQueuedInteractiveInputs(
-	current: InteractiveTurnPresenterState,
-): { readonly state: InteractiveTurnPresenterState; readonly batch: string | null } {
+export function drainQueuedInteractiveInputs(current: InteractiveTurnPresenterState): {
+	readonly state: InteractiveTurnPresenterState;
+	readonly batch: string | null;
+} {
 	if (current.queuedInputs.length === 0) {
 		return { state: current, batch: null };
 	}
@@ -253,10 +251,7 @@ export function summarizeActiveInteractiveToolLabel(current: InteractiveTurnPres
 	return `Running ${current.activeToolCalls.length} tools`;
 }
 
-function formatInteractiveToolTitle(
-	toolName: string,
-	parameters: Readonly<Record<string, unknown>>,
-): string {
+function formatInteractiveToolTitle(toolName: string, parameters: Readonly<Record<string, unknown>>): string {
 	const displayName = mapInteractiveToolName(toolName);
 	const summary = summarizeInteractiveToolParameters(toolName, parameters);
 	return summary.length > 0 ? `${displayName}(${summary})` : displayName;
@@ -283,10 +278,7 @@ function mapInteractiveToolName(toolName: string): string {
 	}
 }
 
-function summarizeInteractiveToolParameters(
-	toolName: string,
-	parameters: Readonly<Record<string, unknown>>,
-): string {
+function summarizeInteractiveToolParameters(toolName: string, parameters: Readonly<Record<string, unknown>>): string {
 	if (toolName === "bash" && typeof parameters.command === "string") {
 		return parameters.command;
 	}

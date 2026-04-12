@@ -934,7 +934,10 @@ function createFakeSessionEngine(
 			createSession(): SessionFacade {
 				return registerSession(createSession());
 			},
-			async recoverSession(data: SessionRecoveryData, options?: { readonly closeActive?: boolean }): Promise<SessionFacade> {
+			async recoverSession(
+				data: SessionRecoveryData,
+				options?: { readonly closeActive?: boolean },
+			): Promise<SessionFacade> {
 				if (options?.closeActive !== false && activeSessionId !== null) {
 					await engine.closeSession(activeSessionId);
 				}

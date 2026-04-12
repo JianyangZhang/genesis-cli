@@ -35,13 +35,16 @@ describe("interactive detail panel state", () => {
 
 	it("switches to compaction summary and clears state", () => {
 		let state = appendThinkingDetailText(initialInteractiveDetailPanelState(), "draft");
-		state = showCompactionDetailSummary(state, formatCompactionDetailText({
-			compressedAt: Date.now(),
-			originalMessageCount: 10,
-			retainedMessageCount: 3,
-			estimatedTokensSaved: 42,
-			compactedSummary: "summary",
-		}));
+		state = showCompactionDetailSummary(
+			state,
+			formatCompactionDetailText({
+				compressedAt: Date.now(),
+				originalMessageCount: 10,
+				retainedMessageCount: 3,
+				estimatedTokensSaved: 42,
+				compactedSummary: "summary",
+			}),
+		);
 
 		expect(readInteractiveDetailPanelText(state)).toContain("Compaction summary");
 		expect(readInteractiveDetailPanelText(state)).toContain("Compressed conversation:");

@@ -64,6 +64,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 	const sessions = new Map<string, SessionFacade>();
 	const activeTurns = new Map<string, Promise<void>>();
 	const sessionTitles = new Map<string, string>();
+	const pendingCloseWrites = new Map<string, Promise<void>>();
 	let activeSessionId: string | null = null;
 
 	const unsubscribeClosed = deps.runtimeEvents.on("session_closed", (event) => {
@@ -72,9 +73,14 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 		if (!session) {
 			return;
 		}
-		void deps.recordClosedRecentSession(session, closed.recoveryData, {
-			title: sessionTitles.get(session.id.value) ?? options.titleResolver?.(session),
-		});
+		const closeWrite = deps
+			.recordClosedRecentSession(session, closed.recoveryData, {
+				title: sessionTitles.get(session.id.value) ?? options.titleResolver?.(session),
+			})
+			.finally(() => {
+				pendingCloseWrites.delete(closed.sessionId.value);
+			});
+		pendingCloseWrites.set(closed.sessionId.value, closeWrite);
 		sessions.delete(closed.sessionId.value);
 		activeTurns.delete(closed.sessionId.value);
 		sessionTitles.delete(closed.sessionId.value);
@@ -122,10 +128,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			return registerSession(session, optionsInput.makeActive !== false);
 		},
 
-		async recoverSession(
-			data: SessionRecoveryData,
-			optionsInput = {},
-		): Promise<SessionFacade> {
+		async recoverSession(data: SessionRecoveryData, optionsInput = {}): Promise<SessionFacade> {
 			if (optionsInput.closeActive !== false && activeSessionId !== null) {
 				await this.closeSession(activeSessionId);
 			}
@@ -167,10 +170,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			return session ? activeTurns.has(session.id.value) : false;
 		},
 
-		submit(
-			input: string,
-			optionsInput = {},
-		): Promise<void> {
+		submit(input: string, optionsInput = {}): Promise<void> {
 			const session = resolveSession(optionsInput.sessionId);
 			if (!session) {
 				return Promise.reject(new Error("No active session"));
@@ -181,8 +181,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			void deps.recordRecentSessionInput(session, input, {
 				title: resolveSessionTitle(session),
 			});
-			const turn =
-				optionsInput.mode === "continue" ? session.continue(input) : session.prompt(input);
+			const turn = optionsInput.mode === "continue" ? session.continue(input) : session.prompt(input);
 			activeTurns.set(
 				session.id.value,
 				turn.finally(() => {
@@ -220,6 +219,10 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 				return null;
 			}
 			await session.close();
+			const closeWrite = pendingCloseWrites.get(session.id.value);
+			if (closeWrite) {
+				await closeWrite;
+			}
 			return session;
 		},
 
@@ -235,6 +238,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			sessions.clear();
 			activeTurns.clear();
 			sessionTitles.clear();
+			pendingCloseWrites.clear();
 			activeSessionId = null;
 		},
 	};

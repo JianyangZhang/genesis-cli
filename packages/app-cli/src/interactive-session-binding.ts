@@ -1,6 +1,5 @@
 import { join } from "node:path";
-import type { RuntimeEvent } from "@pickle-pee/runtime";
-import type { SessionFacade } from "@pickle-pee/runtime";
+import type { RuntimeEvent, SessionFacade } from "@pickle-pee/runtime";
 
 export interface InteractiveSessionBindingHooks {
 	readonly onSessionAttached: (session: SessionFacade) => void;
@@ -46,7 +45,10 @@ export function createInteractiveSessionBinding(
 			bindSession(next);
 		},
 		resolveAgentDir(): string {
-			return sessionRef.current.context.agentDir ?? join(sessionRef.current.context.workingDirectory, ".genesis-local", "agent");
+			return (
+				sessionRef.current.context.agentDir ??
+				join(sessionRef.current.context.workingDirectory, ".genesis-local", "agent")
+			);
 		},
 		dispose(): void {
 			detachEventListener?.();

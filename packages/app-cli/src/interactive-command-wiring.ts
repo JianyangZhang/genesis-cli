@@ -2,7 +2,11 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppRuntime, SessionEngine, SessionFacade } from "@pickle-pee/runtime";
-import { buildRestoredContextLines, createInteractiveCommandRegistry, resolveRecentSessionDirectSelection } from "@pickle-pee/ui";
+import {
+	buildRestoredContextLines,
+	createInteractiveCommandRegistry,
+	resolveRecentSessionDirectSelection,
+} from "@pickle-pee/ui";
 import type { InteractiveSessionBinding } from "./interactive-session-binding.js";
 
 interface InteractiveExitSignal {
@@ -277,10 +281,7 @@ async function buildDoctorSnapshot(
 	}
 }
 
-function runGit(
-	cwd: string,
-	args: readonly string[],
-): Promise<{ type: "ok"; stdout: string } | { type: "error" }> {
+function runGit(cwd: string, args: readonly string[]): Promise<{ type: "ok"; stdout: string } | { type: "error" }> {
 	return new Promise((resolve) => {
 		execFile("git", [...args], { cwd }, (error, stdout) => {
 			if (error) {
@@ -297,7 +298,10 @@ async function inspectGitWorkingTree(cwd: string): Promise<{
 	readonly statusLines: readonly string[];
 	readonly diffStatLines: readonly string[];
 }> {
-	const [status, diffStat] = await Promise.all([runGit(cwd, ["status", "--porcelain"]), runGit(cwd, ["diff", "--stat"])]);
+	const [status, diffStat] = await Promise.all([
+		runGit(cwd, ["status", "--porcelain"]),
+		runGit(cwd, ["diff", "--stat"]),
+	]);
 	if (status.type === "error" || diffStat.type === "error") {
 		return {
 			available: false,
@@ -312,10 +316,7 @@ async function inspectGitWorkingTree(cwd: string): Promise<{
 	};
 }
 
-function readGitDiff(
-	cwd: string,
-	target: string | null,
-): Promise<{ type: "ok"; stdout: string } | { type: "error" }> {
+function readGitDiff(cwd: string, target: string | null): Promise<{ type: "ok"; stdout: string } | { type: "error" }> {
 	return runGit(cwd, target ? ["diff", "--", target] : ["diff"]);
 }
 

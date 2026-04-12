@@ -25,8 +25,16 @@ describe("interactive turn presenter state", () => {
 		expect(state.notice).toBe("thinking");
 		expect(currentInteractiveTurnElapsedMs(state, 3_500)).toBe(2_500);
 
-		state = updateInteractiveTurnUsage(state, { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120 }, false);
-		state = updateInteractiveTurnUsage(state, { input: 0, output: 30, cacheRead: 0, cacheWrite: 0, totalTokens: 30 }, true);
+		state = updateInteractiveTurnUsage(
+			state,
+			{ input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120 },
+			false,
+		);
+		state = updateInteractiveTurnUsage(
+			state,
+			{ input: 0, output: 30, cacheRead: 0, cacheWrite: 0, totalTokens: 30 },
+			true,
+		);
 		expect(currentInteractiveTurnUsage(state)).toEqual({
 			input: 0,
 			output: 30,
@@ -60,7 +68,10 @@ describe("interactive turn presenter state", () => {
 		expect(drained.batch).toBe("first\n\nsecond");
 		expect(drained.state.queuedInputs).toEqual([]);
 
-		let noticeState = setInteractiveTurnNotice(beginInteractiveTurnFeedback(initialInteractiveTurnPresenterState(), 10), "responding");
+		let noticeState = setInteractiveTurnNotice(
+			beginInteractiveTurnFeedback(initialInteractiveTurnPresenterState(), 10),
+			"responding",
+		);
 		noticeState = preserveThinkingNoticeForQueuedBacklog(noticeState, 20);
 		expect(noticeState.notice).toBe("thinking");
 

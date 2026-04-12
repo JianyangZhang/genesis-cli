@@ -10,9 +10,7 @@ export function resetInteractiveInputAssistState(): InteractiveInputAssistState 
 	return initialInteractiveInputAssistState();
 }
 
-export function clearInteractiveInputAssistState(
-	current: InteractiveInputAssistState,
-): InteractiveInputAssistState {
+export function clearInteractiveInputAssistState(current: InteractiveInputAssistState): InteractiveInputAssistState {
 	if (current.commandSuggestions.length === 0) {
 		return current;
 	}

@@ -1,9 +1,5 @@
 import type { RecentSessionSearchHit } from "@pickle-pee/runtime";
-import type {
-	InteractiveOverlayState,
-	PendingPermissionDetails,
-	ResumeBrowserState,
-} from "../types/index.js";
+import type { InteractiveOverlayState, PendingPermissionDetails, ResumeBrowserState } from "../types/index.js";
 import {
 	beginResumeBrowserSearch,
 	completeResumeBrowserSearch,

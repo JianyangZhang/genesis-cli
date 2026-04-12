@@ -1,4 +1,3 @@
-import type { SlashCommand } from "../types/index.js";
 import { describe, expect, it } from "vitest";
 import {
 	acceptFirstSlashSuggestion,
@@ -7,6 +6,7 @@ import {
 	initialInteractiveInputAssistState,
 	updateSlashCommandSuggestions,
 } from "../services/interactive-input-assist-state.js";
+import type { SlashCommand } from "../types/index.js";
 
 describe("interactive input assist state", () => {
 	const commands: readonly SlashCommand[] = [

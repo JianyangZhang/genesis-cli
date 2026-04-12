@@ -8,13 +8,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type {
-	AppRuntime,
-	CliMode,
-	RuntimeEvent,
-	SessionEngine,
-	SessionFacade,
-} from "@pickle-pee/runtime";
+import type { AppRuntime, CliMode, RuntimeEvent, SessionEngine, SessionFacade } from "@pickle-pee/runtime";
 import {
 	type ComposedScreen,
 	clampScrollOffset,
@@ -60,29 +54,29 @@ import type {
 } from "@pickle-pee/ui";
 import {
 	acceptFirstSlashSuggestion,
+	appendThinkingDetailText,
 	beginInteractiveTurn,
 	beginInteractiveTurnFeedback,
-	appendThinkingDetailText,
 	beginResumeBrowserOverlaySearch,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
 	buildResumeBrowserResumedLines,
 	clearInteractiveInputAssistState,
-	clearPendingPermissionRequest,
+	clearInteractiveToolCall,
 	clearInteractiveTurnNotice,
-	collapseInteractiveDetailPanel,
+	clearPendingPermissionRequest,
 	closeResumeBrowserOverlay,
-	completeResumeBrowserOverlaySearch,
+	collapseInteractiveDetailPanel,
 	completeInteractiveTurn,
+	completeResumeBrowserOverlaySearch,
 	computeInteractiveFooterSeparatorWidth,
+	createInteractiveConversationState,
 	currentInteractiveTurnElapsedMs,
 	currentInteractiveTurnUsage,
-	findInteractiveToolParameters,
-	initialInteractiveInputAssistState,
-	createInteractiveConversationState,
 	drainQueuedInteractiveInputs,
 	eventToJsonEnvelope,
+	findInteractiveToolParameters,
 	formatCompactionDetailText,
 	formatEventAsText,
 	formatFullWidthTranscriptUserLine,
@@ -94,8 +88,9 @@ import {
 	formatResumeBrowserTranscriptBlocks,
 	formatTranscriptUserBlocks,
 	INTERACTIVE_THEME,
-	initialInteractiveDetailPanelState,
 	initialInteractionState,
+	initialInteractiveDetailPanelState,
+	initialInteractiveInputAssistState,
 	initialInteractiveOverlayState,
 	initialInteractiveTurnPresenterState,
 	markResumeBrowserSubmitPending,
@@ -105,17 +100,17 @@ import {
 	openResumeBrowserOverlay,
 	preserveThinkingNoticeForQueuedBacklog,
 	queueInteractiveInput,
-	registerInteractiveToolCall,
 	reduceInteractionState,
+	registerInteractiveToolCall,
 	resetInteractiveDetailPanelState,
 	resetInteractiveInputAssistState,
 	resetInteractiveOverlayState,
 	resetInteractiveTurnPresenterState,
 	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSubmitHit,
-	setPendingPermissionRequest,
 	setInteractiveDetailPanelScroll,
 	setInteractiveTurnNotice,
+	setPendingPermissionRequest,
 	showCompactionDetailSummary,
 	summarizeActiveInteractiveToolLabel,
 	summarizeResumeBrowserHit,
@@ -124,11 +119,10 @@ import {
 	toggleResumeBrowserOverlayPreview,
 	updateInteractiveTurnUsage,
 	updateSlashCommandSuggestions,
-	clearInteractiveToolCall,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
-import { createInteractiveHostState } from "./interactive-host-state.js";
-import { executeInteractiveSlashCommand } from "./interactive-local-command-orchestrator.js";
+import type { InputLoop } from "./input-loop.js";
+import { createInputLoop } from "./input-loop.js";
 import { createInteractiveCommandWiring, createInteractiveExitSignal } from "./interactive-command-wiring.js";
 import {
 	formatInteractiveFooter,
@@ -136,20 +130,21 @@ import {
 	formatInteractiveToolEvent,
 	formatInteractiveToolResult,
 	formatInteractiveToolTitle,
+	type InteractiveFooterRenderResult,
 	movePermissionSelection,
 	permissionDecisionFromSelection,
 	shouldRenderInteractiveTranscriptEvent,
-	type InteractiveFooterRenderResult,
 } from "./interactive-formatting.js";
+import { createInteractiveHostState } from "./interactive-host-state.js";
+import { executeInteractiveSlashCommand } from "./interactive-local-command-orchestrator.js";
 import { createInteractiveSessionBinding } from "./interactive-session-binding.js";
-import type { InputLoop } from "./input-loop.js";
-import { createInputLoop } from "./input-loop.js";
 import { createModelCommandHost, type ModelCommandHostOptions } from "./model-command-host.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { createTtySession } from "./tty-session.js";
 
+export type { InteractiveFooterRenderResult } from "./interactive-formatting.js";
 export {
 	formatInteractiveFooter,
 	formatInteractivePermissionBlock,
@@ -160,7 +155,6 @@ export {
 	permissionDecisionFromSelection,
 	shouldRenderInteractiveTranscriptEvent,
 };
-export type { InteractiveFooterRenderResult } from "./interactive-formatting.js";
 
 // ---------------------------------------------------------------------------
 // Mode handler interface
@@ -451,7 +445,11 @@ class InteractiveModeHandler implements ModeHandler {
 					void this.refreshResumeBrowserResults(runtime, state.buffer);
 					return;
 				}
-				this._inputAssistState = updateSlashCommandSuggestions(this._inputAssistState, state.buffer, registry.listPublic());
+				this._inputAssistState = updateSlashCommandSuggestions(
+					this._inputAssistState,
+					state.buffer,
+					registry.listPublic(),
+				);
 				this.renderPromptLine();
 			},
 			onTabComplete: (state) => {
@@ -519,11 +517,7 @@ class InteractiveModeHandler implements ModeHandler {
 				const trimmed = line.trim();
 
 				if (this.resumeBrowserState() !== null) {
-					const handled = await this.handleResumeBrowserSubmit(
-						line,
-						sink,
-						switchInteractiveSession,
-					);
+					const handled = await this.handleResumeBrowserSubmit(line, sink, switchInteractiveSession);
 					if (handled) {
 						if (exitSignal.isExitRequested()) {
 							break;
@@ -852,7 +846,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		if (event.category === "tool") {
-			const text = formatInteractiveToolEvent(event, findInteractiveToolParameters(this._turnPresenterState, event.toolCallId));
+			const text = formatInteractiveToolEvent(
+				event,
+				findInteractiveToolParameters(this._turnPresenterState, event.toolCallId),
+			);
 			if (text.length > 0) {
 				this.flushAssistantBuffer(false);
 				this.writeTranscriptText(text, true);
@@ -1352,7 +1349,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return wrapTranscriptContentFromTuiCore(this._detailPanelState.thinkingText.trim(), this.terminalWidth());
 		}
 		if (this._detailPanelState.compactionDetailText.trim().length > 0) {
-			return wrapTranscriptContentFromTuiCore(this._detailPanelState.compactionDetailText.trim(), this.terminalWidth());
+			return wrapTranscriptContentFromTuiCore(
+				this._detailPanelState.compactionDetailText.trim(),
+				this.terminalWidth(),
+			);
 		}
 		return [];
 	}

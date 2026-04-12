@@ -40,9 +40,7 @@ export function showCompactionDetailSummary(
 	};
 }
 
-export function clearInteractiveDetailPanelState(
-	current: InteractiveDetailPanelState,
-): InteractiveDetailPanelState {
+export function clearInteractiveDetailPanelState(current: InteractiveDetailPanelState): InteractiveDetailPanelState {
 	if (
 		current.expanded === false &&
 		current.scrollOffset === 0 &&
@@ -59,9 +57,7 @@ export function clearInteractiveDetailPanelState(
 	};
 }
 
-export function collapseInteractiveDetailPanel(
-	current: InteractiveDetailPanelState,
-): InteractiveDetailPanelState {
+export function collapseInteractiveDetailPanel(current: InteractiveDetailPanelState): InteractiveDetailPanelState {
 	if (!current.expanded) {
 		return current;
 	}

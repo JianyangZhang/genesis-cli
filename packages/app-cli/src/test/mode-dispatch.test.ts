@@ -35,6 +35,16 @@ import {
 } from "@pickle-pee/ui";
 import { describe, expect, it, vi } from "vitest";
 import {
+	formatInteractiveFooter,
+	formatInteractivePermissionBlock,
+	formatInteractiveToolEvent,
+	formatInteractiveToolResult,
+	formatInteractiveToolTitle,
+	movePermissionSelection,
+	permissionDecisionFromSelection,
+	shouldRenderInteractiveTranscriptEvent,
+} from "../interactive-formatting.js";
+import {
 	buildWelcomeLines,
 	computeVisibleTranscriptLines,
 	createDebouncedCallback,
@@ -46,16 +56,6 @@ import {
 	readInteractiveCliPackageVersion,
 	WELCOME_BIBLE_GREETINGS,
 } from "../mode-dispatch.js";
-import {
-	formatInteractiveFooter,
-	formatInteractivePermissionBlock,
-	formatInteractiveToolEvent,
-	formatInteractiveToolResult,
-	formatInteractiveToolTitle,
-	movePermissionSelection,
-	permissionDecisionFromSelection,
-	shouldRenderInteractiveTranscriptEvent,
-} from "../interactive-formatting.js";
 
 function formatLocalTraceTimestamp(value: Date): string {
 	const padTwo = (part: number): string => String(part).padStart(2, "0");

@@ -85,13 +85,13 @@ export type { RuntimeContextParams } from "./runtime-context.js";
 export { createRuntimeContext, updateModel as updateRuntimeContextModel, updateTaskState } from "./runtime-context.js";
 // Services
 export { EventNormalizer } from "./services/event-normalizer.js";
+export type { SessionEngine, SessionEngineOptions, SessionTurnMode } from "./session/session-engine.js";
+export { createSessionEngine } from "./session/session-engine.js";
 // Session events
 export { generateEventId, sessionClosed, sessionCreated, sessionResumed } from "./session/session-events.js";
 // Session
 export type { SessionFacade } from "./session/session-facade.js";
 export { SessionFacadeImpl } from "./session/session-facade.js";
-export type { SessionEngine, SessionEngineOptions, SessionTurnMode } from "./session/session-engine.js";
-export { createSessionEngine } from "./session/session-engine.js";
 export {
 	createInitialSessionState,
 	recoverSessionState,

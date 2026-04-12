@@ -12,9 +12,9 @@ import {
 import {
 	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
 	computeInteractiveFooterSeparatorWidth,
-	formatSlashSuggestionHint,
 	formatInteractiveInputSeparator,
 	formatInteractivePromptBuffer,
+	formatSlashSuggestionHint,
 	INTERACTIVE_THEME,
 	type UsageSnapshot,
 } from "@pickle-pee/ui";

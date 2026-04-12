@@ -68,7 +68,7 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 		params: Record<string, unknown> | null,
 	): { session: SessionFacade; sessionId: string } | null {
 		const engine = requireSessionEngine();
-		const sid = typeof params?.sessionId === "string" ? params.sessionId : engine.activeSession?.id.value ?? null;
+		const sid = typeof params?.sessionId === "string" ? params.sessionId : (engine.activeSession?.id.value ?? null);
 		if (!sid) return null;
 		const session = engine.getSession(sid);
 		if (!session) return null;
@@ -161,11 +161,13 @@ export function createRpcServer(options: RpcServerOptions = {}): RpcServer {
 			}
 
 			case RPC_METHODS.SESSION_LIST: {
-				const result = requireSessionEngine().listSessions().map((s) => ({
-					sessionId: s.id.value,
-					status: s.state.status,
-					model: s.state.model,
-				}));
+				const result = requireSessionEngine()
+					.listSessions()
+					.map((s) => ({
+						sessionId: s.id.value,
+						status: s.state.status,
+						model: s.state.model,
+					}));
 				send(createRpcResponse(id ?? 0, result));
 				break;
 			}

@@ -27,7 +27,9 @@ export interface RecentSessionAuthority {
 	scheduleEvent(session: SessionFacade, event: RuntimeEvent, options?: { readonly title?: string }): void;
 	listSessions(): Promise<readonly RecentSessionEntry[]>;
 	searchSessions(query: string): Promise<readonly RecentSessionSearchHit[]>;
-	pruneSessions(maxEntries?: number): Promise<{ readonly before: number; readonly after: number; readonly removed: number }>;
+	pruneSessions(
+		maxEntries?: number,
+	): Promise<{ readonly before: number; readonly after: number; readonly removed: number }>;
 	clearSessionOverlay(session: SessionFacade): void;
 	dispose(): void;
 }
@@ -81,7 +83,10 @@ export function createRecentSessionAuthority(historyDir: string | undefined): Re
 		recordClosedSession(session, recoveryData, options): Promise<void> {
 			clearPendingEventTimer(session);
 			return enqueue(async () => {
-				const merged = mergeRecoveryDataWithOverlay(withRecentSessionContext(session, recoveryData), getOverlay(session));
+				const merged = mergeRecoveryDataWithOverlay(
+					withRecentSessionContext(session, recoveryData),
+					getOverlay(session),
+				);
 				await recordRecentSession(historyDir, merged, {
 					...options,
 					authoritativeMetadata: true,
@@ -144,7 +149,9 @@ export function createRecentSessionAuthority(historyDir: string | undefined): Re
 			return searchRecentSessions(historyDir, query);
 		},
 
-		pruneSessions(maxEntries?: number): Promise<{ readonly before: number; readonly after: number; readonly removed: number }> {
+		pruneSessions(
+			maxEntries?: number,
+		): Promise<{ readonly before: number; readonly after: number; readonly removed: number }> {
 			return pruneRecentSessions(historyDir, maxEntries);
 		},
 
@@ -273,7 +280,9 @@ function appendOverlayAssistantMessage(
 	return trimOverlayMessages([...recentMessages, { role: "assistant", text }]);
 }
 
-function trimOverlayMessages(messages: readonly SessionTranscriptMessagePreview[]): readonly SessionTranscriptMessagePreview[] {
+function trimOverlayMessages(
+	messages: readonly SessionTranscriptMessagePreview[],
+): readonly SessionTranscriptMessagePreview[] {
 	return messages.slice(-6);
 }
 
