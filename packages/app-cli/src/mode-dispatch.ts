@@ -8,7 +8,14 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { AppRuntime, CliMode, RuntimeEvent, SessionEngine, SessionFacade, SessionRecoveryData } from "@pickle-pee/runtime";
+import type {
+	AppRuntime,
+	CliMode,
+	RuntimeEvent,
+	SessionEngine,
+	SessionFacade,
+	SessionRecoveryData,
+} from "@pickle-pee/runtime";
 import {
 	type ComposedScreen,
 	clampScrollOffset,
@@ -61,7 +68,6 @@ import {
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
-	buildResumeBrowserResumedLines,
 	clearInteractiveInputAssistState,
 	clearInteractiveToolCall,
 	clearInteractiveTurnNotice,
@@ -137,6 +143,7 @@ import {
 } from "./interactive-formatting.js";
 import { createInteractiveHostState } from "./interactive-host-state.js";
 import { executeInteractiveSlashCommand } from "./interactive-local-command-orchestrator.js";
+import { buildResumedContextLines } from "./interactive-resume-context.js";
 import { createInteractiveSessionBinding } from "./interactive-session-binding.js";
 import { createModelCommandHost, type ModelCommandHostOptions } from "./model-command-host.js";
 import type { RpcServer } from "./rpc-server.js";
@@ -230,10 +237,9 @@ class InteractiveModeHandler implements ModeHandler {
 	} | null = null;
 	private _resumeBrowserScrollOffset = 0;
 	private _inputLoop: InputLoop | null = null;
-	private _switchInteractiveSession: ((
-		next: SessionFacade,
-		options?: { readonly preserveTranscript?: boolean },
-	) => void) | null = null;
+	private _switchInteractiveSession:
+		| ((next: SessionFacade, options?: { readonly preserveTranscript?: boolean }) => void)
+		| null = null;
 	private _preserveTranscriptOnNextAttach = false;
 	private readonly _hostState = createInteractiveHostState({
 		onBusyLocalCommandFailed: (error) => {
@@ -1222,9 +1228,11 @@ class InteractiveModeHandler implements ModeHandler {
 		this.closeResumeBrowser();
 		const recovered = await this.requireSessionEngine().recoverSession(data, { closeActive: true });
 		switchInteractiveSession(recovered);
-		for (const line of buildResumeBrowserResumedLines(hit)) {
+		for (const line of await buildResumedContextLines(hit)) {
 			sink.writeLine(line);
 		}
+		sink.writeLine(`Resumed: ${data.sessionId.value}`);
+		sink.writeLine("Next: continue this session, or /resume to view history again.");
 		return true;
 	}
 
@@ -1328,10 +1336,14 @@ class InteractiveModeHandler implements ModeHandler {
 		if (mapped) {
 			if (this._sessionRef !== null && this._sessionRef.current.id.value !== mapped.id.value) {
 				if (this._switchInteractiveSession !== null) {
-					getActiveDebugLogger()?.debug("interactive.session_rebind", "Auto-rebound to mapped interactive session", {
-						preferredSessionId: preferred.id.value,
-						reboundSessionId: mapped.id.value,
-					});
+					getActiveDebugLogger()?.debug(
+						"interactive.session_rebind",
+						"Auto-rebound to mapped interactive session",
+						{
+							preferredSessionId: preferred.id.value,
+							reboundSessionId: mapped.id.value,
+						},
+					);
 					this._switchInteractiveSession(mapped, { preserveTranscript: true });
 				} else {
 					this._sessionRef.current = mapped;
@@ -1358,10 +1370,14 @@ class InteractiveModeHandler implements ModeHandler {
 		const fallback = engine.activeSession ?? engine.createSession();
 		if (this._sessionRef !== null && this._sessionRef.current.id.value !== fallback.id.value) {
 			if (this._switchInteractiveSession !== null) {
-				getActiveDebugLogger()?.debug("interactive.session_rebind", "Auto-rebound from closed session to fallback", {
-					preferredSessionId: preferred.id.value,
-					reboundSessionId: fallback.id.value,
-				});
+				getActiveDebugLogger()?.debug(
+					"interactive.session_rebind",
+					"Auto-rebound from closed session to fallback",
+					{
+						preferredSessionId: preferred.id.value,
+						reboundSessionId: fallback.id.value,
+					},
+				);
 				this._switchInteractiveSession(fallback, { preserveTranscript: true });
 			} else {
 				this._sessionRef.current = fallback;

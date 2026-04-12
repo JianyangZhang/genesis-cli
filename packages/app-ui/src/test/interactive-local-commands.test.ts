@@ -68,6 +68,7 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 		createSessionEngine: () => ({
 			activeSession: session,
 			createSession: () => session,
+			adoptSession: () => session,
 			recoverSession: async () => session,
 			listSessions: () => [session],
 			getSession: () => session,
@@ -115,6 +116,7 @@ function createMockRuntimeWithSessions(sessions: readonly SessionFacade[]): AppR
 		createSessionEngine: () => ({
 			activeSession: sessions[0] ?? null,
 			createSession: () => sessions[0]!,
+			adoptSession: (session) => session,
 			recoverSession: async () => sessions[0]!,
 			listSessions: () => [...sessions],
 			getSession: (sessionId: string) => sessions.find((session) => session.id.value === sessionId) ?? null,

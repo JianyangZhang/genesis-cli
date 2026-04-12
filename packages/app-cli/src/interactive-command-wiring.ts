@@ -2,11 +2,8 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppRuntime, SessionEngine, SessionFacade } from "@pickle-pee/runtime";
-import {
-	buildRestoredContextLines,
-	createInteractiveCommandRegistry,
-	resolveRecentSessionDirectSelection,
-} from "@pickle-pee/ui";
+import { createInteractiveCommandRegistry, resolveRecentSessionDirectSelection } from "@pickle-pee/ui";
+import { buildResumedContextLines } from "./interactive-resume-context.js";
 import type { InteractiveSessionBinding } from "./interactive-session-binding.js";
 
 interface InteractiveExitSignal {
@@ -109,7 +106,7 @@ export function createInteractiveCommandWiring(options: InteractiveCommandWiring
 			const recovered = await options.sessionEngine.recoverSession(resumableRecoveryData, { closeActive: true });
 			options.replaceSession(recovered);
 			options.closeResumeBrowser();
-			for (const line of buildRestoredContextLines(directMatch)) {
+			for (const line of await buildResumedContextLines(directMatch)) {
 				ctx.output.writeLine(line);
 			}
 			ctx.output.writeLine(`Resumed: ${directMatch.recoveryData.sessionId.value}`);

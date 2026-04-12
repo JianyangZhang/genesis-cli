@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -187,6 +187,7 @@ async function writeSessionTranscript(
 	sessionId: string,
 	messages: ReadonlyArray<{ role: "user" | "assistant"; content: string }>,
 ): Promise<void> {
+	await mkdir(dirname(filePath), { recursive: true });
 	const lines = [
 		JSON.stringify({
 			type: "session",
@@ -1600,8 +1601,14 @@ describe("interactive workbench TTY", () => {
 				async rm() {},
 			},
 		});
-		const initialSession = new FakeInteractiveSession({ sessionId: "session-debug-resume" });
 		const recoveredId = "session-debug-recovered";
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-cli-resume-debug-"));
+		const recoveredSessionFile = join(agentDir, "sessions", `${recoveredId}.jsonl`);
+		await writeSessionTranscript(recoveredSessionFile, recoveredId, [
+			{ role: "user", content: "把 resume 的标题做得更像 Claude" },
+			{ role: "assistant", content: "我先整理 resume metadata。" },
+		]);
+		const initialSession = new FakeInteractiveSession({ sessionId: "session-debug-resume" });
 		const recoveredSession = new FakeInteractiveSession({ sessionId: recoveredId });
 		const runtime = createSequencedRuntime([initialSession], { [recoveredId]: recoveredSession }, [
 			{
@@ -1611,6 +1618,8 @@ describe("interactive workbench TTY", () => {
 					toolSet: ["bash"],
 					planSummary: null,
 					compactionSummary: null,
+					sessionFile: recoveredSessionFile,
+					agentDir,
 					metadata: {
 						summary: "继续推进 resume 摘要",
 						firstPrompt: "把 resume 的标题做得更像 Claude",
@@ -1648,6 +1657,7 @@ describe("interactive workbench TTY", () => {
 			});
 		} finally {
 			await logger.shutdown();
+			await rm(agentDir, { recursive: true, force: true });
 		}
 
 		const runtimeLog = writes
@@ -2194,11 +2204,7 @@ describe("interactive workbench TTY", () => {
 					firstPrompt: "本地所有修改，commit & push",
 					messageCount: 3,
 					fileSizeBytes: 256,
-					recentMessages: [
-						{ role: "user", text: "本地所有修改，commit & push" },
-						{ role: "assistant", text: "我会先检查工作区并整理提交内容。" },
-						{ role: "user", text: "继续推进 /resume 的体验对齐" },
-					],
+					recentMessages: [{ role: "user", text: "本地所有修改，commit & push" }],
 				},
 				taskState: { status: "idle", currentTaskId: null, startedAt: null },
 				workingDirectory: "/tmp",
@@ -2274,9 +2280,96 @@ describe("interactive workbench TTY", () => {
 		}
 	}, 10000);
 
+	it("covers restart + /resume + follow-up question with full restored transcript context", async () => {
+		const restoredSessionId = "session-live-restored";
+		const firstQuestion = "什么是布洛芬";
+		const firstAnswer = "布洛芬是一种常见的解热镇痛抗炎药。";
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-cli-resume-restart-"));
+		const sessionFile = join(agentDir, "sessions", `${restoredSessionId}.jsonl`);
+		await writeSessionTranscript(sessionFile, restoredSessionId, [
+			{ role: "user", content: firstQuestion },
+			{ role: "assistant", content: firstAnswer },
+		]);
+
+		const firstRuntime = createFakeRuntime(new FakeInteractiveSession({ sessionId: "session-before-restart" }));
+		const firstInput = new FakeTtyInput();
+		const firstOutput = new FakeTtyOutput();
+		await withPatchedProcessTty(firstInput, firstOutput, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(firstRuntime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+			firstInput.write(`${firstQuestion}\r`);
+			await waitFor(() => screen.snapshot().includes(firstQuestion));
+			firstInput.write("/exit\r");
+			await startPromise;
+		});
+
+		const recoveredSession = new FakeInteractiveSession({ sessionId: restoredSessionId });
+		const secondRuntime = createSequencedRuntime(
+			[new FakeInteractiveSession({ sessionId: "session-after-restart" })],
+			{ [restoredSessionId]: recoveredSession },
+			[
+				{
+					recoveryData: {
+						sessionId: { value: restoredSessionId },
+						model: { id: "glm-5.1", provider: "zai" },
+						toolSet: ["bash"],
+						planSummary: null,
+						compactionSummary: null,
+						sessionFile,
+						agentDir,
+						metadata: {
+							summary: "恢复上次药物问题",
+							firstPrompt: firstQuestion,
+							messageCount: 2,
+							fileSizeBytes: 256,
+							recentMessages: [{ role: "user", text: firstQuestion }],
+						},
+						taskState: { status: "idle", currentTaskId: null, startedAt: null },
+					},
+					updatedAt: Date.now(),
+				},
+			],
+		);
+
+		const secondInput = new FakeTtyInput();
+		const secondOutput = new FakeTtyOutput();
+		try {
+			await withPatchedProcessTty(secondInput, secondOutput, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(secondRuntime);
+				await waitFor(() => screen.snapshot().includes("❯"));
+
+				secondInput.write("/resume\r");
+				await waitFor(() => screen.snapshot().includes("Goal: 恢复上次药物问题"));
+				secondInput.write("\r");
+				await waitFor(() => screen.snapshot().includes(`Resumed: ${restoredSessionId}`));
+				expect(screen.snapshot()).toContain(`User: ${firstQuestion}`);
+				expect(screen.snapshot()).toContain(`Assistant: ${firstAnswer}`);
+
+				secondInput.write("我之前问过你什么问题?\r");
+				await waitFor(() => screen.snapshot().includes("我之前问过你什么问题?"));
+
+				secondInput.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await rm(agentDir, { recursive: true, force: true });
+		}
+	}, 15000);
+
 	it("supports arrow selection and ctrl+v preview inside the resume browser", async () => {
 		const firstRecoveredId = "session-search-first";
 		const secondRecoveredId = "session-search-second";
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-cli-resume-search-"));
+		const firstSessionFile = join(agentDir, "sessions", `${firstRecoveredId}.jsonl`);
+		const secondSessionFile = join(agentDir, "sessions", `${secondRecoveredId}.jsonl`);
+		await writeSessionTranscript(firstSessionFile, firstRecoveredId, [
+			{ role: "user", content: "README 发布文案调整" },
+			{ role: "assistant", content: "我先看首页文案。" },
+		]);
+		await writeSessionTranscript(secondSessionFile, secondRecoveredId, [
+			{ role: "user", content: "README 发布说明补充" },
+			{ role: "assistant", content: "我先补充安装段落。" },
+		]);
 		const initialSession = new FakeInteractiveSession({ sessionId: "session-before-search" });
 		const firstRecovered = new FakeInteractiveSession({ sessionId: firstRecoveredId });
 		const secondRecovered = new FakeInteractiveSession({ sessionId: secondRecoveredId });
@@ -2294,6 +2387,8 @@ describe("interactive workbench TTY", () => {
 						toolSet: ["bash"],
 						planSummary: null,
 						compactionSummary: null,
+						sessionFile: firstSessionFile,
+						agentDir,
 						metadata: {
 							summary: "修 README 发布文案",
 							firstPrompt: "README 发布文案调整",
@@ -2315,6 +2410,8 @@ describe("interactive workbench TTY", () => {
 						toolSet: ["bash"],
 						planSummary: null,
 						compactionSummary: null,
+						sessionFile: secondSessionFile,
+						agentDir,
 						metadata: {
 							summary: "README 发布说明补充",
 							firstPrompt: "README 发布说明补充",
@@ -2334,32 +2431,36 @@ describe("interactive workbench TTY", () => {
 		const input = new FakeTtyInput();
 		const output = new FakeTtyOutput();
 
-		await withPatchedProcessTty(input, output, async (screen) => {
-			const startPromise = createModeHandler("interactive").start(runtime);
-			await waitFor(() => screen.snapshot().includes("❯"));
+		try {
+			await withPatchedProcessTty(input, output, async (screen) => {
+				const startPromise = createModeHandler("interactive").start(runtime);
+				await waitFor(() => screen.snapshot().includes("❯"));
 
-			input.write("/resume\r");
-			await waitFor(() => screen.snapshot().includes("Goal: README 发布说明补充"));
-			input.write("README 发布");
-			await waitFor(() => screen.snapshot().includes("❯ README 发布说明补充"));
-			expect(screen.snapshot()).toContain("❯ README 发布说明补充");
-			expect(screen.snapshot()).toContain("README 发布文案调整");
-			expect(screen.snapshot()).toContain("Goal: README 发布说明补充");
+				input.write("/resume\r");
+				await waitFor(() => screen.snapshot().includes("Goal: README 发布说明补充"));
+				input.write("README 发布");
+				await waitFor(() => screen.snapshot().includes("❯ README 发布说明补充"));
+				expect(screen.snapshot()).toContain("❯ README 发布说明补充");
+				expect(screen.snapshot()).toContain("README 发布文案调整");
+				expect(screen.snapshot()).toContain("Goal: README 发布说明补充");
 
-			input.write("\u001b[B");
-			await waitFor(() => screen.snapshot().includes("❯ README 发布文案调整"));
+				input.write("\u001b[B");
+				await waitFor(() => screen.snapshot().includes("❯ README 发布文案调整"));
 
-			input.write(Buffer.from([0x16]));
-			await waitFor(() => screen.snapshot().includes("Preview"));
-			expect(screen.snapshot()).toContain("User asked: README 发布文案调整");
+				input.write(Buffer.from([0x16]));
+				await waitFor(() => screen.snapshot().includes("Preview"));
+				expect(screen.snapshot()).toContain("User asked: README 发布文案调整");
 
-			input.write("\r");
-			await waitFor(() => screen.snapshot().includes(`Resumed: ${firstRecoveredId}`));
-			expect(screen.snapshot()).toContain("User: README 发布文案调整");
+				input.write("\r");
+				await waitFor(() => screen.snapshot().includes(`Resumed: ${firstRecoveredId}`));
+				expect(screen.snapshot()).toContain("User: README 发布文案调整");
 
-			input.write("/exit\r");
-			await startPromise;
-		});
+				input.write("/exit\r");
+				await startPromise;
+			});
+		} finally {
+			await rm(agentDir, { recursive: true, force: true });
+		}
 	}, 10000);
 
 	it("runs /compact without crashing and keeps the prompt visible", async () => {

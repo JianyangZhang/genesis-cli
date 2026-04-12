@@ -68,6 +68,7 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 		createSessionEngine: () => ({
 			activeSession: session,
 			createSession: () => session,
+			adoptSession: () => session,
 			recoverSession: async () => session,
 			listSessions: () => [session],
 			getSession: () => session,
