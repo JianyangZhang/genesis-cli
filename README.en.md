@@ -74,7 +74,20 @@ Genesis is built for real repository workflows, with one runtime for `Interactiv
 
 ## Top-Level Blueprint
 
-Genesis follows a layered "terminal host / content semantics / runtime contracts / repository-owned kernel" structure. This section keeps only the four things contributors need most: layers, boundaries, entry points, and the current direction.
+Genesis is no longer framed as a "regular CLI" only. The mainline is a multi-entry session runtime in progress: interactive TTY, print, json, rpc, and future hosts should converge on one `session runtime / session authority / tool-governance` chain. This section keeps five high-value views: current state, target state, minimal boundary, layered map, and current direction. `technical-plan` tracks migration checklists and stage actions; README stays a stable external narrative.
+
+- Current State:
+  - The shared `app-runtime -> SessionFacade -> kernel session` chain is in place. Interactive has already extracted a batch of session glue and command glue, while a small amount of render-driving orchestration still remains in the host layer.
+  - `Print / JSON / RPC / Interactive` already share runtime and session APIs, and are converging on a host-scoped `session engine`; interactive is not fully reduced to a pure host yet.
+  - `recent-session` treats `kernel/session-file metadata` as authority, while `app-runtime` still keeps catalog aggregation and fallback. Critical authority-merge paths are protected by regression tests.
+- Target State:
+  - Genesis should evolve toward a unified session runtime shared by multi-entry hosts, instead of a thicker CLI mode handler.
+  - Entry-point differences should stay in the host layer, while `prompt / continue / resume / session switch / tool governance / recovery` converge into one `session runtime / turn engine`.
+  - `app-cli` converges to process entry, TTY lifecycle, and debug wiring; `app-runtime` owns unified session orchestration; `kernel` owns session authority and provider kernel.
+- Minimal Boundary:
+  - `host`: process entry, TTY lifecycle, mode hosting, host-specific I/O adaptation.
+  - `session engine`: a unified orchestration surface for `prompt / continue / resume / session switch / turn lifecycle`.
+  - `session authority`: the single source of truth for `session file / metadata / recoveryData / compact / recent summary`.
 
 - Layers:
   - `packages/app-cli` owns process entrypoints, the TTY lifecycle, debug wiring, and the interactive mode host

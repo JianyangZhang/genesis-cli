@@ -158,3 +158,63 @@ export interface ResumeBrowserState {
 	readonly previewExpanded: boolean;
 	readonly loading: boolean;
 }
+
+export interface PendingPermissionDetails {
+	readonly toolName: string;
+	readonly toolCallId: string;
+	readonly riskLevel: string;
+	readonly reason?: string;
+	readonly targetPath?: string;
+}
+
+export interface PendingPermissionState {
+	readonly callId: string;
+	readonly details: PendingPermissionDetails;
+	readonly selectedIndex: number;
+}
+
+export interface InteractiveOverlayState {
+	readonly pendingPermission: PendingPermissionState | null;
+	readonly resumeBrowser: ResumeBrowserState | null;
+	readonly resumeBrowserSubmitPending: boolean;
+	readonly resumeSearchRequestId: number;
+}
+
+export interface InteractiveDetailPanelState {
+	readonly expanded: boolean;
+	readonly scrollOffset: number;
+	readonly thinkingText: string;
+	readonly compactionDetailText: string;
+}
+
+export interface UsageSnapshot {
+	readonly input: number;
+	readonly output: number;
+	readonly cacheRead: number;
+	readonly cacheWrite: number;
+	readonly totalTokens: number;
+}
+
+export type InteractiveTurnNotice = "thinking" | "responding" | "compacting" | null;
+
+export interface InteractiveTurnPresenterState {
+	readonly notice: InteractiveTurnNotice;
+	readonly noticeAnimationFrame: number;
+	readonly startedAt: number | null;
+	readonly activeTurnUsageTotals: UsageSnapshot;
+	readonly currentMessageUsage: UsageSnapshot;
+	readonly lastTurnUsage: UsageSnapshot | null;
+	readonly sessionUsageTotals: UsageSnapshot;
+	readonly queuedInputs: readonly string[];
+	readonly activeToolCalls: readonly InteractiveActiveToolCall[];
+}
+
+export interface InteractiveActiveToolCall {
+	readonly toolCallId: string;
+	readonly toolName: string;
+	readonly parameters: Readonly<Record<string, unknown>>;
+}
+
+export interface InteractiveInputAssistState {
+	readonly commandSuggestions: readonly string[];
+}

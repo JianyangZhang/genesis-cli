@@ -65,6 +65,24 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 	return {
 		createSession: () => session,
 		recoverSession: () => session,
+		createSessionEngine: () => ({
+			activeSession: session,
+			createSession: () => session,
+			adoptSession: () => session,
+			recoverSession: async () => session,
+			listSessions: () => [session],
+			getSession: () => session,
+			getSessionTitle: () => undefined,
+			setSessionTitle: () => {},
+			selectSession: () => session,
+			isBusy: () => false,
+			submit: async () => {},
+			recordAssistantText: () => {},
+			resolvePermission: async () => {},
+			closeSession: async () => session,
+			closeAllSessions: async () => {},
+			dispose: () => {},
+		}),
 		events: {} as AppRuntime["events"],
 		governor: {
 			catalog: {
@@ -82,6 +100,7 @@ function createMockRuntime(session: SessionFacade): AppRuntime {
 		recordRecentSessionInput: async () => {},
 		recordRecentSessionAssistantText: async () => {},
 		recordRecentSessionEvent: async () => {},
+		scheduleRecentSessionEvent: () => {},
 		listRecentSessions: async () => [],
 		searchRecentSessions: async () => [],
 		pruneRecentSessions: async () => ({ before: 0, after: 0, removed: 0 }),

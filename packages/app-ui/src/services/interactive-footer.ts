@@ -1,16 +1,10 @@
+import type { UsageSnapshot } from "../types/index.js";
+
 const DIM = "\x1b[2m";
 const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 const RESET = "\x1b[0m";
 const TURN_NOTICE_ELAPSED_THRESHOLD_MS = 2_000;
-
-interface UsageSnapshot {
-	readonly input: number;
-	readonly output: number;
-	readonly cacheRead: number;
-	readonly cacheWrite: number;
-	readonly totalTokens: number;
-}
 
 export function buildInteractiveFooterLeadingLines(state: {
 	readonly terminalWidth: number;

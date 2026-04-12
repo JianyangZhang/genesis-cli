@@ -76,6 +76,7 @@ const DEFAULT_DEBUG_LOG_RETENTION_DAYS = 7;
 const DEFAULT_DEBUG_LOG_MAX_SESSIONS = 10;
 const DEBUG_LOG_RETENTION_DAYS_ENV = "GENESIS_DEBUG_LOG_RETENTION_DAYS";
 const DEBUG_LOG_MAX_SESSIONS_ENV = "GENESIS_DEBUG_LOG_MAX_SESSIONS";
+const DEBUG_LOG_FLUSH_INTERVAL_MS = 500;
 
 const runtimeSeverityOrder: Record<DebugLogLevel, number> = {
 	DEBUG: 10,
@@ -108,6 +109,7 @@ export class DebugLogger {
 	private lastFlushPromise = Promise.resolve();
 	private fatalWriteErrorReported = false;
 	private readonly processListeners: Array<() => void> = [];
+	private flushInterval: ReturnType<typeof setInterval> | null = null;
 
 	constructor(options: DebugLoggerOptions) {
 		this.io = options.io ?? defaultIo;
@@ -146,6 +148,7 @@ export class DebugLogger {
 		await this.ensureInitialized();
 		activeLogger = this;
 		lastLoggerSession = this.sessionValue;
+		this.startFlushInterval();
 		this.installProcessHandlers();
 		this.info("cli.start", "CLI process started", {
 			argv: this.argv,
@@ -211,6 +214,10 @@ export class DebugLogger {
 
 	async shutdown(): Promise<void> {
 		this.info("cli.shutdown", "CLI logger shutting down");
+		if (this.flushInterval !== null) {
+			clearInterval(this.flushInterval);
+			this.flushInterval = null;
+		}
 		await this.flush();
 		for (const remove of this.processListeners.splice(0)) {
 			remove();
@@ -316,6 +323,12 @@ export class DebugLogger {
 	}
 
 	private installProcessHandlers(): void {
+		const onBeforeExit = () => {
+			if (this.pendingWrites.size === 0) {
+				return;
+			}
+			void this.flush();
+		};
 		const onUnhandledRejection = (reason: unknown) => {
 			this.crash("process.unhandledRejection", "Unhandled promise rejection", { reason });
 			void this.flush();
@@ -324,10 +337,25 @@ export class DebugLogger {
 			this.crash("process.uncaughtException", "Uncaught exception", { error });
 			void this.flush();
 		};
+		process.on("beforeExit", onBeforeExit);
 		process.on("unhandledRejection", onUnhandledRejection);
 		process.on("uncaughtException", onUncaughtException);
+		this.processListeners.push(() => process.off("beforeExit", onBeforeExit));
 		this.processListeners.push(() => process.off("unhandledRejection", onUnhandledRejection));
 		this.processListeners.push(() => process.off("uncaughtException", onUncaughtException));
+	}
+
+	private startFlushInterval(): void {
+		if (this.flushInterval !== null) {
+			return;
+		}
+		this.flushInterval = setInterval(() => {
+			if (this.pendingWrites.size === 0 || this.flushing) {
+				return;
+			}
+			void this.flush();
+		}, DEBUG_LOG_FLUSH_INTERVAL_MS);
+		this.flushInterval.unref?.();
 	}
 
 	private reportWriteFailure(error: unknown): void {

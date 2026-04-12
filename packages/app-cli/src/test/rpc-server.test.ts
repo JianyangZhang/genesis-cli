@@ -55,9 +55,87 @@ function createMockSession(overrides?: Partial<SessionState>): SessionFacade {
 
 function createMockRuntime(sessionOrFactory: SessionFacade | (() => SessionFacade)): AppRuntime {
 	const create = typeof sessionOrFactory === "function" ? sessionOrFactory : () => sessionOrFactory;
+	const buildSessionEngine = () => {
+		const sessions = new Map<string, SessionFacade>();
+		let activeSessionId: string | null = null;
+		return {
+			get activeSession(): SessionFacade | null {
+				return activeSessionId ? (sessions.get(activeSessionId) ?? null) : null;
+			},
+			createSession(): SessionFacade {
+				const session = create();
+				sessions.set(session.id.value, session);
+				activeSessionId = session.id.value;
+				return session;
+			},
+			async recoverSession(): Promise<SessionFacade> {
+				const session = create();
+				sessions.set(session.id.value, session);
+				activeSessionId = session.id.value;
+				return session;
+			},
+			listSessions(): readonly SessionFacade[] {
+				return [...sessions.values()];
+			},
+			getSession(sessionId: string): SessionFacade | null {
+				return sessions.get(sessionId) ?? null;
+			},
+			selectSession(sessionId: string): SessionFacade | null {
+				const session = sessions.get(sessionId) ?? null;
+				if (session) activeSessionId = sessionId;
+				return session;
+			},
+			isBusy(): boolean {
+				return false;
+			},
+			async submit(text: string, options?: { readonly sessionId?: string; readonly mode?: "prompt" | "continue" }) {
+				const sessionId = options?.sessionId ?? activeSessionId;
+				const session = sessionId ? (sessions.get(sessionId) ?? null) : null;
+				if (!session) throw new Error("No active session");
+				if (options?.mode === "continue") {
+					await session.continue(text);
+					return;
+				}
+				await session.prompt(text);
+			},
+			recordAssistantText(): void {},
+			async resolvePermission(
+				callId: string,
+				decision: "allow" | "allow_for_session" | "allow_once" | "deny",
+				options?: { readonly sessionId?: string },
+			) {
+				const sessionId = options?.sessionId ?? activeSessionId;
+				const session = sessionId ? (sessions.get(sessionId) ?? null) : null;
+				if (!session) throw new Error("No active session");
+				await session.resolvePermission(callId, decision);
+			},
+			async closeSession(sessionId?: string): Promise<SessionFacade | null> {
+				const resolvedSessionId = sessionId ?? activeSessionId;
+				if (!resolvedSessionId) return null;
+				const session = sessions.get(resolvedSessionId) ?? null;
+				if (!session) return null;
+				await session.close();
+				sessions.delete(resolvedSessionId);
+				if (activeSessionId === resolvedSessionId) activeSessionId = null;
+				return session;
+			},
+			async closeAllSessions(): Promise<void> {
+				for (const session of sessions.values()) {
+					await session.close();
+				}
+				sessions.clear();
+				activeSessionId = null;
+			},
+			dispose(): void {
+				sessions.clear();
+				activeSessionId = null;
+			},
+		};
+	};
 	return {
 		createSession: () => create(),
 		recoverSession: () => create(),
+		createSessionEngine: () => buildSessionEngine(),
 		events: {
 			onCategory: () => () => {},
 			onAny: () => () => {},

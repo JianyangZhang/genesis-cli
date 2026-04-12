@@ -815,6 +815,183 @@ describe("createAppRuntime", () => {
 		expect(results[0]?.matchSource).toBe("title");
 	});
 
+	it("debounces scheduled recent-session projection events inside runtime authority", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-debounced-events-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+
+		runtime.scheduleRecentSessionEvent(
+			session,
+			{
+				id: "evt-compaction-first",
+				category: "compaction",
+				type: "compaction_completed",
+				timestamp: Date.now(),
+				sessionId: session.id,
+				summary: {
+					compressedAt: Date.now(),
+					originalMessageCount: 10,
+					retainedMessageCount: 4,
+					estimatedTokensSaved: 128,
+					compactedSummary: "first compact summary",
+				},
+			},
+			{ title: "First title" },
+		);
+		runtime.scheduleRecentSessionEvent(
+			session,
+			{
+				id: "evt-compaction-second",
+				category: "compaction",
+				type: "compaction_completed",
+				timestamp: Date.now(),
+				sessionId: session.id,
+				summary: {
+					compressedAt: Date.now(),
+					originalMessageCount: 12,
+					retainedMessageCount: 5,
+					estimatedTokensSaved: 256,
+					compactedSummary: "second compact summary",
+				},
+			},
+			{ title: "Second title" },
+		);
+
+		for (let attempt = 0; attempt < 40; attempt += 1) {
+			const recent = await runtime.listRecentSessions();
+			if (recent[0]?.title === "Second title") {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.title).toBe("Second title");
+		expect(recent[0]?.recoveryData.metadata?.summary).toContain("second compact summary");
+	});
+
+	it("keeps authoritative close metadata when a debounced projection flushes later", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-close-vs-debounce-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const session = runtime.createSession();
+
+		runtime.scheduleRecentSessionEvent(
+			session,
+			{
+				id: "evt-pending-compaction",
+				category: "compaction",
+				type: "compaction_completed",
+				timestamp: Date.now(),
+				sessionId: session.id,
+				summary: {
+					compressedAt: Date.now(),
+					originalMessageCount: 10,
+					retainedMessageCount: 4,
+					estimatedTokensSaved: 128,
+					compactedSummary: "pending debounced summary",
+				},
+			},
+			{ title: "Pending Debounce Title" },
+		);
+
+		await runtime.recordClosedRecentSession(session, {
+			sessionId: session.id,
+			model: stubModel,
+			toolSet: ["read", "edit"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "kernel authoritative summary",
+				firstPrompt: "kernel authoritative prompt",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user", text: "kernel authoritative prompt" },
+					{ role: "assistant", text: "kernel authoritative answer" },
+				],
+			},
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+		});
+
+		for (let attempt = 0; attempt < 50; attempt += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent).toHaveLength(1);
+		expect(recent[0]?.title).toBe("kernel authoritative prompt");
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "kernel authoritative summary",
+			firstPrompt: "kernel authoritative prompt",
+		});
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "kernel authoritative prompt" },
+			{ role: "assistant", text: "kernel authoritative answer" },
+		]);
+	});
+
+	it("projects runtime events through session engine owned recent-session scheduling", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-events-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/workspace",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine();
+		const session = engine.createSession();
+		engine.setSessionTitle("Engine event title", { sessionId: session.id.value });
+
+		runtime.events.emit({
+			id: "evt-engine-compaction",
+			category: "compaction",
+			type: "compaction_completed",
+			timestamp: Date.now(),
+			sessionId: session.id,
+			summary: {
+				compressedAt: Date.now(),
+				originalMessageCount: 8,
+				retainedMessageCount: 3,
+				estimatedTokensSaved: 144,
+				compactedSummary: "engine scheduled compact summary",
+			},
+		});
+
+		for (let attempt = 0; attempt < 40; attempt += 1) {
+			const recent = await runtime.listRecentSessions();
+			if (recent[0]?.title === "Engine event title") {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Engine event title");
+		expect(recent[0]?.recoveryData.metadata?.summary).toContain("engine scheduled compact summary");
+	});
+
 	it("keeps resume/compact/recent-session behavior consistent across resumed turns", async () => {
 		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-resume-compact-"));
 		const historyDir = join(agentDir, "history");
@@ -1053,6 +1230,93 @@ describe("createAppRuntime", () => {
 		expect(storedEntry.metadata?.recentMessages).toEqual([
 			{ role: "user", text: "新问题" },
 			{ role: "assistant", text: "新回答" },
+		]);
+	});
+
+	it("keeps runtime-owned metadata stable even when sessionFile changes", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-runtime-metadata-stable-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			adapter: new StubKernelSessionAdapter(),
+		});
+		const sessionFile = join(agentDir, "session.jsonl");
+		await writeFile(
+			sessionFile,
+			`${[
+				JSON.stringify({ type: "session_info", name: "文件标题A" }),
+				JSON.stringify({ type: "message", message: { role: "user", content: "文件问题A" } }),
+				JSON.stringify({ type: "message", message: { role: "assistant", content: "文件回答A" } }),
+			].join("\n")}\n`,
+			"utf8",
+		);
+
+		await runtime.recordRecentSession({
+			sessionId: { value: "runtime-metadata-stable" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "runtime summary A",
+				firstPrompt: "runtime prompt A",
+				messageCount: 2,
+				fileSizeBytes: 128,
+				recentMessages: [
+					{ role: "user", text: "runtime prompt A" },
+					{ role: "assistant", text: "runtime answer A" },
+				],
+			},
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+			sessionFile,
+		});
+
+		await writeFile(
+			sessionFile,
+			`${[
+				JSON.stringify({ type: "session_info", name: "文件标题B" }),
+				JSON.stringify({ type: "message", message: { role: "user", content: "文件问题B" } }),
+				JSON.stringify({ type: "message", message: { role: "assistant", content: "文件回答B" } }),
+			].join("\n")}\n`,
+			"utf8",
+		);
+
+		await runtime.recordRecentSession({
+			sessionId: { value: "runtime-metadata-stable" },
+			model: stubModel,
+			toolSet: ["read"],
+			planSummary: null,
+			compactionSummary: null,
+			metadata: {
+				summary: "runtime summary B",
+				firstPrompt: "runtime prompt A",
+				messageCount: 3,
+				fileSizeBytes: 256,
+				recentMessages: [
+					{ role: "user", text: "runtime prompt A" },
+					{ role: "assistant", text: "runtime answer A" },
+					{ role: "assistant", text: "runtime answer B" },
+				],
+			},
+			taskState: { status: "idle" as const, currentTaskId: null, startedAt: null },
+			agentDir,
+			sessionFile,
+		});
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.recoveryData.metadata).toMatchObject({
+			summary: "runtime summary B",
+			firstPrompt: "runtime prompt A",
+		});
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual([
+			{ role: "user", text: "runtime prompt A" },
+			{ role: "assistant", text: "runtime answer A" },
+			{ role: "assistant", text: "runtime answer B" },
 		]);
 	});
 
@@ -1702,6 +1966,174 @@ describe("createAppRuntime", () => {
 		const session = runtime.createSession();
 		expect(session.plan).toBeDefined();
 		expect(session.plan).not.toBeNull();
+	});
+
+	it("creates a host-scoped session engine that drives prompt, continue, and session switching", async () => {
+		const adapters: StubKernelSessionAdapter[] = [];
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp",
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => {
+				const adapter = new StubKernelSessionAdapter();
+				adapters.push(adapter);
+				return adapter;
+			},
+		});
+		const engine = runtime.createSessionEngine();
+
+		const first = engine.createSession();
+		await engine.submit("first turn");
+		expect(adapters[0]?.lastInput).toBe("first turn");
+		expect(engine.activeSession?.id.value).toBe(first.id.value);
+
+		await engine.submit("carry on", { mode: "continue" });
+		expect(adapters[0]?.lastInput).toBe("carry on");
+
+		const recovered = await engine.recoverSession(
+			{
+				sessionId: { value: "engine-recovered" },
+				model: stubModel,
+				toolSet: ["read", "edit"],
+				planSummary: null,
+				compactionSummary: null,
+				taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			},
+			{ closeActive: true },
+		);
+		expect(first.state.status).toBe("closed");
+		expect(engine.activeSession?.id.value).toBe(recovered.id.value);
+		expect(engine.listSessions().map((session) => session.id.value)).toEqual(["engine-recovered"]);
+	});
+
+	it("records closed sessions through session engine using the shared runtime authority path", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-close-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/engine-close",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine({
+			titleResolver: () => "Engine Session",
+		});
+		const session = engine.createSession();
+
+		await runtime.recordRecentSessionInput(session, "session engine close path");
+		await engine.closeSession();
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBeTruthy();
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("session engine close path");
+	});
+
+	it("prefers session-engine owned titles over cli-local fallback when closing sessions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-title-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/engine-title",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine({
+			titleResolver: () => "Fallback Title",
+		});
+		const session = engine.createSession();
+		engine.setSessionTitle("Engine Owned Title");
+
+		await runtime.recordRecentSessionInput(session, "session title owned by engine");
+		await engine.closeSession();
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Engine Owned Title");
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("session title owned by engine");
+	});
+
+	it("records input and assistant projections through session engine owned recent-session writes", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-engine-projections-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/engine-projections",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine();
+		const session = engine.createSession();
+		engine.setSessionTitle("Engine projection title", { sessionId: session.id.value });
+
+		await engine.submit("engine owned input", { sessionId: session.id.value });
+		engine.recordAssistantText("engine owned assistant", { sessionId: session.id.value });
+
+		for (let attempt = 0; attempt < 40; attempt += 1) {
+			const recent = await runtime.listRecentSessions();
+			if (
+				recent[0]?.title === "Engine projection title" &&
+				recent[0]?.recoveryData.metadata?.recentMessages?.some((item) => item.text === "engine owned assistant")
+			) {
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Engine projection title");
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("engine owned input");
+		expect(recent[0]?.recoveryData.metadata?.recentMessages).toEqual(
+			expect.arrayContaining([expect.objectContaining({ role: "assistant", text: "engine owned assistant" })]),
+		);
+	});
+
+	it("ignores late assistant projection writes after the session has closed", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-late-assistant-projection-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/late-assistant-projection",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine();
+		const session = engine.createSession();
+		await engine.submit("before close", { sessionId: session.id.value });
+		await engine.closeSession(session.id.value);
+		expect(() => engine.recordAssistantText("late assistant", { sessionId: session.id.value })).not.toThrow();
+	});
+
+	it("waits for recent-session close writes when closing all sessions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-close-all-waits-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/close-all-waits",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine({
+			titleResolver: () => "Close All Title",
+		});
+		const session = engine.createSession();
+		await runtime.recordRecentSessionInput(session, "close all waits for authority");
+
+		await engine.closeAllSessions();
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Close All Title");
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("close all waits for authority");
 	});
 
 	it("same runtime can drive multiple modes (print + json)", () => {

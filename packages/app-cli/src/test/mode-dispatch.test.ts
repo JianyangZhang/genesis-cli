@@ -35,26 +35,25 @@ import {
 } from "@pickle-pee/ui";
 import { describe, expect, it, vi } from "vitest";
 import {
-	acceptFirstSlashSuggestion,
-	buildWelcomeLines,
-	computeSlashSuggestions,
-	computeVisibleTranscriptLines,
-	createDebouncedCallback,
 	formatInteractiveFooter,
 	formatInteractivePermissionBlock,
 	formatInteractiveToolEvent,
 	formatInteractiveToolResult,
 	formatInteractiveToolTitle,
-	formatSlashSuggestionHint,
+	movePermissionSelection,
+	permissionDecisionFromSelection,
+	shouldRenderInteractiveTranscriptEvent,
+} from "../interactive-formatting.js";
+import {
+	buildWelcomeLines,
+	computeVisibleTranscriptLines,
+	createDebouncedCallback,
 	formatWelcomeBottomBorder,
 	formatWelcomeCenteredLine,
 	formatWelcomeFilledLine,
 	formatWelcomeTopBorder,
-	movePermissionSelection,
-	permissionDecisionFromSelection,
 	pickWelcomeGreeting,
 	readInteractiveCliPackageVersion,
-	shouldRenderInteractiveTranscriptEvent,
 	WELCOME_BIBLE_GREETINGS,
 } from "../mode-dispatch.js";
 
@@ -101,9 +100,9 @@ describe("interactive transcript formatting", () => {
 		);
 		const errorLine = formatInteractiveErrorLine("Invalid settings.json");
 		expect(errorLine).toContain("Error:");
-		expect(errorLine).toContain(INTERACTIVE_THEME.warningSoft);
+		expect(errorLine).toContain(INTERACTIVE_THEME.error);
 		expect(errorLine).toContain(INTERACTIVE_THEME.bold);
-		expect(formatInteractiveErrorDetailLine("Invalid settings.json")).toContain(INTERACTIVE_THEME.warningSoft);
+		expect(formatInteractiveErrorDetailLine("Invalid settings.json")).toContain(INTERACTIVE_THEME.error);
 	});
 
 	it("keeps the live interactive prompt buffer unstyled", () => {
@@ -736,40 +735,5 @@ describe("interactive transcript formatting", () => {
 		expect(permissionDecisionFromSelection(0)).toBe("allow_once");
 		expect(permissionDecisionFromSelection(1)).toBe("allow_for_session");
 		expect(permissionDecisionFromSelection(2)).toBe("deny");
-	});
-});
-
-describe("slash command hints", () => {
-	const commands = [
-		{ name: "help", description: "", type: "local" as const },
-		{ name: "review", description: "", type: "local" as const },
-		{ name: "status", description: "", type: "local" as const },
-		{ name: "resume", description: "", type: "local" as const },
-	];
-
-	it("suggests commands when the user types a slash prefix", () => {
-		expect(computeSlashSuggestions("/", commands)).toEqual(["help", "resume", "review", "status"]);
-		expect(computeSlashSuggestions("/st", commands)).toEqual(["status"]);
-	});
-
-	it("does not suggest commands after arguments begin", () => {
-		expect(computeSlashSuggestions("/status now", commands)).toEqual([]);
-	});
-
-	it("formats a dim inline hint for matching commands", () => {
-		const hint = formatSlashSuggestionHint(["help", "status"], 30);
-		expect(hint).toContain("/help");
-		expect(hint).toContain("/status");
-	});
-
-	it("accepts the first slash suggestion on tab", () => {
-		expect(acceptFirstSlashSuggestion({ buffer: "/st", cursor: 3 }, ["status", "review"])).toEqual({
-			buffer: "/status ",
-			cursor: 8,
-		});
-	});
-
-	it("does not accept a suggestion once arguments have started", () => {
-		expect(acceptFirstSlashSuggestion({ buffer: "/status now", cursor: 11 }, ["status"])).toBeNull();
 	});
 });

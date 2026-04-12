@@ -5,29 +5,26 @@
  * from it. Mode-specific behavior is isolated to how events are rendered.
  */
 
-import { execFile, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type {
 	AppRuntime,
 	CliMode,
-	CompactionSummary,
 	RuntimeEvent,
-	SessionClosedEvent,
+	SessionEngine,
 	SessionFacade,
+	SessionRecoveryData,
 } from "@pickle-pee/runtime";
 import {
 	type ComposedScreen,
 	clampScrollOffset,
 	composePromptBlock,
 	composeScreenWithFooter,
-	composeSectionBlock,
 	computeBodyViewportRows,
 	computeFooterCursorColumn as computeFooterCursorColumnFromTuiCore,
 	computeFooterStartRow as computeFooterStartRowFromTuiCore,
 	computeMaxScrollOffset,
-	computePromptCursorColumn as computePromptCursorColumnFromTuiCore,
 	computeSelectionColumnsForRow,
 	computeTranscriptDisplayRows as computeTranscriptDisplayRowsFromTuiCore,
 	computeVisibleViewportLines,
@@ -43,8 +40,6 @@ import {
 	extractPlainTextSelection as extractPlainTextSelectionFromTuiCore,
 	fitTerminalLine as fitTerminalLineFromTuiCore,
 	materializeComposerBlock,
-	materializeTextBlock,
-	type RenderedComposerBlock,
 	renderSelectedPlainLine,
 	type ScreenFrame,
 	stripAnsiControlSequences,
@@ -53,24 +48,42 @@ import {
 	summarizeTerminalCapabilities,
 	summarizeTerminalModePlan,
 	type TerminalSelectionRange,
-	truncatePlainText as truncatePlainTextFromTuiCore,
 	wrapTranscriptContent as wrapTranscriptContentFromTuiCore,
 } from "@pickle-pee/tui-core";
-import type { InteractionState, OutputSink, ResumeBrowserState, SlashCommand } from "@pickle-pee/ui";
+import type {
+	InteractionState,
+	InteractiveDetailPanelState,
+	InteractiveInputAssistState,
+	InteractiveOverlayState,
+	InteractiveTurnPresenterState,
+	OutputSink,
+	UsageSnapshot,
+} from "@pickle-pee/ui";
 import {
-	beginResumeBrowserSearch,
-	buildInteractiveFooterLeadingLines as buildInteractiveFooterLeadingLinesFromUi,
-	buildRestoredContextLines,
+	acceptFirstSlashSuggestion,
+	appendThinkingDetailText,
+	beginInteractiveTurn,
+	beginInteractiveTurnFeedback,
+	beginResumeBrowserOverlaySearch,
 	buildResumeBrowserBodyBlocks,
 	buildResumeBrowserFooterHintLines,
 	buildResumeBrowserHeaderLines,
-	buildResumeBrowserResumedLines,
-	completeResumeBrowserSearch,
+	clearInteractiveInputAssistState,
+	clearInteractiveToolCall,
+	clearInteractiveTurnNotice,
+	clearPendingPermissionRequest,
+	closeResumeBrowserOverlay,
+	collapseInteractiveDetailPanel,
+	completeInteractiveTurn,
+	completeResumeBrowserOverlaySearch,
 	computeInteractiveFooterSeparatorWidth,
-	createInteractiveCommandRegistry,
 	createInteractiveConversationState,
-	createResumeBrowserState,
+	currentInteractiveTurnElapsedMs,
+	currentInteractiveTurnUsage,
+	drainQueuedInteractiveInputs,
 	eventToJsonEnvelope,
+	findInteractiveToolParameters,
+	formatCompactionDetailText,
 	formatEventAsText,
 	formatFullWidthTranscriptUserLine,
 	formatInteractiveErrorDetailLine,
@@ -82,23 +95,73 @@ import {
 	formatTranscriptUserBlocks,
 	INTERACTIVE_THEME,
 	initialInteractionState,
+	initialInteractiveDetailPanelState,
+	initialInteractiveInputAssistState,
+	initialInteractiveOverlayState,
+	initialInteractiveTurnPresenterState,
+	markResumeBrowserSubmitPending,
 	materializeAssistantTranscriptBlock,
-	moveResumeBrowserSelection,
+	movePendingPermissionSelection as movePendingPermissionSelectionFromUi,
+	moveResumeBrowserOverlaySelection,
+	openResumeBrowserOverlay,
+	preserveThinkingNoticeForQueuedBacklog,
+	queueInteractiveInput,
 	reduceInteractionState,
-	resolveRecentSessionDirectSelection,
+	registerInteractiveToolCall,
+	resetInteractiveDetailPanelState,
+	resetInteractiveInputAssistState,
+	resetInteractiveOverlayState,
+	resetInteractiveTurnPresenterState,
 	resolveResumeBrowserKeyAction,
 	resolveResumeBrowserSubmitHit,
+	setInteractiveDetailPanelScroll,
+	setInteractiveTurnNotice,
+	setPendingPermissionRequest,
+	showCompactionDetailSummary,
+	summarizeActiveInteractiveToolLabel,
 	summarizeResumeBrowserHit,
-	toggleResumeBrowserPreviewState,
+	tickInteractiveTurnNoticeAnimation,
+	toggleInteractiveDetailPanel,
+	toggleResumeBrowserOverlayPreview,
+	updateInteractiveTurnUsage,
+	updateSlashCommandSuggestions,
 } from "@pickle-pee/ui";
 import { getActiveDebugLogger } from "./debug-logger.js";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
+import { createInteractiveCommandWiring, createInteractiveExitSignal } from "./interactive-command-wiring.js";
+import {
+	formatInteractiveFooter,
+	formatInteractivePermissionBlock,
+	formatInteractiveToolEvent,
+	formatInteractiveToolResult,
+	formatInteractiveToolTitle,
+	type InteractiveFooterRenderResult,
+	movePermissionSelection,
+	permissionDecisionFromSelection,
+	shouldRenderInteractiveTranscriptEvent,
+} from "./interactive-formatting.js";
+import { createInteractiveHostState } from "./interactive-host-state.js";
+import { executeInteractiveSlashCommand } from "./interactive-local-command-orchestrator.js";
+import { buildResumedContextLines } from "./interactive-resume-context.js";
+import { createInteractiveSessionBinding } from "./interactive-session-binding.js";
 import { createModelCommandHost, type ModelCommandHostOptions } from "./model-command-host.js";
 import type { RpcServer } from "./rpc-server.js";
 import { createRpcServer } from "./rpc-server.js";
 import { measureTerminalDisplayWidth } from "./terminal-display-width.js";
 import { createTtySession } from "./tty-session.js";
+
+export type { InteractiveFooterRenderResult } from "./interactive-formatting.js";
+export {
+	formatInteractiveFooter,
+	formatInteractivePermissionBlock,
+	formatInteractiveToolEvent,
+	formatInteractiveToolResult,
+	formatInteractiveToolTitle,
+	movePermissionSelection,
+	permissionDecisionFromSelection,
+	shouldRenderInteractiveTranscriptEvent,
+};
 
 // ---------------------------------------------------------------------------
 // Mode handler interface
@@ -133,14 +196,6 @@ export async function runInteractiveStartupChecks(check: () => Promise<void>): P
 	await handler.startStartupCheckScreen(check);
 }
 
-interface UsageSnapshot {
-	readonly input: number;
-	readonly output: number;
-	readonly cacheRead: number;
-	readonly cacheWrite: number;
-	readonly totalTokens: number;
-}
-
 const RESIZE_REDRAW_DEBOUNCE_MS = 120;
 const RENDER_DEBUG_SAME_FRAME_THROTTLE_MS = 250;
 
@@ -154,15 +209,8 @@ class InteractiveModeHandler implements ModeHandler {
 		private readonly _welcomeProvider?: string,
 	) {}
 
-	private _pendingPermissionCallId: string | null = null;
-	private _pendingPermissionDetails: {
-		toolName: string;
-		toolCallId: string;
-		riskLevel: string;
-		reason?: string;
-		targetPath?: string;
-	} | null = null;
 	private _activeTurn: Promise<void> | null = null;
+	private _activeTurnToken = 0;
 	private readonly _prompt = "❯ ";
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
 	private readonly _history: string[] = [];
@@ -170,22 +218,11 @@ class InteractiveModeHandler implements ModeHandler {
 	private _lastError: string | null = null;
 	private readonly _changedPaths = new Set<string>();
 	private readonly _conversation = createInteractiveConversationState();
-	private _turnNotice: "thinking" | "responding" | "compacting" | null = null;
-	private _turnNoticeAnimationFrame = 0;
 	private _turnNoticeTimer: ReturnType<typeof setInterval> | null = null;
-	private _turnStartedAt: number | null = null;
-	private _detailPanelExpanded = false;
-	private _detailPanelScroll = 0;
-	private _thinkingBuffer = "";
-	private _compactionDetailText = "";
-	private _activeTurnUsageTotals: UsageSnapshot = emptyUsageSnapshot();
-	private _currentMessageUsage: UsageSnapshot = emptyUsageSnapshot();
-	private _lastTurnUsage: UsageSnapshot | null = null;
-	private _sessionUsageTotals: UsageSnapshot = emptyUsageSnapshot();
-	private _commandSuggestions: readonly string[] = [];
-	private readonly _toolCalls = new Map<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>();
-	private readonly _queuedInputs: string[] = [];
-	private _pendingPermissionSelection = 0;
+	private _detailPanelState: InteractiveDetailPanelState = initialInteractiveDetailPanelState();
+	private _inputAssistState: InteractiveInputAssistState = initialInteractiveInputAssistState();
+	private _turnPresenterState: InteractiveTurnPresenterState = initialInteractiveTurnPresenterState();
+	private _overlayState: InteractiveOverlayState = initialInteractiveOverlayState();
 	private _renderedFooterUi: InteractiveFooterRenderResult | null = null;
 	private _renderedFooterStartRow: number | null = null;
 	private _lastScreenFrame: ScreenFrame | null = null;
@@ -198,29 +235,51 @@ class InteractiveModeHandler implements ModeHandler {
 		focusRow: number;
 		focusColumn: number;
 	} | null = null;
-	private _resumeBrowser: ResumeBrowserState | null = null;
 	private _resumeBrowserScrollOffset = 0;
-	private _resumeBrowserSubmitPending = false;
-	private _resumeSearchRequestId = 0;
 	private _inputLoop: InputLoop | null = null;
-	private _activeLocalCommand: Promise<void> | null = null;
+	private _switchInteractiveSession:
+		| ((next: SessionFacade, options?: { readonly preserveTranscript?: boolean }) => void)
+		| null = null;
+	private _preserveTranscriptOnNextAttach = false;
+	private readonly _hostState = createInteractiveHostState({
+		onBusyLocalCommandFailed: (error) => {
+			if (this._turnPresenterState.notice === "compacting") {
+				this.stopTurnNoticeAnimation();
+				this._turnPresenterState = clearInteractiveTurnNotice(this._turnPresenterState);
+			}
+			this._lastError = error instanceof Error ? error.message : String(error);
+			getActiveDebugLogger()?.error("interactive.local_command", "Local command failed", { error });
+			this._sink?.writeError(this._lastError);
+		},
+		onBusyLocalCommandSettled: () => {
+			if (this._activeTurn !== null || this._turnPresenterState.notice === "compacting") {
+				this.renderFooterRegion();
+				return;
+			}
+			const queuedInputBatch = this.drainQueuedInputs();
+			if (queuedInputBatch !== null && this._sessionRef !== null && this._sink !== null) {
+				this.startQueuedContinueTurn(this._sessionRef.current, queuedInputBatch, this._sink);
+				return;
+			}
+			this.fullRedrawInteractiveScreen();
+		},
+	});
+	private _sessionEngine: SessionEngine | null = null;
 	private _sessionRef: { current: SessionFacade } | null = null;
 	private _sink: OutputSink | null = null;
-	private _runtime: AppRuntime | null = null;
-	private _recentSessionPersistTimer: ReturnType<typeof setTimeout> | null = null;
 	private _startupCheckScreenActive = false;
 	private _lastRenderDebugKey: string | null = null;
 	private _lastRenderDebugLoggedAt = 0;
 	private _suppressedRenderDebugCount = 0;
 
 	async start(runtime: AppRuntime): Promise<void> {
-		const handler = this;
 		const commandHost = createModelCommandHost(this._modelHostOptions ?? {});
 		if (!process.stdin.isTTY || !process.stdout.isTTY) {
 			throw new Error("Interactive mode requires a TTY. Use --mode print|json|rpc instead.");
 		}
 
-		const sessionRef: { current: SessionFacade } = { current: runtime.createSession() };
+		const sessionEngine = runtime.createSessionEngine();
+		const sessionRef: { current: SessionFacade } = { current: sessionEngine.createSession() };
 		const sink: OutputSink = {
 			write: (text) => {
 				this.writeTranscriptText(text, false);
@@ -233,13 +292,14 @@ class InteractiveModeHandler implements ModeHandler {
 			},
 		};
 		this._sessionRef = sessionRef;
+		this._sessionEngine = sessionEngine;
 		this._sink = sink;
-		this._runtime = runtime;
 
 		let interactionState: InteractionState = initialInteractionState();
-		let sessionTitle: string | undefined;
-		let exitRequested = false;
 		let inputLoop: InputLoop | null = null;
+		const exitSignal = createInteractiveExitSignal(() => {
+			inputLoop?.close();
+		});
 		const terminalCapabilities = detectTerminalCapabilities({
 			term: process.env.TERM,
 			termProgram: process.env.TERM_PROGRAM,
@@ -274,340 +334,122 @@ class InteractiveModeHandler implements ModeHandler {
 			debouncedResizeRedraw.schedule();
 		};
 		process.stdout.on("resize", onResize);
-		let detachSessionStateListener: (() => void) | null = null;
-
-		const resolveAgentDir = (): string => {
-			return (
-				sessionRef.current.context.agentDir ??
-				join(sessionRef.current.context.workingDirectory, ".genesis-local", "agent")
-			);
-		};
-
-		const attachSession = (next: SessionFacade): void => {
-			detachSessionStateSubscription(detachSessionStateListener);
-			detachSessionStateListener = null;
-			sessionRef.current.events.removeAllListeners();
-			sessionRef.current = next;
-			this._pendingPermissionCallId = null;
-			this._pendingPermissionDetails = null;
-			this._activeTurn = null;
-			this._historyIndex = null;
-			this._lastError = null;
-			this._changedPaths.clear();
-			this._conversation.clear();
-			this.stopTurnNoticeAnimation();
-			this._turnNotice = null;
-			this._turnNoticeAnimationFrame = 0;
-			this._turnStartedAt = null;
-			this._detailPanelExpanded = false;
-			this._detailPanelScroll = 0;
-			this._thinkingBuffer = "";
-			this._compactionDetailText = "";
-			this._activeTurnUsageTotals = emptyUsageSnapshot();
-			this._currentMessageUsage = emptyUsageSnapshot();
-			this._lastTurnUsage = null;
-			this._sessionUsageTotals = emptyUsageSnapshot();
-			this._commandSuggestions = [];
-			this._toolCalls.clear();
-			this._queuedInputs.length = 0;
-			this._pendingPermissionSelection = 0;
-			this._renderedFooterUi = null;
-			this._renderedFooterStartRow = null;
-			this._lastScreenFrame = null;
-			this._transcriptScrollOffset = 0;
-			this._resumeBrowserScrollOffset = 0;
-			this._resumeBrowserSubmitPending = false;
-			if (this._recentSessionPersistTimer !== null) {
-				clearTimeout(this._recentSessionPersistTimer);
-				this._recentSessionPersistTimer = null;
-			}
-			this._sessionRef = sessionRef;
-			this._sink = sink;
-			this._runtime = runtime;
-			sessionTitle = undefined;
-			interactionState = initialInteractionState();
-
-			sessionRef.current.events.on("session_closed", (event) => {
-				try {
-					void runtime.recordClosedRecentSession(sessionRef.current, (event as SessionClosedEvent).recoveryData, {
-						title: sessionTitle,
-					});
-				} catch {}
-			});
-
-			sessionRef.current.events.onAny((event: RuntimeEvent) => {
-				if (event.type === "permission_requested") {
-					this._pendingPermissionDetails = {
-						toolName: event.toolName,
-						toolCallId: event.toolCallId,
-						riskLevel: event.riskLevel,
-						reason: (event as { reason?: string }).reason,
-						targetPath: (event as { targetPath?: string }).targetPath,
-					};
-					this._pendingPermissionSelection = 0;
-				}
-				if (event.type === "permission_resolved") {
-					if (this._pendingPermissionDetails?.toolCallId === event.toolCallId) {
-						this._pendingPermissionDetails = null;
-						this._pendingPermissionSelection = 0;
+		const sessionBinding = createInteractiveSessionBinding(
+			sessionRef.current,
+			{
+				onSessionAttached: (next) => {
+					const preserveTranscript = this._preserveTranscriptOnNextAttach;
+					this._preserveTranscriptOnNextAttach = false;
+					sessionRef.current = next;
+					this._overlayState = resetInteractiveOverlayState();
+					this._activeTurn = null;
+					this._historyIndex = null;
+					this._lastError = null;
+					this._changedPaths.clear();
+					this.stopTurnNoticeAnimation();
+					this._turnPresenterState = resetInteractiveTurnPresenterState();
+					this._detailPanelState = resetInteractiveDetailPanelState();
+					this._inputAssistState = resetInteractiveInputAssistState();
+					this._hostState.reset();
+					this._renderedFooterUi = null;
+					this._renderedFooterStartRow = null;
+					this._lastScreenFrame = null;
+					this._resumeBrowserScrollOffset = 0;
+					this._sessionRef = sessionRef;
+					this._sink = sink;
+					interactionState = initialInteractionState();
+					if (preserveTranscript) {
+						this.clampTranscriptScrollOffset();
+					} else {
+						this._conversation.clear();
+						this._transcriptScrollOffset = 0;
 					}
-				}
-				if (event.type === "tool_started") {
-					this._toolCalls.set(event.toolCallId, { toolName: event.toolName, parameters: event.parameters });
-					const targetPath =
-						typeof event.parameters.file_path === "string"
-							? event.parameters.file_path
-							: typeof event.parameters.path === "string"
-								? event.parameters.path
-								: undefined;
-					if (targetPath && (event.toolName === "edit" || event.toolName === "write")) {
-						this._changedPaths.add(targetPath);
+				},
+				onSessionEvent: (event) => {
+					if (event.type === "permission_requested") {
+						this._overlayState = setPendingPermissionRequest(this._overlayState, event.toolCallId, {
+							toolName: event.toolName,
+							toolCallId: event.toolCallId,
+							riskLevel: event.riskLevel,
+							reason: (event as { reason?: string }).reason,
+							targetPath: (event as { targetPath?: string }).targetPath,
+						});
 					}
-				}
-				if (event.type === "tool_denied") {
-					this._toolCalls.delete(event.toolCallId);
-					this._lastError = `${event.toolName}: ${event.reason}`;
-				}
-				if (event.type === "tool_completed" && event.status === "failure") {
-					this._toolCalls.delete(event.toolCallId);
-					this._lastError = `${event.toolName}: ${event.result ?? "failure"}`;
-				}
-				if (event.type === "tool_completed" && event.status === "success") {
-					this._toolCalls.delete(event.toolCallId);
-				}
+					if (event.type === "permission_resolved") {
+						this._overlayState = clearPendingPermissionRequest(this._overlayState, event.toolCallId);
+					}
+					if (event.type === "tool_started") {
+						this._turnPresenterState = registerInteractiveToolCall(this._turnPresenterState, {
+							toolCallId: event.toolCallId,
+							toolName: event.toolName,
+							parameters: event.parameters,
+						});
+						const targetPath =
+							typeof event.parameters.file_path === "string"
+								? event.parameters.file_path
+								: typeof event.parameters.path === "string"
+									? event.parameters.path
+									: undefined;
+						if (targetPath && (event.toolName === "edit" || event.toolName === "write")) {
+							this._changedPaths.add(targetPath);
+						}
+					}
+					if (event.type === "tool_denied") {
+						this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
+						this._lastError = `${event.toolName}: ${event.reason}`;
+					}
+					if (event.type === "tool_completed" && event.status === "failure") {
+						this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
+						this._lastError = `${event.toolName}: ${event.result ?? "failure"}`;
+					}
+					if (event.type === "tool_completed" && event.status === "success") {
+						this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
+					}
 
-				interactionState = reduceInteractionState(interactionState, event);
+					interactionState = reduceInteractionState(interactionState, event);
+					this.handleTranscriptEvent(event);
+				},
+				onSessionStateChange: (_state, session) => {
+					this.renderWelcome(session);
+					this.renderFooterRegion();
+				},
+			},
+			sessionRef,
+		);
 
-				if (interactionState.phase === "waiting_permission" && interactionState.activeToolCallId) {
-					this._pendingPermissionCallId = interactionState.activeToolCallId;
-				} else if (interactionState.phase !== "waiting_permission") {
-					this._pendingPermissionCallId = null;
-				}
-				this.handleTranscriptEvent(event);
-				if (shouldPersistRecentSessionForEvent(event)) {
-					this.scheduleRecentSessionPersist(runtime, sessionRef.current, event, sessionTitle);
-				}
-			});
-			detachSessionStateListener = sessionRef.current.onStateChange((state) => {
-				if (
-					state.model.id !== sessionRef.current.state.model.id ||
-					state.model.provider !== sessionRef.current.state.model.provider
-				) {
-					return;
-				}
-				this.renderWelcome(sessionRef.current);
-				this.renderFooterRegion();
-			});
-		};
-
-		const switchInteractiveSession = (next: SessionFacade): void => {
-			attachSession(next);
+		const switchInteractiveSession = (
+			next: SessionFacade,
+			options: { readonly preserveTranscript?: boolean } = {},
+		): void => {
+			this._preserveTranscriptOnNextAttach = options.preserveTranscript === true;
+			sessionBinding.switchSession(next);
 			this.renderWelcome(next);
 			this.fullRedrawInteractiveScreen();
 		};
+		this._switchInteractiveSession = switchInteractiveSession;
 
-		const registry = createInteractiveCommandRegistry({
+		const { registry } = createInteractiveCommandWiring({
+			runtime,
+			sessionEngine,
+			sessionBinding,
 			getCurrentSession: () => sessionRef.current,
-			getSessionTitle: () => sessionTitle,
-			setSessionTitle: (next) => {
-				sessionTitle = next;
-			},
-			requestExit: () => {
-				exitRequested = true;
-				inputLoop?.close();
-			},
-			isInteractionBusy: () => handler.isInteractionBusy(),
-			hasPendingPermissionRequest: () => handler._pendingPermissionCallId !== null,
 			replaceSession: (next) => {
 				switchInteractiveSession(next);
 			},
-			getAgentDir: () => resolveAgentDir(),
+			exitSignal,
+			isInteractionBusy: () => this.isInteractionBusy(),
+			hasPendingPermissionRequest: () => this.pendingPermissionState() !== null,
 			getInteractionPhase: () => interactionState.phase,
-			getLastError: () => handler._lastError,
-			getChangedFileCount: () => handler._changedPaths.size,
-			getPendingPermissionCallId: () => handler._pendingPermissionCallId,
-			getToolUsageSummary: () => {
-				const entries = runtime.governor.audit.getAll();
-				return {
-					total: entries.length,
-					success: entries.filter((e) => e.status === "success").length,
-					failure: entries.filter((e) => e.status === "failure").length,
-					denied: entries.filter((e) => e.status === "denied").length,
-					recent: entries.slice(-10).map((entry) => ({
-						status: entry.status,
-						toolName: entry.toolName,
-						riskLevel: entry.riskLevel,
-						targetPath: entry.targetPath,
-						durationMs: entry.durationMs,
-					})),
-				};
+			getLastError: () => this._lastError,
+			getChangedPaths: () => [...this._changedPaths],
+			getPendingPermissionCallId: () => this.pendingPermissionState()?.callId ?? null,
+			openResumeBrowser: async (query) => {
+				await this.openResumeBrowser(runtime, query);
 			},
-			getConfigSnapshot: async (ctx) => {
-				const sources = ctx.session.context.configSources ?? {};
-				const agentDir = resolveAgentDir();
-				const modelsPath = join(agentDir, "models.json");
-				let raw = "";
-				try {
-					raw = await readFile(modelsPath, "utf8");
-				} catch {
-					return {
-						sources: Object.keys(sources)
-							.sort((a, b) => a.localeCompare(b))
-							.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
-						agentDir,
-						modelsPath,
-						error: "models.json not found. Run Genesis once or pass --agent-dir.",
-					};
-				}
-
-				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
-				const providerKey = ctx.session.state.model.provider;
-				const provider = parsed.providers?.[providerKey];
-				if (!provider) {
-					return {
-						sources: Object.keys(sources)
-							.sort((a, b) => a.localeCompare(b))
-							.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
-						agentDir,
-						modelsPath,
-						providerKey,
-					};
-				}
-
-				const models = Array.isArray(provider.models) ? provider.models : [];
-				const active = models.find((m: any) => m?.id === ctx.session.state.model.id);
-				const apiKeyEnv = typeof provider.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
-				return {
-					sources: Object.keys(sources)
-						.sort((a, b) => a.localeCompare(b))
-						.map((key) => ({ key, layer: sources[key]!.layer, detail: sources[key]!.detail })),
-					agentDir,
-					modelsPath,
-					providerKey,
-					provider: {
-						api: provider.api ?? "(missing)",
-						baseUrl: provider.baseUrl ?? "(missing)",
-						apiKeyEnv,
-						apiKeyPresent: Boolean(process.env[apiKeyEnv]),
-					},
-					activeModel: active
-						? {
-								name: active.name ?? active.id,
-								id: active.id,
-								reasoning: Boolean(active.reasoning),
-							}
-						: null,
-					modelError: active ? null : `Model not configured: ${ctx.session.state.model.id}`,
-				};
-			},
-			getWorkingTreeSummary: async () => ({
-				changedPaths: [...handler._changedPaths],
-				snapshot: await inspectGitWorkingTree(sessionRef.current.context.workingDirectory),
-			}),
-			getGitDiff: async (target) => readGitDiff(sessionRef.current.context.workingDirectory, target),
-			getDoctorSnapshot: async (ctx) => {
-				const agentDir = resolveAgentDir();
-				const modelsPath = join(agentDir, "models.json");
-				let raw = "";
-				try {
-					raw = await readFile(modelsPath, "utf8");
-				} catch {
-					return null;
-				}
-				const parsed = JSON.parse(raw) as { providers?: Record<string, any> };
-				const providerKey = ctx.session.state.model.provider;
-				const provider = parsed.providers?.[providerKey];
-				const baseUrl = typeof provider?.baseUrl === "string" ? provider.baseUrl : "";
-				const api = typeof provider?.api === "string" ? provider.api : "";
-				const apiKeyEnv = typeof provider?.apiKey === "string" ? provider.apiKey : "GENESIS_API_KEY";
-				const apiKey = process.env[apiKeyEnv];
-				const snapshot = {
-					providerKey,
-					api,
-					baseUrl,
-					apiKeyEnv,
-					apiKeyPresent: Boolean(apiKey),
-				};
-				if (!apiKey || !baseUrl || api !== "openai-completions") {
-					return snapshot;
-				}
-				const controller = new AbortController();
-				const timeout = setTimeout(() => controller.abort(), 3000);
-				try {
-					const response = await fetch(
-						new URL("chat/completions", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`),
-						{
-							method: "POST",
-							headers: {
-								"content-type": "application/json",
-								authorization: `Bearer ${apiKey}`,
-							},
-							body: JSON.stringify({
-								model: ctx.session.state.model.id,
-								stream: false,
-								messages: [{ role: "user", content: "Reply exactly DOCTOR_OK" }],
-							}),
-							signal: controller.signal,
-						},
-					);
-					if (!response.ok) {
-						return { ...snapshot, httpStatus: response.status, errorText: await response.text() };
-					}
-					const payload = (await response.json()) as any;
-					const text = payload?.choices?.[0]?.message?.content;
-					return {
-						...snapshot,
-						httpStatus: response.status,
-						responseText: typeof text === "string" ? text.trim() : null,
-					};
-				} catch (err) {
-					return { ...snapshot, errorText: `  error: ${err instanceof Error ? err.message : String(err)}` };
-				} finally {
-					clearTimeout(timeout);
-				}
+			closeResumeBrowser: () => {
+				this.closeResumeBrowser();
 			},
 		});
-
-		registry.register({
-			name: "resume",
-			description: "Show recent sessions or resume one",
-			type: "local",
-			visibility: "public",
-			async execute(ctx) {
-				if (handler.isInteractionBusy() || handler._pendingPermissionCallId) {
-					ctx.output.writeError("Session is busy.");
-					return undefined;
-				}
-
-				const recent = await runtime.listRecentSessions();
-				const selector = ctx.args.trim();
-				if (selector.length === 0) {
-					await handler.openResumeBrowser(runtime, "");
-					return undefined;
-				}
-
-				const directMatch = resolveRecentSessionDirectSelection(selector, recent, recent);
-				if (!directMatch) {
-					await handler.openResumeBrowser(runtime, selector);
-					return undefined;
-				}
-				const data = directMatch.recoveryData;
-
-				await sessionRef.current.close();
-
-				const recovered = runtime.recoverSession(data);
-				switchInteractiveSession(recovered);
-				handler.closeResumeBrowser();
-				for (const line of buildRestoredContextLines(directMatch)) {
-					ctx.output.writeLine(line);
-				}
-				ctx.output.writeLine(`Resumed: ${data.sessionId.value}`);
-				ctx.output.writeLine("Next: continue this session, or /resume to view history again.");
-				return undefined;
-			},
-		});
-
-		attachSession(sessionRef.current);
 
 		// Input loop
 		inputLoop = createInputLoop({
@@ -616,42 +458,50 @@ class InteractiveModeHandler implements ModeHandler {
 			submitNewline: false,
 			onInputStateChange: (state) => {
 				this._inputState = state;
-				if (this._resumeBrowser !== null) {
-					if (this._resumeBrowserSubmitPending && state.buffer.length === 0) {
-						this._resumeBrowserSubmitPending = false;
+				if (this.resumeBrowserState() !== null) {
+					if (this._overlayState.resumeBrowserSubmitPending && state.buffer.length === 0) {
+						this._overlayState = markResumeBrowserSubmitPending(this._overlayState, false);
 						this.renderPromptLine();
 						return;
 					}
-					this._commandSuggestions = [];
+					this._inputAssistState = clearInteractiveInputAssistState(this._inputAssistState);
 					void this.refreshResumeBrowserResults(runtime, state.buffer);
 					return;
 				}
-				this._commandSuggestions = computeSlashSuggestions(state.buffer, registry.listPublic());
+				this._inputAssistState = updateSlashCommandSuggestions(
+					this._inputAssistState,
+					state.buffer,
+					registry.listPublic(),
+				);
 				this.renderPromptLine();
 			},
 			onTabComplete: (state) => {
-				if (this._resumeBrowser !== null) {
+				if (this.resumeBrowserState() !== null) {
 					return null;
 				}
-				if (this._pendingPermissionCallId !== null) {
+				if (this.pendingPermissionState() !== null) {
 					return null;
 				}
-				const nextState = acceptFirstSlashSuggestion(state, this._commandSuggestions);
+				const nextState = acceptFirstSlashSuggestion(state, this._inputAssistState.commandSuggestions);
 				if (nextState) {
 					this._inputState = nextState;
-					this._commandSuggestions = computeSlashSuggestions(nextState.buffer, registry.listPublic());
+					this._inputAssistState = updateSlashCommandSuggestions(
+						this._inputAssistState,
+						nextState.buffer,
+						registry.listPublic(),
+					);
 					this.renderPromptLine();
 				}
 				return nextState;
 			},
 			onKey: (key) => {
 				if (key === "ctrlc") {
-					if (this._pendingPermissionCallId !== null) {
-						const callId = this._pendingPermissionCallId;
-						this._pendingPermissionCallId = null;
-						this._pendingPermissionDetails = null;
+					const permissionState = this.pendingPermissionState();
+					if (permissionState !== null) {
+						const callId = permissionState.callId;
+						this._overlayState = clearPendingPermissionRequest(this._overlayState, callId);
 						void sessionRef.current.resolvePermission(callId, "deny").catch((err) => {
-							sink.writeError(`Error: ${err}`);
+							sink.writeError(formatUnknownErrorMessage(err));
 						});
 						sink.writeLine("Permission denied.");
 						this.renderPromptLine();
@@ -663,16 +513,15 @@ class InteractiveModeHandler implements ModeHandler {
 						sink.writeLine("Aborted.");
 						return;
 					}
-					exitRequested = true;
+					exitSignal.requestExit();
 					sink.writeLine("Bye.");
-					inputLoop?.close();
 					return;
 				}
 				this.handleSpecialKey(key);
 			},
 			onSubmit: (line) => {
-				if (this._resumeBrowser !== null && line.length >= 0) {
-					this._resumeBrowserSubmitPending = true;
+				if (this.resumeBrowserState() !== null && line.length >= 0) {
+					this._overlayState = markResumeBrowserSubmitPending(this._overlayState, true);
 				}
 			},
 			onMouse: (event) => {
@@ -690,16 +539,10 @@ class InteractiveModeHandler implements ModeHandler {
 			while (line !== null) {
 				const trimmed = line.trim();
 
-				if (this._resumeBrowser !== null) {
-					const handled = await this.handleResumeBrowserSubmit(
-						line,
-						runtime,
-						sessionRef,
-						sink,
-						switchInteractiveSession,
-					);
+				if (this.resumeBrowserState() !== null) {
+					const handled = await this.handleResumeBrowserSubmit(line, sink, switchInteractiveSession);
 					if (handled) {
-						if (exitRequested) {
+						if (exitSignal.isExitRequested()) {
 							break;
 						}
 						line = await inputLoop.nextLine();
@@ -708,22 +551,26 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				// Permission response
-				if (this._pendingPermissionCallId !== null) {
-					const decision = parsePermissionDecision(trimmed, this._pendingPermissionSelection);
+				const permissionState = this.pendingPermissionState();
+				if (permissionState !== null) {
+					const decision = parsePermissionDecision(trimmed, permissionState.selectedIndex);
 					if (!decision) {
 						sink.writeError("Permission: use 1/2/3, Enter, y/Y/n, or arrow keys/Tab to choose.");
 						line = await inputLoop.nextLine();
 						continue;
 					}
-					await sessionRef.current.resolvePermission(this._pendingPermissionCallId, decision);
-					this._pendingPermissionCallId = null;
-					this._pendingPermissionDetails = null;
-					this._pendingPermissionSelection = 0;
+					await sessionRef.current.resolvePermission(permissionState.callId, decision);
+					this._overlayState = clearPendingPermissionRequest(this._overlayState, permissionState.callId);
 					line = await inputLoop.nextLine();
 					continue;
 				}
 
 				if (trimmed.length === 0) {
+					if (line.length > 0) {
+						getActiveDebugLogger()?.debug("interactive.input_submit", "Ignored whitespace-only input", {
+							rawLength: line.length,
+						});
+					}
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -731,36 +578,27 @@ class InteractiveModeHandler implements ModeHandler {
 				// Check for slash commands
 				const resolution = registry.resolve(trimmed);
 				if (resolution && resolution.type === "command") {
-					if (this.isInteractionBusy()) {
-						sink.writeError("Session is busy.");
-						line = await inputLoop.nextLine();
-						continue;
-					}
-					const executeCommand = async (): Promise<void> => {
-						await resolution.command.execute?.({
-							args: resolution.args,
-							runtime,
-							session: sessionRef.current,
-							output: sink,
-							host: commandHost,
-						});
-					};
-					try {
-						if (resolution.command.name === "compact") {
-							this.startLocalBusyCommand(executeCommand(), sessionRef, sink);
-						} else {
-							await executeCommand();
-						}
-					} catch (error) {
-						this._lastError = error instanceof Error ? error.message : String(error);
-						getActiveDebugLogger()?.error("interactive.slash_command", "Slash command failed", {
-							command: resolution.command.name,
-							args: resolution.args,
-							error,
-						});
-						sink.writeError(this._lastError);
-					}
-					if (exitRequested) {
+					await executeInteractiveSlashCommand({
+						resolution,
+						runtime,
+						session: sessionRef.current,
+						output: sink,
+						host: commandHost,
+						isInteractionBusy: () => this.isInteractionBusy(),
+						runLocalBusyCommand: (command) => {
+							this._hostState.runLocalBusyCommand(command);
+						},
+						onError: (error) => {
+							this._lastError = error instanceof Error ? error.message : String(error);
+							getActiveDebugLogger()?.error("interactive.slash_command", "Slash command failed", {
+								command: resolution.command.name,
+								args: resolution.args,
+								error,
+							});
+							sink.writeError(this._lastError);
+						},
+					});
+					if (exitSignal.isExitRequested()) {
 						break;
 					}
 					line = await inputLoop.nextLine();
@@ -774,12 +612,23 @@ class InteractiveModeHandler implements ModeHandler {
 
 				// Regular prompt
 				if (this.isInteractionBusy()) {
-					this._queuedInputs.push(trimmed);
+					const queuedBefore = this._turnPresenterState.queuedInputs.length;
+					this._turnPresenterState = queueInteractiveInput(this._turnPresenterState, trimmed);
+					getActiveDebugLogger()?.debug("interactive.input_submit", "Queued prompt while interaction is busy", {
+						inputPreview: previewInteractiveDebugText(trimmed),
+						queuedBefore,
+						queuedAfter: this._turnPresenterState.queuedInputs.length,
+						notice: this._turnPresenterState.notice,
+					});
 					this.preserveThinkingNoticeForQueuedBacklog();
 					this.renderFooterRegion();
 					line = await inputLoop.nextLine();
 					continue;
 				}
+				getActiveDebugLogger()?.debug("interactive.input_submit", "Started prompt turn", {
+					inputPreview: previewInteractiveDebugText(trimmed),
+					sessionId: sessionRef.current.id.value,
+				});
 				this.startPromptTurn(sessionRef.current, trimmed, sink);
 
 				line = await inputLoop.nextLine();
@@ -787,13 +636,15 @@ class InteractiveModeHandler implements ModeHandler {
 		} finally {
 			process.stdout.off("resize", onResize);
 			debouncedResizeRedraw.cancel();
-			detachSessionStateSubscription(detachSessionStateListener);
+			sessionBinding.dispose();
 			inputLoop.close();
 			this._inputLoop = null;
 			process.stdout.write(encodeResetScrollRegion());
 			ttySession.restore();
-			sessionRef.current.events.removeAllListeners();
-			await sessionRef.current.close();
+			await sessionEngine.closeAllSessions();
+			sessionEngine.dispose();
+			this._sessionEngine = null;
+			this._switchInteractiveSession = null;
 		}
 	}
 
@@ -805,7 +656,7 @@ class InteractiveModeHandler implements ModeHandler {
 		this._startupCheckScreenActive = true;
 		this._lastError = null;
 		this._inputState = { buffer: "", cursor: 0 };
-		this._commandSuggestions = [];
+		this._inputAssistState = resetInteractiveInputAssistState();
 		this._welcomeLines = buildWelcomeLines({
 			terminalWidth: process.stdout.columns ?? 80,
 			version: readInteractiveCliPackageVersion(),
@@ -963,7 +814,7 @@ class InteractiveModeHandler implements ModeHandler {
 			| "ctrlo"
 			| "ctrlv",
 	): void {
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			const action = resolveResumeBrowserKeyAction(key, this.currentResumeBrowserBodyViewportRows());
 			if (action?.type === "close") {
 				this.closeResumeBrowser();
@@ -985,12 +836,12 @@ class InteractiveModeHandler implements ModeHandler {
 		if (key === "ctrlv") {
 			return;
 		}
-		if (key === "esc" && this._detailPanelExpanded) {
-			this._detailPanelExpanded = false;
+		if (key === "esc" && this._detailPanelState.expanded) {
+			this._detailPanelState = collapseInteractiveDetailPanel(this._detailPanelState);
 			this.renderFooterRegion();
 			return;
 		}
-		if (this._detailPanelExpanded) {
+		if (this._detailPanelState.expanded) {
 			const detailScrollDelta = detailPanelScrollDeltaForKey(key, this.currentDetailPanelViewport().viewportSize);
 			if (detailScrollDelta !== 0) {
 				this.scrollDetailPanel(detailScrollDelta);
@@ -1002,12 +853,12 @@ class InteractiveModeHandler implements ModeHandler {
 			this.scrollTranscript(transcriptScrollDelta);
 			return;
 		}
-		if (this._pendingPermissionCallId !== null) {
+		if (this.pendingPermissionState() !== null) {
 			if (key === "up" || key === "shifttab") {
-				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, -1);
+				this._overlayState = movePendingPermissionSelectionFromUi(this._overlayState, -1);
 				this.renderPermissionUi();
 			} else if (key === "down" || key === "tab") {
-				this._pendingPermissionSelection = movePermissionSelection(this._pendingPermissionSelection, 1);
+				this._overlayState = movePendingPermissionSelectionFromUi(this._overlayState, 1);
 				this.renderPermissionUi();
 			}
 			return;
@@ -1018,7 +869,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderPermissionUi(): void {
-		if (this._pendingPermissionCallId === null || this._pendingPermissionDetails === null) {
+		if (this.pendingPermissionState() === null) {
 			this.fullRedrawInteractiveScreen();
 			return;
 		}
@@ -1035,7 +886,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		if (event.category === "tool") {
-			const text = formatInteractiveToolEvent(event, this._toolCalls.get(event.toolCallId)?.parameters);
+			const text = formatInteractiveToolEvent(
+				event,
+				findInteractiveToolParameters(this._turnPresenterState, event.toolCallId),
+			);
 			if (text.length > 0) {
 				this.flushAssistantBuffer(false);
 				this.writeTranscriptText(text, true);
@@ -1051,20 +905,19 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		if (event.category === "compaction") {
 			if (event.type === "compaction_started") {
-				this._turnNotice = "compacting";
-				this._turnNoticeAnimationFrame = 0;
-				this._turnStartedAt = Date.now();
+				this._turnPresenterState = setInteractiveTurnNotice(this._turnPresenterState, "compacting", {
+					startedAt: Date.now(),
+				});
 				this.startTurnNoticeAnimation();
 			} else {
 				this.stopTurnNoticeAnimation();
-				this._turnNotice = null;
-				this._turnNoticeAnimationFrame = 0;
-				this._turnStartedAt = null;
-				this._detailPanelExpanded = false;
-				this._detailPanelScroll = 0;
-				this._compactionDetailText = formatCompactionDetailText(event.summary);
+				this._turnPresenterState = clearInteractiveTurnNotice(this._turnPresenterState);
+				this._detailPanelState = showCompactionDetailSummary(
+					this._detailPanelState,
+					formatCompactionDetailText(event.summary),
+				);
 				if (
-					this._activeLocalCommand === null &&
+					!this._hostState.hasActiveLocalCommand() &&
 					this._activeTurn === null &&
 					this._sessionRef !== null &&
 					this._sink !== null
@@ -1081,9 +934,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		if (event.category === "session" && event.type === "session_error") {
 			this._lastError = event.message;
-			this._turnNotice = null;
-			this._turnNoticeAnimationFrame = 0;
-			this._turnStartedAt = null;
+			this._turnPresenterState = clearInteractiveTurnNotice(this._turnPresenterState);
 			getActiveDebugLogger()?.error("interactive.session_error", "Interactive session reported an upstream error", {
 				message: event.message,
 				source: event.source,
@@ -1091,6 +942,9 @@ class InteractiveModeHandler implements ModeHandler {
 			});
 			this.flushAssistantBuffer(false);
 			this.writeTranscriptText(formatInteractiveErrorLine(event.message), true);
+			if (event.fatal) {
+				this.recoverFromFatalSessionError();
+			}
 			return;
 		}
 		if (!shouldRenderInteractiveTranscriptEvent(event)) {
@@ -1098,17 +952,16 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		if (event.category === "text" && event.type === "thinking_delta") {
-			this._thinkingBuffer += event.content;
-			if (this._turnNotice === null) {
+			this._detailPanelState = appendThinkingDetailText(this._detailPanelState, event.content);
+			if (this._turnPresenterState.notice === null) {
 				this.startTurnFeedback();
 			}
 			this.renderPromptLine();
 			return;
 		}
 		if (event.category === "text" && event.type === "text_delta") {
-			if (this._turnNotice !== "responding") {
-				this._turnNoticeAnimationFrame = 0;
-				this._turnNotice = "responding";
+			if (this._turnPresenterState.notice !== "responding") {
+				this._turnPresenterState = setInteractiveTurnNotice(this._turnPresenterState, "responding");
 				this.startTurnNoticeAnimation();
 			}
 			const previousRows = this.currentTranscriptDisplayRows();
@@ -1139,8 +992,10 @@ class InteractiveModeHandler implements ModeHandler {
 			const previousRows = this.currentTranscriptDisplayRows();
 			this.rememberAssistantTranscriptBlock(assistantBlock);
 			this.adjustTranscriptScrollForGrowth(previousRows, this.currentTranscriptDisplayRows());
-			if (this._runtime !== null && this._sessionRef !== null) {
-				void this._runtime.recordRecentSessionAssistantText(this._sessionRef.current, assistantText);
+			if (this._sessionRef !== null) {
+				this.requireSessionEngine().recordAssistantText(assistantText, {
+					sessionId: this._sessionRef.current.id.value,
+				});
 			}
 		}
 		if (redrawPrompt) {
@@ -1149,11 +1004,10 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private startTurnFeedback(): void {
-		if (this._turnNotice !== null) {
+		if (this._turnPresenterState.notice !== null) {
 			return;
 		}
-		this._turnNotice = "thinking";
-		this._turnNoticeAnimationFrame = 0;
+		this._turnPresenterState = beginInteractiveTurnFeedback(this._turnPresenterState, Date.now());
 		this.startTurnNoticeAnimation();
 		this.renderPromptLine();
 	}
@@ -1163,10 +1017,10 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		this._turnNoticeTimer = setInterval(() => {
-			if (this._turnNotice === null) {
+			if (this._turnPresenterState.notice === null) {
 				return;
 			}
-			this._turnNoticeAnimationFrame = (this._turnNoticeAnimationFrame + 1) % 3;
+			this._turnPresenterState = tickInteractiveTurnNoticeAnimation(this._turnPresenterState);
 			this.renderFooterRegion();
 		}, 400);
 		this._turnNoticeTimer.unref?.();
@@ -1218,14 +1072,12 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private async openResumeBrowser(runtime: AppRuntime, initialQuery: string): Promise<void> {
-		this._resumeBrowser = createResumeBrowserState(initialQuery);
-		this._detailPanelExpanded = false;
-		this._detailPanelScroll = 0;
+		this._overlayState = openResumeBrowserOverlay(this._overlayState, initialQuery);
+		this._detailPanelState = resetInteractiveDetailPanelState();
 		this._transcriptScrollOffset = 0;
 		this._resumeBrowserScrollOffset = 0;
-		this._resumeBrowserSubmitPending = false;
 		this.clearMouseSelection(false);
-		this._commandSuggestions = [];
+		this._inputAssistState = resetInteractiveInputAssistState();
 		getActiveDebugLogger()?.debug("resume.browser.open", "Opened resume browser", {
 			initialQuery,
 			transcriptScrollOffset: this._transcriptScrollOffset,
@@ -1240,61 +1092,62 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private closeResumeBrowser(): void {
-		if (this._resumeBrowser === null) {
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
 			return;
 		}
 		getActiveDebugLogger()?.debug("resume.browser.close", "Closed resume browser", {
-			query: this._resumeBrowser.query,
-			selectedIndex: this._resumeBrowser.selectedIndex,
-			resultCount: this._resumeBrowser.hits.length,
-			previewExpanded: this._resumeBrowser.previewExpanded,
+			query: browser.query,
+			selectedIndex: browser.selectedIndex,
+			resultCount: browser.hits.length,
+			previewExpanded: browser.previewExpanded,
 		});
-		this._resumeBrowser = null;
-		this._resumeSearchRequestId += 1;
+		this._overlayState = closeResumeBrowserOverlay(this._overlayState);
 		this._transcriptScrollOffset = 0;
 		this._resumeBrowserScrollOffset = 0;
-		this._resumeBrowserSubmitPending = false;
 		this.clearMouseSelection(false);
 		if (this._inputLoop !== null) {
 			this._inputLoop.setState({ buffer: "", cursor: 0 });
 		} else {
 			this._inputState = { buffer: "", cursor: 0 };
-			this._commandSuggestions = [];
+			this._inputAssistState = resetInteractiveInputAssistState();
 		}
 		this.rerenderInteractiveRegions();
 	}
 
 	private async refreshResumeBrowserResults(runtime: AppRuntime, query: string): Promise<void> {
-		const browser = this._resumeBrowser;
+		const started = beginResumeBrowserOverlaySearch(this._overlayState, query);
+		if (started === null) {
+			return;
+		}
+		const nextQuery = query;
+		this._overlayState = started.state;
+		this.rerenderInteractiveRegions();
+		const hits = await runtime.searchRecentSessions(nextQuery);
+		if (this.resumeBrowserState() === null || started.requestId !== this._overlayState.resumeSearchRequestId) {
+			return;
+		}
+		this._overlayState = completeResumeBrowserOverlaySearch(this._overlayState, {
+			requestId: started.requestId,
+			nextQuery,
+			hits,
+			selectedSessionId: started.selectedSessionId,
+			fallbackIndex: started.previous.selectedIndex,
+		});
+		if (started.previous.query !== nextQuery) {
+			this._resumeBrowserScrollOffset = 0;
+		}
+		const browser = this.resumeBrowserState();
 		if (browser === null) {
 			return;
 		}
-		const selectedSessionId = browser.hits[browser.selectedIndex]?.entry.recoveryData.sessionId.value ?? null;
-		const requestId = ++this._resumeSearchRequestId;
-		const nextQuery = query;
-		this._resumeBrowser = beginResumeBrowserSearch(browser, nextQuery);
-		this.rerenderInteractiveRegions();
-		const hits = await runtime.searchRecentSessions(nextQuery);
-		if (this._resumeBrowser === null || requestId !== this._resumeSearchRequestId) {
-			return;
-		}
-		this._resumeBrowser = completeResumeBrowserSearch(
-			this._resumeBrowser,
-			nextQuery,
-			hits,
-			selectedSessionId,
-			browser.selectedIndex,
-		);
-		if (browser.query !== nextQuery) {
-			this._resumeBrowserScrollOffset = 0;
-		}
 		getActiveDebugLogger()?.debug("resume.browser.search", "Refreshed resume browser results", {
 			query: nextQuery,
-			requestId,
+			requestId: started.requestId,
 			resultCount: hits.length,
-			selectedIndex: this._resumeBrowser.selectedIndex,
+			selectedIndex: browser.selectedIndex,
 			topHit: summarizeResumeBrowserHit(hits[0]),
-			selectedHit: summarizeResumeBrowserHit(hits[this._resumeBrowser.selectedIndex]),
+			selectedHit: summarizeResumeBrowserHit(hits[browser.selectedIndex]),
 			scrollOffset: this._resumeBrowserScrollOffset,
 		});
 		this.ensureResumeBrowserSelectionVisible();
@@ -1302,25 +1155,20 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private moveResumeBrowserSelection(delta: number): void {
-		if (this._resumeBrowser === null) {
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
 			return;
 		}
-		const nextIndex = moveResumeBrowserSelection(
-			this._resumeBrowser.selectedIndex,
-			delta,
-			this._resumeBrowser.hits.length,
-		);
-		if (nextIndex === this._resumeBrowser.selectedIndex) {
+		const nextState = moveResumeBrowserOverlaySelection(this._overlayState, delta);
+		const nextBrowser = nextState.resumeBrowser;
+		if (nextBrowser === null || nextBrowser.selectedIndex === browser.selectedIndex) {
 			return;
 		}
-		this._resumeBrowser = {
-			...this._resumeBrowser,
-			selectedIndex: nextIndex,
-		};
+		this._overlayState = nextState;
 		getActiveDebugLogger()?.debug("resume.browser.selection", "Moved resume browser selection", {
 			delta,
-			selectedIndex: nextIndex,
-			selectedHit: summarizeResumeBrowserHit(this._resumeBrowser.hits[nextIndex]),
+			selectedIndex: nextBrowser.selectedIndex,
+			selectedHit: summarizeResumeBrowserHit(nextBrowser.hits[nextBrowser.selectedIndex]),
 			scrollOffset: this._resumeBrowserScrollOffset,
 		});
 		this.ensureResumeBrowserSelectionVisible();
@@ -1328,14 +1176,18 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private toggleResumeBrowserPreview(): void {
-		if (this._resumeBrowser === null) {
+		if (this.resumeBrowserState() === null) {
 			return;
 		}
-		this._resumeBrowser = toggleResumeBrowserPreviewState(this._resumeBrowser);
+		this._overlayState = toggleResumeBrowserOverlayPreview(this._overlayState);
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
+			return;
+		}
 		getActiveDebugLogger()?.debug("resume.browser.preview", "Toggled resume browser preview", {
-			previewExpanded: this._resumeBrowser.previewExpanded,
-			selectedIndex: this._resumeBrowser.selectedIndex,
-			selectedHit: summarizeResumeBrowserHit(this._resumeBrowser.hits[this._resumeBrowser.selectedIndex]),
+			previewExpanded: browser.previewExpanded,
+			selectedIndex: browser.selectedIndex,
+			selectedHit: summarizeResumeBrowserHit(browser.hits[browser.selectedIndex]),
 		});
 		this.ensureResumeBrowserSelectionVisible();
 		this.rerenderInteractiveRegions();
@@ -1343,40 +1195,57 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private async handleResumeBrowserSubmit(
 		line: string,
-		runtime: AppRuntime,
-		sessionRef: { current: SessionFacade },
 		sink: OutputSink,
 		switchInteractiveSession: (nextSession: SessionFacade) => void,
 	): Promise<boolean> {
-		if (this._resumeBrowser === null) {
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
 			return false;
 		}
 		getActiveDebugLogger()?.debug("resume.browser.submit", "Handling resume browser submit", {
 			line,
-			loading: this._resumeBrowser.loading,
-			selectedIndex: this._resumeBrowser.selectedIndex,
-			hitCount: this._resumeBrowser.hits.length,
+			loading: browser.loading,
+			selectedIndex: browser.selectedIndex,
+			hitCount: browser.hits.length,
 		});
-		if (this._resumeBrowser.loading) {
+		if (browser.loading) {
 			return true;
 		}
-		const hit = resolveResumeBrowserSubmitHit(this._resumeBrowser);
+		const hit = resolveResumeBrowserSubmitHit(browser);
 		if (!hit) {
 			return true;
 		}
 		const data = hit.entry.recoveryData;
+		if (!this.canResumeRecoveryData(data)) {
+			sink.writeError("This session cannot be resumed: transcript file is missing.");
+			sink.writeLine("Tip: pick a newer session that has full transcript persistence.");
+			return true;
+		}
 		getActiveDebugLogger()?.debug("resume.browser.resume", "Resuming selected session", {
-			selectedIndex: this._resumeBrowser.selectedIndex,
+			selectedIndex: browser.selectedIndex,
 			selectedHit: summarizeResumeBrowserHit(hit),
 		});
 		this.closeResumeBrowser();
-		await sessionRef.current.close();
-		const recovered = runtime.recoverSession(data);
+		const recovered = await this.requireSessionEngine().recoverSession(data, { closeActive: true });
 		switchInteractiveSession(recovered);
-		for (const line of buildResumeBrowserResumedLines(hit)) {
+		for (const line of await buildResumedContextLines(hit)) {
 			sink.writeLine(line);
 		}
+		sink.writeLine(`Resumed: ${data.sessionId.value}`);
+		sink.writeLine("Next: continue this session, or /resume to view history again.");
 		return true;
+	}
+
+	private canResumeRecoveryData(data: SessionRecoveryData): boolean {
+		if (typeof data.sessionFile !== "string" || data.sessionFile.length === 0) {
+			return false;
+		}
+		try {
+			readFileSync(data.sessionFile, "utf8");
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	private startPromptTurn(session: SessionFacade, prompt: string, sink: OutputSink): void {
@@ -1387,159 +1256,178 @@ class InteractiveModeHandler implements ModeHandler {
 		this.startUserTurn(session, input, sink, "continue");
 	}
 
+	private recoverFromFatalSessionError(): void {
+		if (this._activeTurn === null) {
+			this.fullRedrawInteractiveScreen();
+			return;
+		}
+		const previousTurnToken = this._activeTurnToken;
+		this.stopTurnNoticeAnimation();
+		this._activeTurn = null;
+		this._activeTurnToken += 1;
+		this._turnPresenterState = completeInteractiveTurn(this._turnPresenterState);
+		this._detailPanelState = resetInteractiveDetailPanelState();
+		const queuedInputBatch = this.drainQueuedInputs();
+		const sessionRef = this._sessionRef;
+		const sink = this._sink;
+		if (queuedInputBatch !== null && sessionRef !== null && sink !== null) {
+			queueMicrotask(() => {
+				if (this._activeTurn !== null || this._activeTurnToken !== previousTurnToken + 1) {
+					return;
+				}
+				this.startQueuedContinueTurn(this.ensureLiveInteractiveSession(sessionRef.current), queuedInputBatch, sink);
+			});
+			return;
+		}
+		this.fullRedrawInteractiveScreen();
+	}
+
 	private startUserTurn(session: SessionFacade, input: string, sink: OutputSink, mode: "prompt" | "continue"): void {
+		const engine = this.requireSessionEngine();
+		const liveSession = this.ensureLiveInteractiveSession(session);
+		const transcriptBlocksBefore = this._conversation.getTranscriptBlocks().length;
+		const transcriptRowsBefore = this.currentTranscriptDisplayRows();
 		this.flushAssistantBuffer(false);
 		for (const block of formatTranscriptUserBlocks(input)) {
 			this.writeTranscriptText(block, true, false);
 		}
-		this._turnStartedAt = Date.now();
-		this._detailPanelExpanded = false;
-		this._detailPanelScroll = 0;
-		this._thinkingBuffer = "";
-		this._compactionDetailText = "";
-		this._activeTurnUsageTotals = emptyUsageSnapshot();
-		this._currentMessageUsage = emptyUsageSnapshot();
-		this.startTurnFeedback();
+		const transcriptBlocksAfter = this._conversation.getTranscriptBlocks().length;
+		const transcriptRowsAfter = this.currentTranscriptDisplayRows();
+		getActiveDebugLogger()?.debug("interactive.turn_start", "Recorded user turn transcript blocks", {
+			mode,
+			sessionId: liveSession.id.value,
+			inputPreview: previewInteractiveDebugText(input),
+			transcriptBlocksBefore,
+			transcriptBlocksAfter,
+			transcriptRowsBefore,
+			transcriptRowsAfter,
+		});
+		this._turnPresenterState = beginInteractiveTurn(this._turnPresenterState, Date.now());
+		this._detailPanelState = resetInteractiveDetailPanelState();
 		this.rememberHistory(input);
-		if (this._runtime !== null) {
-			void this._runtime.recordRecentSessionInput(session, input);
-		}
-		const sendTurn =
-			mode === "continue" ? (value: string) => session.continue(value) : (value: string) => session.prompt(value);
-		this._activeTurn = sendTurn(input)
+		const turnToken = this._activeTurnToken + 1;
+		this._activeTurnToken = turnToken;
+		this._activeTurn = engine
+			.submit(input, { mode, sessionId: liveSession.id.value })
 			.catch((err: unknown) => {
-				sink.writeError(`Error: ${err}`);
+				sink.writeError(formatUnknownErrorMessage(err));
 			})
 			.finally(() => {
+				if (turnToken !== this._activeTurnToken) {
+					return;
+				}
 				this.stopTurnNoticeAnimation();
-				const completedTurnUsage = this.currentTurnUsage();
 				this._activeTurn = null;
 				this.flushAssistantBuffer(false);
-				this._turnNotice = null;
-				this._turnNoticeAnimationFrame = 0;
-				this._turnStartedAt = null;
-				this._detailPanelExpanded = false;
-				this._detailPanelScroll = 0;
-				this._thinkingBuffer = "";
-				this._compactionDetailText = "";
-				if (hasUsageSnapshot(completedTurnUsage)) {
-					this._lastTurnUsage = completedTurnUsage;
-					this._sessionUsageTotals = addUsageSnapshots(this._sessionUsageTotals, completedTurnUsage);
-				}
-				this._activeTurnUsageTotals = emptyUsageSnapshot();
-				this._currentMessageUsage = emptyUsageSnapshot();
+				this._turnPresenterState = completeInteractiveTurn(this._turnPresenterState);
+				this._detailPanelState = resetInteractiveDetailPanelState();
 				const queuedInputBatch = this.drainQueuedInputs();
 				if (queuedInputBatch !== null) {
-					this.startQueuedContinueTurn(session, queuedInputBatch, sink);
+					this.startQueuedContinueTurn(liveSession, queuedInputBatch, sink);
 					return;
 				}
 				this.fullRedrawInteractiveScreen();
 			});
+	}
+
+	private ensureLiveInteractiveSession(preferred: SessionFacade): SessionFacade {
+		const engine = this.requireSessionEngine();
+		const mapped = engine.getSession(preferred.id.value);
+		if (mapped) {
+			if (this._sessionRef !== null && this._sessionRef.current.id.value !== mapped.id.value) {
+				if (this._switchInteractiveSession !== null) {
+					getActiveDebugLogger()?.debug(
+						"interactive.session_rebind",
+						"Auto-rebound to mapped interactive session",
+						{
+							preferredSessionId: preferred.id.value,
+							reboundSessionId: mapped.id.value,
+						},
+					);
+					this._switchInteractiveSession(mapped, { preserveTranscript: true });
+				} else {
+					this._sessionRef.current = mapped;
+					this.renderWelcome(mapped);
+				}
+			}
+			return mapped;
+		}
+
+		// Keep the in-hand session when it's still active to avoid silently jumping to an unrelated session.
+		if (preferred.state.status !== "closed") {
+			engine.adoptSession(preferred, { makeActive: true });
+			getActiveDebugLogger()?.debug(
+				"interactive.session_rebind",
+				"Re-adopted preferred session after host mapping loss",
+				{
+					preferredSessionId: preferred.id.value,
+					preferredStatus: preferred.state.status,
+				},
+			);
+			return preferred;
+		}
+
+		const fallback = engine.activeSession ?? engine.createSession();
+		if (this._sessionRef !== null && this._sessionRef.current.id.value !== fallback.id.value) {
+			if (this._switchInteractiveSession !== null) {
+				getActiveDebugLogger()?.debug(
+					"interactive.session_rebind",
+					"Auto-rebound from closed session to fallback",
+					{
+						preferredSessionId: preferred.id.value,
+						reboundSessionId: fallback.id.value,
+					},
+				);
+				this._switchInteractiveSession(fallback, { preserveTranscript: true });
+			} else {
+				this._sessionRef.current = fallback;
+				this.renderWelcome(fallback);
+			}
+		}
+		return fallback;
+	}
+
+	private requireSessionEngine(): SessionEngine {
+		if (this._sessionEngine === null) {
+			throw new Error("Interactive session engine is not initialized");
+		}
+		return this._sessionEngine;
+	}
+
+	private resumeBrowserState() {
+		return this._overlayState.resumeBrowser;
+	}
+
+	private pendingPermissionState() {
+		return this._overlayState.pendingPermission;
 	}
 
 	private drainQueuedInputs(): string | null {
-		if (this._queuedInputs.length === 0) {
-			return null;
-		}
-		const queued = [...this._queuedInputs];
-		this._queuedInputs.length = 0;
-		return queued.join("\n\n");
-	}
-
-	private startLocalBusyCommand(
-		command: Promise<void>,
-		sessionRef: { current: SessionFacade },
-		sink: OutputSink,
-	): void {
-		this._activeLocalCommand = command
-			.catch((error: unknown) => {
-				if (this._turnNotice === "compacting") {
-					this.stopTurnNoticeAnimation();
-					this._turnNotice = null;
-					this._turnNoticeAnimationFrame = 0;
-					this._turnStartedAt = null;
-				}
-				this._lastError = error instanceof Error ? error.message : String(error);
-				getActiveDebugLogger()?.error("interactive.local_command", "Local command failed", { error });
-				sink.writeError(this._lastError);
-			})
-			.finally(() => {
-				this._activeLocalCommand = null;
-				if (this._activeTurn !== null || this._turnNotice === "compacting") {
-					this.renderFooterRegion();
-					return;
-				}
-				const queuedInputBatch = this.drainQueuedInputs();
-				if (queuedInputBatch !== null) {
-					this.startQueuedContinueTurn(sessionRef.current, queuedInputBatch, sink);
-					return;
-				}
-				this.fullRedrawInteractiveScreen();
-			});
+		const drained = drainQueuedInteractiveInputs(this._turnPresenterState);
+		this._turnPresenterState = drained.state;
+		return drained.batch;
 	}
 
 	private preserveThinkingNoticeForQueuedBacklog(): void {
-		if (this._activeTurn === null && this._turnNotice !== "compacting") {
+		if (this._activeTurn === null && this._turnPresenterState.notice !== "compacting") {
 			return;
 		}
-		if (this._turnNotice === "responding") {
-			this._turnNotice = "thinking";
+		this._turnPresenterState = preserveThinkingNoticeForQueuedBacklog(this._turnPresenterState, Date.now());
+		if (this._turnPresenterState.notice !== null) {
 			this.startTurnNoticeAnimation();
-			return;
-		}
-		if (this._turnNotice === null) {
-			this.startTurnFeedback();
 		}
 	}
 
 	private isInteractionBusy(): boolean {
-		return this._activeTurn !== null || this._activeLocalCommand !== null || this._turnNotice === "compacting";
-	}
-
-	private scheduleRecentSessionPersist(
-		runtime: AppRuntime,
-		session: SessionFacade,
-		event: RuntimeEvent,
-		title?: string,
-	): void {
-		if (this._recentSessionPersistTimer !== null) {
-			clearTimeout(this._recentSessionPersistTimer);
-		}
-		this._recentSessionPersistTimer = setTimeout(() => {
-			this._recentSessionPersistTimer = null;
-			void this.enqueueRecentSessionPersist(runtime, session, event, title);
-		}, 120);
-	}
-
-	private async enqueueRecentSessionPersist(
-		runtime: AppRuntime,
-		session: SessionFacade,
-		event: RuntimeEvent,
-		title?: string,
-	): Promise<void> {
-		try {
-			await runtime.recordRecentSessionEvent(session, event, { title });
-			getActiveDebugLogger()?.debug("resume.history.persist", "Persisted runtime-owned session history update", {
-				sessionId: session.id.value,
-				category: event.category,
-				type: event.type,
-			});
-		} catch (error) {
-			getActiveDebugLogger()?.error(
-				"resume.history.persist",
-				"Failed to persist runtime-owned session history update",
-				{
-					error,
-					sessionId: session.id.value,
-					category: event.category,
-					type: event.type,
-				},
-			);
-		}
+		return (
+			this._activeTurn !== null ||
+			this._hostState.hasActiveLocalCommand() ||
+			this._turnPresenterState.notice === "compacting"
+		);
 	}
 
 	private ensureResumeBrowserSelectionVisible(): void {
-		if (this._resumeBrowser === null) {
+		if (this.resumeBrowserState() === null) {
 			return;
 		}
 		this._resumeBrowserScrollOffset = ensureVisibleSelectionOffset({
@@ -1554,10 +1442,9 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this.currentDetailPanelContentLines().length === 0) {
 			return;
 		}
-		this._detailPanelExpanded = !this._detailPanelExpanded;
-		if (this._detailPanelExpanded) {
-			this._detailPanelScroll = 0;
-		}
+		this._detailPanelState = toggleInteractiveDetailPanel(this._detailPanelState, {
+			hasContent: this.currentDetailPanelContentLines().length > 0,
+		});
 		this.renderFooterRegion();
 	}
 
@@ -1567,11 +1454,11 @@ class InteractiveModeHandler implements ModeHandler {
 			return;
 		}
 		const maxScroll = Math.max(0, viewport.totalLines - viewport.viewportSize);
-		const next = Math.max(0, Math.min(maxScroll, this._detailPanelScroll + delta));
-		if (next === this._detailPanelScroll) {
+		const next = Math.max(0, Math.min(maxScroll, this._detailPanelState.scrollOffset + delta));
+		if (next === this._detailPanelState.scrollOffset) {
 			return;
 		}
-		this._detailPanelScroll = next;
+		this._detailPanelState = setInteractiveDetailPanelScroll(this._detailPanelState, next);
 		this.renderFooterRegion();
 	}
 
@@ -1591,42 +1478,46 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private buildFooterUi(): InteractiveFooterRenderResult {
-		const activeToolLabel = summarizeActiveToolNotice(this._toolCalls);
+		const activeToolLabel = summarizeActiveInteractiveToolLabel(this._turnPresenterState);
 		const detailPanel = this.currentDetailPanelViewport();
+		const pendingPermission = this.pendingPermissionState();
 		return formatInteractiveFooter({
 			terminalWidth: process.stdout.columns ?? 80,
 			prompt: this.currentPrompt(),
 			buffer: this._inputState.buffer,
 			cursor: this._inputState.cursor,
-			suggestions: this._commandSuggestions,
-			turnNotice: activeToolLabel !== null ? "tool" : this._turnNotice,
-			turnNoticeAnimationFrame: this._turnNoticeAnimationFrame,
+			suggestions: this._inputAssistState.commandSuggestions,
+			turnNotice: activeToolLabel !== null ? "tool" : this._turnPresenterState.notice,
+			turnNoticeAnimationFrame: this._turnPresenterState.noticeAnimationFrame,
 			elapsedMs: this.currentTurnElapsedMs(),
 			currentTurnUsage: this.currentTurnUsage(),
-			lastTurnUsage: this._lastTurnUsage,
-			sessionUsage: this._sessionUsageTotals,
+			lastTurnUsage: this._turnPresenterState.lastTurnUsage,
+			sessionUsage: this._turnPresenterState.sessionUsageTotals,
 			activeToolLabel,
 			showPendingOutputIndicator: this.shouldShowPendingOutputIndicator(activeToolLabel),
-			detailPanelExpanded: this._detailPanelExpanded,
+			detailPanelExpanded: this._detailPanelState.expanded,
 			detailPanelLines: detailPanel.lines,
 			detailPanelSummary: detailPanel.summary,
-			queuedInputs: this._queuedInputs,
+			queuedInputs: this._turnPresenterState.queuedInputs,
 			permission:
-				this._pendingPermissionCallId !== null && this._pendingPermissionDetails !== null
+				pendingPermission !== null
 					? {
-							details: this._pendingPermissionDetails,
-							selectedIndex: this._pendingPermissionSelection,
+							details: pendingPermission.details,
+							selectedIndex: pendingPermission.selectedIndex,
 						}
 					: null,
 		});
 	}
 
 	private currentDetailPanelContentLines(): readonly string[] {
-		if (this._thinkingBuffer.trim().length > 0) {
-			return wrapTranscriptContentFromTuiCore(this._thinkingBuffer.trim(), this.terminalWidth());
+		if (this._detailPanelState.thinkingText.trim().length > 0) {
+			return wrapTranscriptContentFromTuiCore(this._detailPanelState.thinkingText.trim(), this.terminalWidth());
 		}
-		if (this._compactionDetailText.trim().length > 0) {
-			return wrapTranscriptContentFromTuiCore(this._compactionDetailText.trim(), this.terminalWidth());
+		if (this._detailPanelState.compactionDetailText.trim().length > 0) {
+			return wrapTranscriptContentFromTuiCore(
+				this._detailPanelState.compactionDetailText.trim(),
+				this.terminalWidth(),
+			);
 		}
 		return [];
 	}
@@ -1635,7 +1526,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (this._startupCheckScreenActive) {
 			return this._lastError ? "Press Enter to retry " : "Running startup checks ";
 		}
-		return this._resumeBrowser === null ? this._prompt : "Search> ";
+		return this.resumeBrowserState() === null ? this._prompt : "Search> ";
 	}
 
 	private shouldShowPendingOutputIndicator(activeToolLabel: string | null): boolean {
@@ -1662,7 +1553,7 @@ class InteractiveModeHandler implements ModeHandler {
 		if (lines.length === 0) {
 			return { lines: [], summary: null, viewportSize: 0, totalLines: 0 };
 		}
-		if (!this._detailPanelExpanded) {
+		if (!this._detailPanelState.expanded) {
 			return {
 				lines: [],
 				summary: "ctrl+o to expand",
@@ -1672,7 +1563,7 @@ class InteractiveModeHandler implements ModeHandler {
 		}
 		const viewportSize = Math.max(3, this.terminalHeight() - 8);
 		const maxScroll = Math.max(0, lines.length - viewportSize);
-		const start = Math.max(0, Math.min(this._detailPanelScroll, maxScroll));
+		const start = Math.max(0, Math.min(this._detailPanelState.scrollOffset, maxScroll));
 		const end = Math.min(lines.length, start + viewportSize);
 		const summary =
 			lines.length <= viewportSize
@@ -1688,7 +1579,7 @@ class InteractiveModeHandler implements ModeHandler {
 
 	private rerenderInteractiveRegions(): void {
 		this.clearMouseSelection(false);
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			this.clampResumeBrowserScrollOffset();
 		} else {
 			this.clampTranscriptScrollOffset();
@@ -1711,25 +1602,15 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private updateTurnUsage(usage: UsageSnapshot, isFinal: boolean): void {
-		const normalized = normalizeUsageSnapshot(usage);
-		if (isFinal) {
-			this._activeTurnUsageTotals = addUsageSnapshots(this._activeTurnUsageTotals, normalized);
-			this._currentMessageUsage = emptyUsageSnapshot();
-			return;
-		}
-		this._currentMessageUsage = normalized;
+		this._turnPresenterState = updateInteractiveTurnUsage(this._turnPresenterState, usage, isFinal);
 	}
 
 	private currentTurnUsage(): UsageSnapshot | null {
-		const usage = addUsageSnapshots(this._activeTurnUsageTotals, this._currentMessageUsage);
-		return hasUsageSnapshot(usage) ? usage : null;
+		return currentInteractiveTurnUsage(this._turnPresenterState);
 	}
 
 	private currentTurnElapsedMs(): number | null {
-		if (this._turnNotice === null || this._turnStartedAt === null) {
-			return null;
-		}
-		return Math.max(0, Date.now() - this._turnStartedAt);
+		return currentInteractiveTurnElapsedMs(this._turnPresenterState, Date.now());
 	}
 
 	private terminalWidth(): number {
@@ -1753,11 +1634,13 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentResumeBrowserTopLines(): readonly string[] {
-		return this._resumeBrowser === null ? [] : buildResumeBrowserHeaderLines(this._resumeBrowser);
+		const browser = this.resumeBrowserState();
+		return browser === null ? [] : buildResumeBrowserHeaderLines(browser);
 	}
 
 	private currentResumeBrowserBodyBlocks(): readonly string[] {
-		return this._resumeBrowser === null ? [] : buildResumeBrowserBodyBlocks(this._resumeBrowser);
+		const browser = this.resumeBrowserState();
+		return browser === null ? [] : buildResumeBrowserBodyBlocks(browser);
 	}
 
 	private buildResumeBrowserFooterUi(): InteractiveFooterRenderResult {
@@ -1804,22 +1687,23 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentResumeBrowserSelectedRowRange(): { start: number; end: number } | null {
-		if (this._resumeBrowser === null) {
+		const browser = this.resumeBrowserState();
+		if (browser === null) {
 			return null;
 		}
 		const blocks = this.currentResumeBrowserBodyBlocks();
-		const selectedBlock = blocks[this._resumeBrowser.selectedIndex];
+		const selectedBlock = blocks[browser.selectedIndex];
 		if (!selectedBlock) {
 			return null;
 		}
 		let start = 0;
-		for (let index = 0; index < this._resumeBrowser.selectedIndex; index += 1) {
+		for (let index = 0; index < browser.selectedIndex; index += 1) {
 			start += countRenderedTerminalRowsFromTuiCore((blocks[index] ?? "").split("\n"), this.terminalWidth());
 		}
 		let end =
 			start + Math.max(0, countRenderedTerminalRowsFromTuiCore(selectedBlock.split("\n"), this.terminalWidth()) - 1);
-		const previewBlock = blocks[this._resumeBrowser.selectedIndex + 1];
-		if (this._resumeBrowser.previewExpanded && previewBlock?.startsWith("Preview\n")) {
+		const previewBlock = blocks[browser.selectedIndex + 1];
+		if (browser.previewExpanded && previewBlock?.startsWith("Preview\n")) {
 			end += countRenderedTerminalRowsFromTuiCore(previewBlock.split("\n"), this.terminalWidth());
 		}
 		return {
@@ -1837,7 +1721,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private isTranscriptMouseRow(row: number): boolean {
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			return false;
 		}
 		const footerStartRow =
@@ -1912,7 +1796,8 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private renderInteractiveScreenState(options: { readonly resetScrollRegion?: boolean } = {}): void {
-		if (this._resumeBrowser !== null) {
+		const browser = this.resumeBrowserState();
+		if (browser !== null) {
 			this.clampResumeBrowserScrollOffset();
 		} else {
 			this.clampTranscriptScrollOffset();
@@ -1935,14 +1820,14 @@ class InteractiveModeHandler implements ModeHandler {
 		if (renderDebug !== null) {
 			getActiveDebugLogger()?.debug("tui.render", "Rendered interactive screen frame", renderDebug);
 		}
-		if (this._resumeBrowser !== null) {
+		if (browser !== null) {
 			getActiveDebugLogger()?.debug("resume.browser.layout", "Rendered resume browser layout", {
 				headerLineCount: this.currentResumeBrowserTopLines().length,
 				bodyViewportRows: this.currentResumeBrowserBodyViewportRows(),
 				bodyDisplayRows: this.currentResumeBrowserBodyDisplayRows(),
 				scrollOffset: this._resumeBrowserScrollOffset,
-				selectedIndex: this._resumeBrowser.selectedIndex,
-				previewExpanded: this._resumeBrowser.previewExpanded,
+				selectedIndex: browser.selectedIndex,
+				previewExpanded: browser.previewExpanded,
 				footerStartRow: next.footerStartRow,
 			});
 		}
@@ -2024,7 +1909,7 @@ class InteractiveModeHandler implements ModeHandler {
 	} {
 		const terminalWidth = this.terminalWidth();
 		const terminalHeight = this.terminalHeight();
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			return this.buildResumeBrowserScreenFrame(terminalWidth, terminalHeight);
 		}
 		const footerUi = this.buildFooterUi();
@@ -2134,7 +2019,7 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentSelectionRange(): TerminalSelectionRange | null {
-		if (this._resumeBrowser !== null) {
+		if (this.resumeBrowserState() !== null) {
 			return null;
 		}
 		if (this._mouseSelection === null) {
@@ -2157,14 +2042,15 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private currentRenderedTranscriptBlocks(): readonly string[] {
-		if (this._resumeBrowser !== null) {
-			return formatResumeBrowserTranscriptBlocks(this._resumeBrowser);
+		const browser = this.resumeBrowserState();
+		if (browser !== null) {
+			return formatResumeBrowserTranscriptBlocks(browser);
 		}
 		return this._conversation.renderedTranscriptBlocks(this._welcomeLines);
 	}
 
 	private currentWelcomeLineCount(): number {
-		return this._resumeBrowser === null ? this._welcomeLines.length : 0;
+		return this.resumeBrowserState() === null ? this._welcomeLines.length : 0;
 	}
 }
 
@@ -2174,7 +2060,8 @@ class InteractiveModeHandler implements ModeHandler {
 
 class PrintModeHandler implements ModeHandler {
 	async start(runtime: AppRuntime): Promise<void> {
-		const session = runtime.createSession();
+		const sessionEngine = runtime.createSessionEngine();
+		const session = sessionEngine.createSession();
 
 		// Subscribe to events and format as text
 		session.events.onAny((event: RuntimeEvent) => {
@@ -2189,11 +2076,12 @@ class PrintModeHandler implements ModeHandler {
 		try {
 			const line = await inputLoop.nextLine();
 			if (line && line.trim().length > 0) {
-				await session.prompt(line.trim());
+				await sessionEngine.submit(line.trim(), { sessionId: session.id.value, mode: "prompt" });
 			}
 		} finally {
 			inputLoop.close();
-			await session.close();
+			await sessionEngine.closeAllSessions();
+			sessionEngine.dispose();
 		}
 	}
 }
@@ -2204,7 +2092,8 @@ class PrintModeHandler implements ModeHandler {
 
 class JsonModeHandler implements ModeHandler {
 	async start(runtime: AppRuntime): Promise<void> {
-		const session = runtime.createSession();
+		const sessionEngine = runtime.createSessionEngine();
+		const session = sessionEngine.createSession();
 
 		// Subscribe to events and emit JSON envelopes
 		session.events.onAny((event: RuntimeEvent) => {
@@ -2223,11 +2112,12 @@ class JsonModeHandler implements ModeHandler {
 		try {
 			const line = await inputLoop.nextLine();
 			if (line && line.trim().length > 0) {
-				await session.prompt(line.trim());
+				await sessionEngine.submit(line.trim(), { sessionId: session.id.value, mode: "prompt" });
 			}
 		} finally {
 			inputLoop.close();
-			await session.close();
+			await sessionEngine.closeAllSessions();
+			sessionEngine.dispose();
 		}
 	}
 }
@@ -2262,67 +2152,6 @@ function parsePermissionDecision(input: string, selectedIndex = 0): "allow_once"
 	if (trimmed === "2") return "allow_for_session";
 	if (trimmed === "3") return "deny";
 	return null;
-}
-
-function runGit(
-	cwd: string,
-	args: readonly string[],
-): Promise<{ type: "ok"; stdout: string; stderr: string } | { type: "error" }> {
-	return new Promise((resolve) => {
-		execFile("git", [...args], { cwd }, (error, stdout, stderr) => {
-			if (error) {
-				resolve({ type: "error" });
-				return;
-			}
-			resolve({ type: "ok", stdout: String(stdout), stderr: String(stderr) });
-		});
-	});
-}
-
-interface GitWorkingTreeSnapshot {
-	readonly available: boolean;
-	readonly statusLines: readonly string[];
-	readonly diffStatLines: readonly string[];
-}
-
-async function inspectGitWorkingTree(cwd: string): Promise<GitWorkingTreeSnapshot> {
-	const [status, diffStat] = await Promise.all([
-		runGit(cwd, ["status", "--porcelain"]),
-		runGit(cwd, ["diff", "--stat"]),
-	]);
-	if (status.type === "error" || diffStat.type === "error") {
-		return {
-			available: false,
-			statusLines: [],
-			diffStatLines: [],
-		};
-	}
-	return {
-		available: true,
-		statusLines: splitNonEmptyLines(status.stdout),
-		diffStatLines: splitNonEmptyLines(diffStat.stdout),
-	};
-}
-
-function readGitDiff(
-	cwd: string,
-	target: string | null,
-): Promise<{ type: "ok"; stdout: string; stderr: string } | { type: "error" }> {
-	return runGit(cwd, target ? ["diff", "--", target] : ["diff"]);
-}
-
-function splitNonEmptyLines(text: string): readonly string[] {
-	return text
-		.trim()
-		.split("\n")
-		.map((line) => line.trimEnd())
-		.filter((line) => line.length > 0);
-}
-
-function detachSessionStateSubscription(unsubscribe: (() => void) | null): void {
-	if (unsubscribe) {
-		unsubscribe();
-	}
 }
 
 function stripAnsiWelcome(text: string): string {
@@ -2433,57 +2262,6 @@ export function formatWelcomeCenteredLine(contentWidth: number, text: string): s
 	return `${applyWelcomeBorderColor("│")}${" ".repeat(left)}${text}${" ".repeat(right)}${applyWelcomeBorderColor("│")}`;
 }
 
-export function shouldRenderInteractiveTranscriptEvent(event: RuntimeEvent): boolean {
-	if (event.category === "session") return false;
-	if (event.category === "tool") return false;
-	if (event.category === "compaction") return false;
-	if (event.category === "permission") return false;
-	return true;
-}
-
-export function formatInteractiveToolEvent(
-	event: RuntimeEvent,
-	startedParameters?: Readonly<Record<string, unknown>>,
-): string {
-	if (event.category !== "tool") return "";
-	if (event.type === "tool_started") {
-		return [
-			formatInteractiveToolTitle(event.toolName, event.parameters),
-			formatInteractiveToolPreview(event.toolName, event.parameters),
-		]
-			.filter((part) => part.length > 0)
-			.join("\n");
-	}
-	if (event.type === "tool_completed") {
-		return formatInteractiveToolResult(event.toolName, event.result, startedParameters);
-	}
-	if (event.type === "tool_denied") {
-		return "";
-	}
-	return "";
-}
-
-export function formatInteractivePermissionBlock(
-	details: {
-		toolName: string;
-		riskLevel: string;
-		reason?: string;
-		targetPath?: string;
-	},
-	selectedIndex = 0,
-): string {
-	const bodyLines = formatInteractivePermissionBodyLines(details, selectedIndex);
-	return materializeTextBlock(
-		composeSectionBlock({
-			leadingLines: bodyLines.slice(0, 1),
-			separator: "────────────────────────────────────────",
-			bodyLines: bodyLines.slice(1),
-		}),
-	).block;
-}
-
-export type InteractiveFooterRenderResult = RenderedComposerBlock;
-
 function materializeInteractiveScreenFrame(
 	composed: ComposedScreen,
 	footerUi: InteractiveFooterRenderResult,
@@ -2507,226 +2285,6 @@ export interface InteractiveStreamingRenderResult {
 	readonly renderedWidth: number;
 	readonly startRow: number;
 	readonly reservedRows: number;
-}
-
-export function formatInteractiveFooter(state: {
-	readonly terminalWidth: number;
-	readonly prompt: string;
-	readonly buffer: string;
-	readonly cursor: number;
-	readonly suggestions: readonly string[];
-	readonly turnNotice: "thinking" | "responding" | "tool" | "compacting" | null;
-	readonly turnNoticeAnimationFrame?: number;
-	readonly elapsedMs?: number | null;
-	readonly currentTurnUsage?: UsageSnapshot | null;
-	readonly lastTurnUsage?: UsageSnapshot | null;
-	readonly sessionUsage?: UsageSnapshot | null;
-	readonly activeToolLabel?: string | null;
-	readonly showPendingOutputIndicator?: boolean;
-	readonly detailPanelExpanded?: boolean;
-	readonly detailPanelSummary?: string | null;
-	readonly detailPanelLines?: readonly string[];
-	readonly queuedInputs?: readonly string[];
-	readonly permission: {
-		readonly details: {
-			toolName: string;
-			riskLevel: string;
-			reason?: string;
-			targetPath?: string;
-		};
-		readonly selectedIndex: number;
-	} | null;
-}): InteractiveFooterRenderResult {
-	const separator = formatInteractiveInputSeparator(computeInteractiveFooterSeparatorWidth(state.terminalWidth));
-	const leadingLines = buildInteractiveFooterLeadingLinesFromUi({
-		...state,
-		truncateText: truncatePlainTerminalText,
-	});
-	if (state.permission !== null) {
-		const prompt = "choice [Enter/1/2/3]> ";
-		const layout = composePromptBlock({
-			leadingLines,
-			separator,
-			bodyLines: formatInteractivePermissionBodyLines(state.permission.details, state.permission.selectedIndex),
-			prompt,
-			buffer: state.buffer,
-			cursor: state.cursor,
-		});
-		return materializeComposerBlock(layout, state.terminalWidth);
-	}
-	const hint = formatSlashSuggestionHint(
-		state.suggestions,
-		state.terminalWidth - computePromptCursorColumnFromTuiCore(state.prompt, state.buffer, state.buffer.length),
-	);
-	const layout = composePromptBlock({
-		leadingLines,
-		separator,
-		prompt: state.prompt,
-		buffer: formatInteractivePromptBuffer(state.buffer, false),
-		cursor: state.cursor,
-		hint,
-	});
-	return materializeComposerBlock(layout, state.terminalWidth);
-}
-
-export function movePermissionSelection(current: number, direction: -1 | 1): number {
-	const size = 3;
-	return (current + direction + size) % size;
-}
-
-export function permissionDecisionFromSelection(selectedIndex: number): "allow_once" | "allow_for_session" | "deny" {
-	if (selectedIndex === 1) return "allow_for_session";
-	if (selectedIndex === 2) return "deny";
-	return "allow_once";
-}
-
-function formatPermissionChoiceLine(index: number, selectedIndex: number, label: string): string {
-	const prefix = index === selectedIndex ? "❯" : " ";
-	if (index === selectedIndex) {
-		return `${prefix} ${INTERACTIVE_THEME.selectedBg}${INTERACTIVE_THEME.selectedFg}${index + 1}. ${label}${INTERACTIVE_THEME.reset}`;
-	}
-	return `${prefix} ${index + 1}. ${label}`;
-}
-
-function formatInteractivePermissionBodyLines(
-	details: {
-		toolName: string;
-		riskLevel: string;
-		reason?: string;
-		targetPath?: string;
-	},
-	selectedIndex: number,
-): string[] {
-	return [
-		formatInteractiveToolTitle(details.toolName, details.targetPath ? { file_path: details.targetPath } : {}),
-		formatPermissionQuestion(details),
-		formatPermissionChoiceLine(0, selectedIndex, "Yes"),
-		formatPermissionChoiceLine(1, selectedIndex, "Yes, allow during this session"),
-		formatPermissionChoiceLine(2, selectedIndex, "No"),
-	];
-}
-
-function formatPermissionQuestion(details: {
-	toolName: string;
-	riskLevel: string;
-	reason?: string;
-	targetPath?: string;
-}): string {
-	if (details.toolName === "write" || details.toolName === "edit") {
-		const target = details.targetPath ? basename(details.targetPath) : "this file";
-		const action = details.toolName === "write" ? "create or overwrite" : "edit";
-		return `Do you want to ${action} ${target}?`;
-	}
-	return `Allow ${details.toolName} (${details.riskLevel})${details.reason ? ` — ${details.reason}` : ""}?`;
-}
-
-export function formatInteractiveToolTitle(
-	toolName: string,
-	parameters: Readonly<Record<string, unknown>> | { file_path?: string; path?: string } = {},
-): string {
-	const name = interactiveToolDisplayName(toolName);
-	const summary = summarizeToolParameters(toolName, parameters);
-	return summary.length > 0 ? `⏺ ${name}(${summary})` : `⏺ ${name}`;
-}
-
-export function formatInteractiveToolResult(
-	toolName: string,
-	result?: string,
-	startedParameters?: Readonly<Record<string, unknown>>,
-): string {
-	const lines = normalizeToolResultLines(toolName, result, startedParameters);
-	if (lines.length === 0) return "";
-	return lines.map((line, index) => `${index === 0 ? "  ⎿" : "   "} ${line}`).join("\n");
-}
-
-function formatInteractiveToolPreview(toolName: string, parameters: Readonly<Record<string, unknown>>): string {
-	if (toolName !== "write" && toolName !== "edit") return "";
-	if (toolName === "edit") {
-		const oldString = typeof parameters.old_string === "string" ? parameters.old_string : "";
-		const newString = typeof parameters.new_string === "string" ? parameters.new_string : "";
-		const diff = formatMiniDiffPreview(oldString, newString);
-		if (diff.length > 0) {
-			return diff;
-		}
-	}
-	const previewSource = typeof parameters.content === "string" ? parameters.content : "";
-	if (previewSource.trim().length === 0) return "";
-	const previewLines = previewSource.trimEnd().split("\n").slice(0, 4);
-	return ["  │ Preview", ...previewLines.map((line) => `  │ ${truncatePreviewLine(line)}`)]
-		.filter((line) => line.length > 0)
-		.join("\n");
-}
-
-function interactiveToolDisplayName(toolName: string): string {
-	switch (toolName) {
-		case "bash":
-			return "Bash";
-		case "write":
-			return "Write";
-		case "edit":
-			return "Edit";
-		case "read":
-			return "Read";
-		case "grep":
-			return "Grep";
-		case "find":
-			return "Find";
-		case "ls":
-			return "LS";
-		default:
-			return toolName;
-	}
-}
-
-function summarizeToolParameters(
-	toolName: string,
-	parameters: Readonly<Record<string, unknown>> | { file_path?: string; path?: string },
-): string {
-	if (toolName === "bash" && typeof (parameters as Record<string, unknown>).command === "string") {
-		return (parameters as Record<string, unknown>).command as string;
-	}
-	const filePath =
-		typeof parameters.file_path === "string"
-			? parameters.file_path
-			: typeof parameters.path === "string"
-				? parameters.path
-				: undefined;
-	if (filePath) {
-		return basename(filePath);
-	}
-	if (toolName === "grep" && typeof (parameters as Record<string, unknown>).pattern === "string") {
-		return (parameters as Record<string, unknown>).pattern as string;
-	}
-	return "";
-}
-
-function summarizeActiveToolNotice(
-	toolCalls: ReadonlyMap<string, { toolName: string; parameters: Readonly<Record<string, unknown>> }>,
-): string | null {
-	if (toolCalls.size === 0) {
-		return null;
-	}
-	const [first] = toolCalls.values();
-	if (!first) {
-		return "Running tools";
-	}
-	const title = formatInteractiveToolTitle(first.toolName, first.parameters).replace(/^⏺\s+/, "");
-	if (toolCalls.size === 1) {
-		return `Running ${title}`;
-	}
-	return `Running ${toolCalls.size} tools`;
-}
-
-function formatCompactionDetailText(summary: CompactionSummary): string {
-	const lines = [
-		"Compaction summary",
-		`- Messages: ${summary.originalMessageCount} -> ${summary.retainedMessageCount}`,
-		`- Estimated tokens saved: ${summary.estimatedTokensSaved}`,
-	];
-	if (summary.compactedSummary && summary.compactedSummary.trim().length > 0) {
-		lines.push("", summary.compactedSummary.trim());
-	}
-	return lines.join("\n");
 }
 
 function detailPanelScrollDeltaForKey(
@@ -2767,17 +2325,6 @@ function transcriptScrollDeltaForKey(
 	}
 }
 
-function shouldPersistRecentSessionForEvent(event: RuntimeEvent): boolean {
-	switch (event.category) {
-		case "compaction":
-			return event.type === "compaction_completed";
-		case "session":
-			return event.type === "session_resumed";
-		default:
-			return false;
-	}
-}
-
 export function createDebouncedCallback(
 	callback: () => void,
 	delayMs: number,
@@ -2807,152 +2354,23 @@ export function createDebouncedCallback(
 	};
 }
 
-function normalizeToolResultLines(
-	toolName: string,
-	result?: string,
-	startedParameters?: Readonly<Record<string, unknown>>,
-): readonly string[] {
-	if ((!result || result.trim().length === 0) && startedParameters) {
-		if (toolName === "write" || toolName === "edit") {
-			const target =
-				typeof startedParameters.file_path === "string"
-					? basename(startedParameters.file_path)
-					: typeof startedParameters.path === "string"
-						? basename(startedParameters.path)
-						: "file";
-			const previewSource =
-				typeof startedParameters.content === "string"
-					? startedParameters.content
-					: typeof startedParameters.new_string === "string"
-						? startedParameters.new_string
-						: "";
-			const lineCount = previewSource.length > 0 ? previewSource.split("\n").length : null;
-			if (toolName === "write") {
-				return [`Wrote ${lineCount ?? 1} lines to ${target}`];
-			}
-			const replacementCount =
-				typeof startedParameters.old_string === "string" || typeof startedParameters.new_string === "string"
-					? 1
-					: null;
-			return [
-				`Applied edit to ${target}${replacementCount ? ` (${replacementCount} change)` : lineCount ? ` (${lineCount} lines)` : ""}`,
-			];
-		}
-		if (toolName === "bash" && typeof startedParameters.command === "string") {
-			return [`Ran: ${startedParameters.command}`];
-		}
-	}
-	if (!result || result.trim().length === 0) return [];
-	if (toolName === "write" || toolName === "edit") {
-		const lines = result.trimEnd().split("\n");
-		return lines.slice(0, 4);
-	}
-	return result.trimEnd().split("\n").slice(0, 6);
-}
-
-function truncatePreviewLine(line: string): string {
-	return measureTerminalDisplayWidth(line) <= 72 ? line : `${line.slice(0, 69)}...`;
-}
-
 function ansiShowCursor(): string {
 	return "\x1b[?25h";
 }
 
-function formatMiniDiffPreview(oldString: string, newString: string): string {
-	if (oldString.trim().length === 0 && newString.trim().length === 0) return "";
-	const removed = oldString
-		.trimEnd()
-		.split("\n")
-		.filter((line) => line.length > 0)
-		.slice(0, 2);
-	const added = newString
-		.trimEnd()
-		.split("\n")
-		.filter((line) => line.length > 0)
-		.slice(0, 2);
-	const lines = ["  │ Diff"];
-	lines.push(...removed.map((line) => `  - ${truncatePreviewLine(line)}`));
-	lines.push(...added.map((line) => `  + ${truncatePreviewLine(line)}`));
-	return lines.join("\n");
-}
-
-export function computeSlashSuggestions(input: string, commands: readonly SlashCommand[]): readonly string[] {
-	const trimmed = input.trimStart();
-	if (!trimmed.startsWith("/")) return [];
-	const body = trimmed.slice(1);
-	if (body.includes(" ")) return [];
-	const query = body.toLowerCase();
-	return commands
-		.map((command) => command.name)
-		.filter((name) => query.length === 0 || name.startsWith(query))
-		.sort((a, b) => a.localeCompare(b))
-		.slice(0, 6);
-}
-
-export function formatSlashSuggestionHint(suggestions: readonly string[], remainingWidth: number): string {
-	if (suggestions.length === 0 || remainingWidth < 6) return "";
-	const DIM = "\x1b[2m";
-	const RESET = "\x1b[0m";
-	let hint = "";
-	for (const name of suggestions) {
-		const segment = `${hint.length === 0 ? "  " : "  "}/${name}`;
-		if (measureTerminalDisplayWidth(hint + segment) > remainingWidth) {
-			break;
-		}
-		hint += segment;
+function formatUnknownErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
 	}
-	return hint.length > 0 ? `${DIM}${hint}${RESET}` : "";
+	return String(error);
 }
 
-export function acceptFirstSlashSuggestion(
-	state: { buffer: string; cursor: number },
-	suggestions: readonly string[],
-): { buffer: string; cursor: number } | null {
-	if (suggestions.length === 0) return null;
-	if (state.cursor !== state.buffer.length) return null;
-	const trimmed = state.buffer.trimStart();
-	if (!trimmed.startsWith("/")) return null;
-	if (trimmed.slice(1).includes(" ")) return null;
-	const nextBuffer = `/${suggestions[0]} `;
-	return {
-		buffer: nextBuffer,
-		cursor: nextBuffer.length,
-	};
-}
-
-function truncatePlainTerminalText(text: string, width: number): string {
-	return truncatePlainTextFromTuiCore(text, width);
-}
-
-function emptyUsageSnapshot(): UsageSnapshot {
-	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
-}
-
-function normalizeUsageSnapshot(usage: UsageSnapshot): UsageSnapshot {
-	return {
-		input: Math.max(0, usage.input),
-		output: Math.max(0, usage.output),
-		cacheRead: Math.max(0, usage.cacheRead),
-		cacheWrite: Math.max(0, usage.cacheWrite),
-		totalTokens: Math.max(0, usage.totalTokens),
-	};
-}
-
-function addUsageSnapshots(left: UsageSnapshot, right: UsageSnapshot): UsageSnapshot {
-	return {
-		input: left.input + right.input,
-		output: left.output + right.output,
-		cacheRead: left.cacheRead + right.cacheRead,
-		cacheWrite: left.cacheWrite + right.cacheWrite,
-		totalTokens: left.totalTokens + right.totalTokens,
-	};
-}
-
-function hasUsageSnapshot(usage: UsageSnapshot | null | undefined): usage is UsageSnapshot {
-	if (!usage) {
-		return false;
+function previewInteractiveDebugText(text: string, limit = 80): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	if (normalized.length <= limit) {
+		return normalized;
 	}
-	return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0 || usage.totalTokens > 0;
+	return `${normalized.slice(0, Math.max(0, limit - 3))}...`;
 }
 
 export function computeVisibleTranscriptLines(
