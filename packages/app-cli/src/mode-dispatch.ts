@@ -8,7 +8,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { AppRuntime, CliMode, RuntimeEvent, SessionEngine, SessionFacade } from "@pickle-pee/runtime";
+import type { AppRuntime, CliMode, RuntimeEvent, SessionEngine, SessionFacade, SessionRecoveryData } from "@pickle-pee/runtime";
 import {
 	type ComposedScreen,
 	clampScrollOffset,
@@ -230,7 +230,11 @@ class InteractiveModeHandler implements ModeHandler {
 	} | null = null;
 	private _resumeBrowserScrollOffset = 0;
 	private _inputLoop: InputLoop | null = null;
-	private _switchInteractiveSession: ((next: SessionFacade) => void) | null = null;
+	private _switchInteractiveSession: ((
+		next: SessionFacade,
+		options?: { readonly preserveTranscript?: boolean },
+	) => void) | null = null;
+	private _preserveTranscriptOnNextAttach = false;
 	private readonly _hostState = createInteractiveHostState({
 		onBusyLocalCommandFailed: (error) => {
 			if (this._turnPresenterState.notice === "compacting") {
@@ -328,13 +332,14 @@ class InteractiveModeHandler implements ModeHandler {
 			sessionRef.current,
 			{
 				onSessionAttached: (next) => {
+					const preserveTranscript = this._preserveTranscriptOnNextAttach;
+					this._preserveTranscriptOnNextAttach = false;
 					sessionRef.current = next;
 					this._overlayState = resetInteractiveOverlayState();
 					this._activeTurn = null;
 					this._historyIndex = null;
 					this._lastError = null;
 					this._changedPaths.clear();
-					this._conversation.clear();
 					this.stopTurnNoticeAnimation();
 					this._turnPresenterState = resetInteractiveTurnPresenterState();
 					this._detailPanelState = resetInteractiveDetailPanelState();
@@ -343,11 +348,16 @@ class InteractiveModeHandler implements ModeHandler {
 					this._renderedFooterUi = null;
 					this._renderedFooterStartRow = null;
 					this._lastScreenFrame = null;
-					this._transcriptScrollOffset = 0;
 					this._resumeBrowserScrollOffset = 0;
 					this._sessionRef = sessionRef;
 					this._sink = sink;
 					interactionState = initialInteractionState();
+					if (preserveTranscript) {
+						this.clampTranscriptScrollOffset();
+					} else {
+						this._conversation.clear();
+						this._transcriptScrollOffset = 0;
+					}
 				},
 				onSessionEvent: (event) => {
 					if (event.type === "permission_requested") {
@@ -401,7 +411,11 @@ class InteractiveModeHandler implements ModeHandler {
 			sessionRef,
 		);
 
-		const switchInteractiveSession = (next: SessionFacade): void => {
+		const switchInteractiveSession = (
+			next: SessionFacade,
+			options: { readonly preserveTranscript?: boolean } = {},
+		): void => {
+			this._preserveTranscriptOnNextAttach = options.preserveTranscript === true;
 			sessionBinding.switchSession(next);
 			this.renderWelcome(next);
 			this.fullRedrawInteractiveScreen();
@@ -546,6 +560,11 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 
 				if (trimmed.length === 0) {
+					if (line.length > 0) {
+						getActiveDebugLogger()?.debug("interactive.input_submit", "Ignored whitespace-only input", {
+							rawLength: line.length,
+						});
+					}
 					line = await inputLoop.nextLine();
 					continue;
 				}
@@ -587,12 +606,23 @@ class InteractiveModeHandler implements ModeHandler {
 
 				// Regular prompt
 				if (this.isInteractionBusy()) {
+					const queuedBefore = this._turnPresenterState.queuedInputs.length;
 					this._turnPresenterState = queueInteractiveInput(this._turnPresenterState, trimmed);
+					getActiveDebugLogger()?.debug("interactive.input_submit", "Queued prompt while interaction is busy", {
+						inputPreview: previewInteractiveDebugText(trimmed),
+						queuedBefore,
+						queuedAfter: this._turnPresenterState.queuedInputs.length,
+						notice: this._turnPresenterState.notice,
+					});
 					this.preserveThinkingNoticeForQueuedBacklog();
 					this.renderFooterRegion();
 					line = await inputLoop.nextLine();
 					continue;
 				}
+				getActiveDebugLogger()?.debug("interactive.input_submit", "Started prompt turn", {
+					inputPreview: previewInteractiveDebugText(trimmed),
+					sessionId: sessionRef.current.id.value,
+				});
 				this.startPromptTurn(sessionRef.current, trimmed, sink);
 
 				line = await inputLoop.nextLine();
@@ -1180,6 +1210,11 @@ class InteractiveModeHandler implements ModeHandler {
 			return true;
 		}
 		const data = hit.entry.recoveryData;
+		if (!this.canResumeRecoveryData(data)) {
+			sink.writeError("This session cannot be resumed: transcript file is missing.");
+			sink.writeLine("Tip: pick a newer session that has full transcript persistence.");
+			return true;
+		}
 		getActiveDebugLogger()?.debug("resume.browser.resume", "Resuming selected session", {
 			selectedIndex: browser.selectedIndex,
 			selectedHit: summarizeResumeBrowserHit(hit),
@@ -1191,6 +1226,18 @@ class InteractiveModeHandler implements ModeHandler {
 			sink.writeLine(line);
 		}
 		return true;
+	}
+
+	private canResumeRecoveryData(data: SessionRecoveryData): boolean {
+		if (typeof data.sessionFile !== "string" || data.sessionFile.length === 0) {
+			return false;
+		}
+		try {
+			readFileSync(data.sessionFile, "utf8");
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	private startPromptTurn(session: SessionFacade, prompt: string, sink: OutputSink): void {
@@ -1230,10 +1277,23 @@ class InteractiveModeHandler implements ModeHandler {
 	private startUserTurn(session: SessionFacade, input: string, sink: OutputSink, mode: "prompt" | "continue"): void {
 		const engine = this.requireSessionEngine();
 		const liveSession = this.ensureLiveInteractiveSession(session);
+		const transcriptBlocksBefore = this._conversation.getTranscriptBlocks().length;
+		const transcriptRowsBefore = this.currentTranscriptDisplayRows();
 		this.flushAssistantBuffer(false);
 		for (const block of formatTranscriptUserBlocks(input)) {
 			this.writeTranscriptText(block, true, false);
 		}
+		const transcriptBlocksAfter = this._conversation.getTranscriptBlocks().length;
+		const transcriptRowsAfter = this.currentTranscriptDisplayRows();
+		getActiveDebugLogger()?.debug("interactive.turn_start", "Recorded user turn transcript blocks", {
+			mode,
+			sessionId: liveSession.id.value,
+			inputPreview: previewInteractiveDebugText(input),
+			transcriptBlocksBefore,
+			transcriptBlocksAfter,
+			transcriptRowsBefore,
+			transcriptRowsAfter,
+		});
 		this._turnPresenterState = beginInteractiveTurn(this._turnPresenterState, Date.now());
 		this._detailPanelState = resetInteractiveDetailPanelState();
 		this.rememberHistory(input);
@@ -1265,16 +1325,50 @@ class InteractiveModeHandler implements ModeHandler {
 	private ensureLiveInteractiveSession(preferred: SessionFacade): SessionFacade {
 		const engine = this.requireSessionEngine();
 		const mapped = engine.getSession(preferred.id.value);
-		const liveSession = mapped ?? engine.activeSession ?? engine.createSession();
-		if (this._sessionRef !== null && this._sessionRef.current.id.value !== liveSession.id.value) {
+		if (mapped) {
+			if (this._sessionRef !== null && this._sessionRef.current.id.value !== mapped.id.value) {
+				if (this._switchInteractiveSession !== null) {
+					getActiveDebugLogger()?.debug("interactive.session_rebind", "Auto-rebound to mapped interactive session", {
+						preferredSessionId: preferred.id.value,
+						reboundSessionId: mapped.id.value,
+					});
+					this._switchInteractiveSession(mapped, { preserveTranscript: true });
+				} else {
+					this._sessionRef.current = mapped;
+					this.renderWelcome(mapped);
+				}
+			}
+			return mapped;
+		}
+
+		// Keep the in-hand session when it's still active to avoid silently jumping to an unrelated session.
+		if (preferred.state.status !== "closed") {
+			engine.adoptSession(preferred, { makeActive: true });
+			getActiveDebugLogger()?.debug(
+				"interactive.session_rebind",
+				"Re-adopted preferred session after host mapping loss",
+				{
+					preferredSessionId: preferred.id.value,
+					preferredStatus: preferred.state.status,
+				},
+			);
+			return preferred;
+		}
+
+		const fallback = engine.activeSession ?? engine.createSession();
+		if (this._sessionRef !== null && this._sessionRef.current.id.value !== fallback.id.value) {
 			if (this._switchInteractiveSession !== null) {
-				this._switchInteractiveSession(liveSession);
+				getActiveDebugLogger()?.debug("interactive.session_rebind", "Auto-rebound from closed session to fallback", {
+					preferredSessionId: preferred.id.value,
+					reboundSessionId: fallback.id.value,
+				});
+				this._switchInteractiveSession(fallback, { preserveTranscript: true });
 			} else {
-				this._sessionRef.current = liveSession;
-				this.renderWelcome(liveSession);
+				this._sessionRef.current = fallback;
+				this.renderWelcome(fallback);
 			}
 		}
-		return liveSession;
+		return fallback;
 	}
 
 	private requireSessionEngine(): SessionEngine {
@@ -2253,6 +2347,14 @@ function formatUnknownErrorMessage(error: unknown): string {
 		return error.message;
 	}
 	return String(error);
+}
+
+function previewInteractiveDebugText(text: string, limit = 80): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	if (normalized.length <= limit) {
+		return normalized;
+	}
+	return `${normalized.slice(0, Math.max(0, limit - 3))}...`;
 }
 
 export function computeVisibleTranscriptLines(

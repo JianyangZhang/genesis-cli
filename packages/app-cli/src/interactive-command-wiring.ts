@@ -100,7 +100,13 @@ export function createInteractiveCommandWiring(options: InteractiveCommandWiring
 				return undefined;
 			}
 
-			const recovered = await options.sessionEngine.recoverSession(directMatch.recoveryData, { closeActive: true });
+			const resumableRecoveryData = await resolveResumableRecoveryData(directMatch.recoveryData);
+			if (!resumableRecoveryData) {
+				ctx.output.writeError("This session cannot be resumed: transcript file is missing.");
+				ctx.output.writeLine("Tip: pick a newer session that has full transcript persistence.");
+				return undefined;
+			}
+			const recovered = await options.sessionEngine.recoverSession(resumableRecoveryData, { closeActive: true });
 			options.replaceSession(recovered);
 			options.closeResumeBrowser();
 			for (const line of buildRestoredContextLines(directMatch)) {
@@ -113,6 +119,20 @@ export function createInteractiveCommandWiring(options: InteractiveCommandWiring
 	});
 
 	return { registry };
+}
+
+export async function resolveResumableRecoveryData(
+	recoveryData: Parameters<SessionEngine["recoverSession"]>[0],
+): Promise<Parameters<SessionEngine["recoverSession"]>[0] | null> {
+	if (typeof recoveryData.sessionFile === "string" && recoveryData.sessionFile.length > 0) {
+		try {
+			await readFile(recoveryData.sessionFile, "utf8");
+			return recoveryData;
+		} catch {
+			return null;
+		}
+	}
+	return null;
 }
 
 function summarizeToolUsage(runtime: AppRuntime) {

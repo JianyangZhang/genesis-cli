@@ -3,7 +3,7 @@ export const INTERACTIVE_THEME = {
 	accent: "\x1b[38;5;153m",
 	success: "\x1b[38;5;114m",
 	warning: "\x1b[38;5;221m",
-	error: "\x1b[38;5;209m",
+	error: "\x1b[38;2;255;153;0m",
 	warningSoft: "\x1b[38;5;180m",
 	muted: "\x1b[2m",
 	bold: "\x1b[1m",

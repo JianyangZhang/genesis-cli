@@ -72,6 +72,7 @@ describe("session engine", () => {
 			runtimeEvents,
 			createSession: () => session,
 			recoverSession: () => session,
+			recordRecentSession: async () => {},
 			recordClosedRecentSession: async () => {},
 			recordRecentSessionInput: async () => Promise.reject(new Error("history write failed")),
 			recordRecentSessionAssistantText: async () => {},
@@ -94,6 +95,7 @@ describe("session engine", () => {
 			runtimeEvents,
 			createSession: () => session,
 			recoverSession: () => session,
+			recordRecentSession: async () => {},
 			recordClosedRecentSession: async () => {},
 			recordRecentSessionInput: async () => {},
 			recordRecentSessionAssistantText: async () => Promise.reject(new Error("assistant write failed")),
@@ -105,5 +107,42 @@ describe("session engine", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		expect(onUnhandled).not.toHaveBeenCalled();
+	});
+
+	it("persists a checkpoint with sessionFile after submit to enable real resume continuity", async () => {
+		const runtimeEvents = createEventBus();
+		const session = createFakeSession("checkpoint-session", runtimeEvents);
+		(session.snapshotRecoveryData as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sessionId: { value: "checkpoint-session" },
+			model: session.state.model,
+			toolSet: [],
+			planSummary: null,
+			compactionSummary: null,
+			taskState: { status: "idle", currentTaskId: null, startedAt: null },
+			sessionFile: "/tmp/checkpoint-session.jsonl",
+		});
+		const recordRecentSession = vi.fn(async () => {});
+		const engine = createSessionEngine({
+			runtimeEvents,
+			createSession: () => session,
+			recoverSession: () => session,
+			recordRecentSession,
+			recordClosedRecentSession: async () => {},
+			recordRecentSessionInput: async () => {},
+			recordRecentSessionAssistantText: async () => {},
+			scheduleRecentSessionEvent: () => {},
+		});
+
+		engine.createSession();
+		await engine.submit("hello");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(recordRecentSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: { value: "checkpoint-session" },
+				sessionFile: "/tmp/checkpoint-session.jsonl",
+			}),
+			expect.any(Object),
+		);
 	});
 });

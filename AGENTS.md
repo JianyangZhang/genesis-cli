@@ -1,40 +1,64 @@
 # AGENTS.md
 
-This file gives coding agents stable, repo-specific operating guidance.
+Stable operating guidance for coding agents in this repository.
 
-## Purpose
+## Mission
 
-- Use this as the default project context for any coding agent session.
-- Keep this file concise, actionable, and updated with current repo reality.
-- Treat `README.md` as external-facing narrative; treat this file as execution guidance.
+- Keep Genesis reliable as a multi-entry session runtime (`Interactive / Print / JSON / RPC`).
+- Optimize for correctness first, observability second, and iteration speed third.
+- Prefer explicit system behavior over implicit fallbacks.
 
-## Project Identity
+## First Principles
 
-- Genesis is a multi-entry session runtime (`Interactive / Print / JSON / RPC`).
-- Primary architecture direction:
-  - `app-cli` converges toward host-only concerns (process entry, TTY lifecycle, debug wiring).
-  - `app-runtime` owns shared session orchestration and stable runtime contracts.
-  - `kernel` is the authority source for session/provider core facts.
+- Single authority: session truth must have one owner per concern, not competing sources.
+- Clear boundaries: host wiring, runtime orchestration, and kernel provider plumbing stay decoupled.
+- Deterministic failure: when prerequisites are missing, fail fast with explicit errors.
+- Verifiable changes: every meaningful behavior change must be testable and observable.
+- Reversible evolution: refactors should be incremental and low-blast-radius.
 
-## Package Boundaries
+## Architectural Invariants
 
-- `packages/app-cli`: host wiring, mode hosting, TTY lifecycle, debug plumbing.
-- `packages/app-tui-core`: terminal capability/modeling, frame/patch/composer rendering mechanics.
-- `packages/app-ui`: presentation semantics (slash commands, resume browser UX, formatters, footer content).
-- `packages/app-runtime`: session facade, event normalization, recent-session catalog, governance/planning integration.
-- `packages/app-tools`: tool catalog, risk classification, permission policy, audit.
-- `packages/kernel`: provider wiring and upstream session plumbing.
+- `app-cli` is host-focused: process entry, TTY lifecycle, command wiring, debug plumbing.
+- `app-runtime` owns session orchestration and stable runtime contracts.
+- `kernel` is the authority for upstream session/provider core facts.
+- `app-ui` owns presentation semantics and user-facing copy/layout behavior.
+- `app-tui-core` owns terminal capability detection, frame/diff, and render mechanics.
+- `app-tools` owns tool catalog, risk classification, permission policy, and audit.
+
+## Design Rules
+
+- Do not add unbounded compatibility layers by default.
+- Do not silently downgrade critical flows (for example, "looks resumed" but not truly resumable).
+- Prefer explicit guardrails:
+  - detect invalid state early,
+  - return actionable user-facing errors,
+  - log structured debug events for diagnosis.
+- Preserve user-visible behavior during refactors unless the change is intentional and documented.
+
+## Runtime Safety Rules
+
+- Treat resume/session continuity as a correctness feature, not a best-effort feature.
+- Never cross-switch sessions implicitly unless safety conditions are explicit and test-covered.
+- For asynchronous background persistence, avoid unhandled rejections and preserve host stability.
+- For lifecycle edges (close, recover, fatal errors, queued turns), add regression tests before/with code changes.
+
+## Refactor Strategy
+
+- Change one capability slice at a time.
+- Avoid mixing host entry changes, authority model rewrites, and rendering semantics in one patch.
+- Keep `mode-dispatch.ts` shrinking toward orchestration-only responsibilities.
+- Push presentation logic from `app-cli` to `app-ui` whenever feasible.
 
 ## Quality Gates
 
-Run these before finishing meaningful changes:
+Run before finishing meaningful changes:
 
 ```bash
 npm run check:lint
 npm run check:types
 ```
 
-Run focused tests for changed areas (examples):
+Run focused tests for touched areas (examples):
 
 ```bash
 npx vitest run packages/app-cli/src/test/mode-dispatch.test.ts
@@ -42,25 +66,20 @@ npx vitest run packages/app-cli/src/test/interactive-tty-workbench.test.ts
 npm run test -w @pickle-pee/runtime -- src/test/create-app-runtime.test.ts
 ```
 
-## Refactor Rules
-
-- Prefer incremental, reversible refactors.
-- Move one capability slice at a time; avoid changing host entry, authority source, and rendering semantics in a single step.
-- Keep behavior stable while shrinking `mode-dispatch.ts`.
-- Push product copy/theme/layout semantics away from `app-cli` and into `app-ui` where possible.
-- Protect authority merge behavior with regression tests when touching recent-session paths.
+For session lifecycle/race-condition changes, include targeted regression tests in the same patch.
 
 ## Documentation Rules
 
-- If architecture wording changes, keep `README.md` and `README.en.md` aligned.
-- `technical-plan/` is ignored by git in this repo; do not assume its edits are commit-tracked.
-- Use explicit wording; avoid vague qualifiers in architecture claims.
+- Keep architecture wording aligned between `README.md` and `README.en.md`.
+- `README*` is external-facing narrative; `AGENTS.md` is execution policy.
+- Use explicit, testable wording; avoid vague qualifiers.
+- `technical-plan/` is gitignored; do not rely on it as commit-tracked evidence.
 
-## Preferred Commit Style
+## Commit Rules
 
-- Use small commits with clear scope.
-- Suggested prefixes:
-  - `refactor: ...`
+- Prefer small commits with one clear intent.
+- Recommended prefixes:
   - `fix: ...`
+  - `refactor: ...`
   - `test: ...`
   - `docs: ...`

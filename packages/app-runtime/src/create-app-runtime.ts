@@ -329,6 +329,7 @@ export function createAppRuntime(config: AppRuntimeConfig): AppRuntime {
 					runtimeEvents: globalBus,
 					createSession: () => this.createSession(),
 					recoverSession: (data) => this.recoverSession(data),
+					recordRecentSession: this.recordRecentSession,
 					recordClosedRecentSession: this.recordClosedRecentSession,
 					recordRecentSessionInput: this.recordRecentSessionInput,
 					recordRecentSessionAssistantText: this.recordRecentSessionAssistantText,

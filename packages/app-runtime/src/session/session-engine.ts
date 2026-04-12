@@ -12,6 +12,7 @@ export interface SessionEngineOptions {
 export interface SessionEngine {
 	readonly activeSession: SessionFacade | null;
 	createSession(options?: { readonly makeActive?: boolean }): SessionFacade;
+	adoptSession(session: SessionFacade, options?: { readonly makeActive?: boolean }): SessionFacade;
 	recoverSession(
 		data: SessionRecoveryData,
 		options?: { readonly makeActive?: boolean; readonly closeActive?: boolean },
@@ -38,6 +39,10 @@ interface SessionEngineDeps {
 	readonly runtimeEvents: EventBus;
 	readonly createSession: () => SessionFacade;
 	readonly recoverSession: (data: SessionRecoveryData) => SessionFacade;
+	readonly recordRecentSession: (
+		recoveryData: SessionRecoveryData,
+		options?: { readonly title?: string },
+	) => Promise<void>;
 	readonly recordClosedRecentSession: (
 		session: SessionFacade,
 		recoveryData: SessionRecoveryData,
@@ -132,6 +137,25 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 		});
 	}
 
+	function hasSessionFile(recoveryData: SessionRecoveryData): boolean {
+		return typeof recoveryData.sessionFile === "string" && recoveryData.sessionFile.length > 0;
+	}
+
+	async function persistRecentSessionCheckpoint(session: SessionFacade): Promise<void> {
+		const title = resolveSessionTitle(session);
+		for (let attempt = 0; attempt < 3; attempt += 1) {
+			const recoveryData = await session.snapshotRecoveryData();
+			if (hasSessionFile(recoveryData)) {
+				await deps.recordRecentSession(recoveryData, { title });
+				return;
+			}
+			await new Promise<void>((resolve) => {
+				const timer = setTimeout(resolve, 80 * (attempt + 1));
+				timer.unref?.();
+			});
+		}
+	}
+
 	return {
 		get activeSession(): SessionFacade | null {
 			return resolveSession();
@@ -139,6 +163,10 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 
 		createSession(optionsInput = {}): SessionFacade {
 			const session = deps.createSession();
+			return registerSession(session, optionsInput.makeActive !== false);
+		},
+
+		adoptSession(session: SessionFacade, optionsInput = {}): SessionFacade {
 			return registerSession(session, optionsInput.makeActive !== false);
 		},
 
@@ -204,6 +232,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 					activeTurns.delete(session.id.value);
 				}),
 			);
+			swallowBackgroundWrite(persistRecentSessionCheckpoint(session));
 			return activeTurns.get(session.id.value)!;
 		},
 

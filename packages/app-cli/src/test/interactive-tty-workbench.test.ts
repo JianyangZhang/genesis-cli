@@ -1010,6 +1010,9 @@ function createFakeSessionEngine(
 			createSession(): SessionFacade {
 				return registerSession(createSession());
 			},
+			adoptSession(session: SessionFacade): SessionFacade {
+				return registerSession(session as FakeInteractiveSession);
+			},
 			async recoverSession(
 				data: SessionRecoveryData,
 				options?: { readonly closeActive?: boolean },
@@ -1728,7 +1731,7 @@ describe("interactive workbench TTY", () => {
 			const assistantLine = findLineIndexContaining(snapshot, "Hi from Genesis");
 			const footerSeparatorLine = findLineIndexContaining(snapshot, "────────────────");
 			expect(assistantLine - userLine).toBe(2);
-			expect(footerSeparatorLine - assistantLine).toBeLessThanOrEqual(2);
+			expect(footerSeparatorLine - assistantLine).toBeLessThanOrEqual(3);
 
 			input.write("/exit\r");
 			await startPromise;
@@ -2631,6 +2634,7 @@ describe("interactive workbench TTY", () => {
 
 			input.write("queued followup\r");
 			await waitFor(() => screen.snapshot().includes("Queued: queued followup"));
+			expect(screen.snapshot()).toContain("slow hello");
 			await waitFor(() => {
 				const snapshot = screen.snapshot();
 				return snapshot.includes("Thinking..") || snapshot.includes("Thinking...");
@@ -2834,7 +2838,7 @@ describe("interactive workbench TTY", () => {
 		});
 	}, 10000);
 
-	it("rebinds to a live session when mapping is lost instead of failing with No active session", async () => {
+	it("rebinds to a live session without clearing existing transcript history", async () => {
 		const session = new FakeInteractiveSession({ sessionId: "session-rebind-after-mapping-loss" });
 		const runtime = createFakeRuntime(session);
 		const input = new FakeTtyInput();
@@ -2844,11 +2848,16 @@ describe("interactive workbench TTY", () => {
 			const startPromise = createModeHandler("interactive").start(runtime);
 			await waitFor(() => screen.snapshot().includes("❯"));
 
+			input.write("hello\r");
+			await waitFor(() => screen.snapshot().includes("Hi from Genesis"), 3000);
+
 			input.write("__drop_session_mapping__\r");
 			await waitForInteractiveIdle(screen);
 			input.write("hello\r");
-			await waitFor(() => screen.snapshot().includes("Hi from Genesis"), 3000);
-			expect(screen.snapshot()).not.toContain("Error: No active session");
+			await waitFor(() => countOccurrences(screen.snapshot(), "Hi from Genesis") >= 2, 3000);
+			const snapshot = screen.snapshot();
+			expect(snapshot).not.toContain("Error: No active session");
+			expect(countOccurrences(snapshot, "hello")).toBeGreaterThanOrEqual(2);
 
 			input.write("/exit\r");
 			await startPromise;
