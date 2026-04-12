@@ -2076,7 +2076,10 @@ describe("createAppRuntime", () => {
 
 		for (let attempt = 0; attempt < 40; attempt += 1) {
 			const recent = await runtime.listRecentSessions();
-			if (recent[0]?.recoveryData.metadata?.recentMessages?.some((item) => item.text === "engine owned assistant")) {
+			if (
+				recent[0]?.title === "Engine projection title" &&
+				recent[0]?.recoveryData.metadata?.recentMessages?.some((item) => item.text === "engine owned assistant")
+			) {
 				break;
 			}
 			await new Promise((resolve) => setTimeout(resolve, 10));
@@ -2106,6 +2109,31 @@ describe("createAppRuntime", () => {
 		await engine.submit("before close", { sessionId: session.id.value });
 		await engine.closeSession(session.id.value);
 		expect(() => engine.recordAssistantText("late assistant", { sessionId: session.id.value })).not.toThrow();
+	});
+
+	it("waits for recent-session close writes when closing all sessions", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-close-all-waits-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/close-all-waits",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine({
+			titleResolver: () => "Close All Title",
+		});
+		const session = engine.createSession();
+		await runtime.recordRecentSessionInput(session, "close all waits for authority");
+
+		await engine.closeAllSessions();
+
+		const recent = await runtime.listRecentSessions();
+		expect(recent[0]?.title).toBe("Close All Title");
+		expect(recent[0]?.recoveryData.sessionId.value).toBe(session.id.value);
+		expect(recent[0]?.recoveryData.metadata?.firstPrompt).toBe("close all waits for authority");
 	});
 
 	it("same runtime can drive multiple modes (print + json)", () => {

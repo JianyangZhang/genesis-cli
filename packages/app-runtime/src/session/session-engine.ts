@@ -89,13 +89,20 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 		}
 	});
 	const unsubscribeProjectedEvents = deps.runtimeEvents.onAny((event) => {
+		if (event.category === "session" && event.type === "session_error" && event.fatal) {
+			activeTurns.delete(event.sessionId.value);
+		}
 		const session = sessions.get(event.sessionId.value);
 		if (!session) {
 			return;
 		}
-		deps.scheduleRecentSessionEvent(session, event, {
-			title: resolveSessionTitle(session),
-		});
+		try {
+			deps.scheduleRecentSessionEvent(session, event, {
+				title: resolveSessionTitle(session),
+			});
+		} catch {
+			// event-derived recent-session projection must not break the live session path
+		}
 	});
 
 	function registerSession(session: SessionFacade, makeActive = true): SessionFacade {
@@ -116,6 +123,13 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 
 	function resolveSessionTitle(session: SessionFacade): string | undefined {
 		return sessionTitles.get(session.id.value) ?? options.titleResolver?.(session);
+	}
+
+	function swallowBackgroundWrite(promise: Promise<void>): void {
+		void promise.catch(() => {
+			// recent-session persistence must never surface as an unhandled rejection
+			// on the host lifecycle path
+		});
 	}
 
 	return {
@@ -178,9 +192,11 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 			if (activeTurns.has(session.id.value)) {
 				return Promise.reject(new Error("Session is already processing a turn"));
 			}
-			void deps.recordRecentSessionInput(session, input, {
-				title: resolveSessionTitle(session),
-			});
+			swallowBackgroundWrite(
+				deps.recordRecentSessionInput(session, input, {
+					title: resolveSessionTitle(session),
+				}),
+			);
 			const turn = optionsInput.mode === "continue" ? session.continue(input) : session.prompt(input);
 			activeTurns.set(
 				session.id.value,
@@ -198,9 +214,11 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 				// Ignore silently so host teardown and next-turn recovery can proceed.
 				return;
 			}
-			void deps.recordRecentSessionAssistantText(session, text, {
-				title: resolveSessionTitle(session),
-			});
+			swallowBackgroundWrite(
+				deps.recordRecentSessionAssistantText(session, text, {
+					title: resolveSessionTitle(session),
+				}),
+			);
 		},
 
 		resolvePermission(
@@ -230,7 +248,7 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 
 		async closeAllSessions(): Promise<void> {
 			for (const session of [...sessions.values()]) {
-				await session.close();
+				await this.closeSession(session.id.value);
 			}
 		},
 

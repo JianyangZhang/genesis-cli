@@ -203,6 +203,7 @@ class InteractiveModeHandler implements ModeHandler {
 	) {}
 
 	private _activeTurn: Promise<void> | null = null;
+	private _activeTurnToken = 0;
 	private readonly _prompt = "❯ ";
 	private _inputState: { buffer: string; cursor: number } = { buffer: "", cursor: 0 };
 	private readonly _history: string[] = [];
@@ -229,6 +230,7 @@ class InteractiveModeHandler implements ModeHandler {
 	} | null = null;
 	private _resumeBrowserScrollOffset = 0;
 	private _inputLoop: InputLoop | null = null;
+	private _switchInteractiveSession: ((next: SessionFacade) => void) | null = null;
 	private readonly _hostState = createInteractiveHostState({
 		onBusyLocalCommandFailed: (error) => {
 			if (this._turnPresenterState.notice === "compacting") {
@@ -404,6 +406,7 @@ class InteractiveModeHandler implements ModeHandler {
 			this.renderWelcome(next);
 			this.fullRedrawInteractiveScreen();
 		};
+		this._switchInteractiveSession = switchInteractiveSession;
 
 		const { registry } = createInteractiveCommandWiring({
 			runtime,
@@ -605,6 +608,7 @@ class InteractiveModeHandler implements ModeHandler {
 			await sessionEngine.closeAllSessions();
 			sessionEngine.dispose();
 			this._sessionEngine = null;
+			this._switchInteractiveSession = null;
 		}
 	}
 
@@ -902,6 +906,9 @@ class InteractiveModeHandler implements ModeHandler {
 			});
 			this.flushAssistantBuffer(false);
 			this.writeTranscriptText(formatInteractiveErrorLine(event.message), true);
+			if (event.fatal) {
+				this.recoverFromFatalSessionError();
+			}
 			return;
 		}
 		if (!shouldRenderInteractiveTranscriptEvent(event)) {
@@ -1194,14 +1201,35 @@ class InteractiveModeHandler implements ModeHandler {
 		this.startUserTurn(session, input, sink, "continue");
 	}
 
+	private recoverFromFatalSessionError(): void {
+		if (this._activeTurn === null) {
+			this.fullRedrawInteractiveScreen();
+			return;
+		}
+		const previousTurnToken = this._activeTurnToken;
+		this.stopTurnNoticeAnimation();
+		this._activeTurn = null;
+		this._activeTurnToken += 1;
+		this._turnPresenterState = completeInteractiveTurn(this._turnPresenterState);
+		this._detailPanelState = resetInteractiveDetailPanelState();
+		const queuedInputBatch = this.drainQueuedInputs();
+		const sessionRef = this._sessionRef;
+		const sink = this._sink;
+		if (queuedInputBatch !== null && sessionRef !== null && sink !== null) {
+			queueMicrotask(() => {
+				if (this._activeTurn !== null || this._activeTurnToken !== previousTurnToken + 1) {
+					return;
+				}
+				this.startQueuedContinueTurn(this.ensureLiveInteractiveSession(sessionRef.current), queuedInputBatch, sink);
+			});
+			return;
+		}
+		this.fullRedrawInteractiveScreen();
+	}
+
 	private startUserTurn(session: SessionFacade, input: string, sink: OutputSink, mode: "prompt" | "continue"): void {
 		const engine = this.requireSessionEngine();
-		const mappedSession = engine.getSession(session.id.value);
-		const liveSession = mappedSession ?? engine.activeSession ?? engine.createSession();
-		if (this._sessionRef !== null && this._sessionRef.current.id.value !== liveSession.id.value) {
-			this._sessionRef.current = liveSession;
-			this.renderWelcome(liveSession);
-		}
+		const liveSession = this.ensureLiveInteractiveSession(session);
 		this.flushAssistantBuffer(false);
 		for (const block of formatTranscriptUserBlocks(input)) {
 			this.writeTranscriptText(block, true, false);
@@ -1209,12 +1237,17 @@ class InteractiveModeHandler implements ModeHandler {
 		this._turnPresenterState = beginInteractiveTurn(this._turnPresenterState, Date.now());
 		this._detailPanelState = resetInteractiveDetailPanelState();
 		this.rememberHistory(input);
+		const turnToken = this._activeTurnToken + 1;
+		this._activeTurnToken = turnToken;
 		this._activeTurn = engine
 			.submit(input, { mode, sessionId: liveSession.id.value })
 			.catch((err: unknown) => {
 				sink.writeError(formatUnknownErrorMessage(err));
 			})
 			.finally(() => {
+				if (turnToken !== this._activeTurnToken) {
+					return;
+				}
 				this.stopTurnNoticeAnimation();
 				this._activeTurn = null;
 				this.flushAssistantBuffer(false);
@@ -1227,6 +1260,21 @@ class InteractiveModeHandler implements ModeHandler {
 				}
 				this.fullRedrawInteractiveScreen();
 			});
+	}
+
+	private ensureLiveInteractiveSession(preferred: SessionFacade): SessionFacade {
+		const engine = this.requireSessionEngine();
+		const mapped = engine.getSession(preferred.id.value);
+		const liveSession = mapped ?? engine.activeSession ?? engine.createSession();
+		if (this._sessionRef !== null && this._sessionRef.current.id.value !== liveSession.id.value) {
+			if (this._switchInteractiveSession !== null) {
+				this._switchInteractiveSession(liveSession);
+			} else {
+				this._sessionRef.current = liveSession;
+				this.renderWelcome(liveSession);
+			}
+		}
+		return liveSession;
 	}
 
 	private requireSessionEngine(): SessionEngine {

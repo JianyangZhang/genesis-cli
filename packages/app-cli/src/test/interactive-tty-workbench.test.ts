@@ -450,6 +450,82 @@ class FakeInteractiveSession implements SessionFacade {
 			return;
 		}
 
+		if (input === "auth fail delayed") {
+			this.emit({
+				id: "session-error-auth-delayed-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "session",
+				type: "session_error",
+				message: "401 Unauthorized",
+				source: "auth",
+				fatal: true,
+			} as RuntimeEvent);
+			await sleep(150);
+			return;
+		}
+
+		if (input === "auth fail hang") {
+			this.emit({
+				id: "session-error-auth-hang-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "session",
+				type: "session_error",
+				message: "401 Unauthorized",
+				source: "auth",
+				fatal: true,
+			} as RuntimeEvent);
+			await new Promise(() => {});
+		}
+
+		if (input === "auth fail queued delayed") {
+			this.emit({
+				id: "thinking-auth-queued-delayed-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "thinking_delta",
+				content: "...",
+			} as RuntimeEvent);
+			await sleep(80);
+			this.emit({
+				id: "session-error-auth-queued-delayed-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "session",
+				type: "session_error",
+				message: "401 Unauthorized",
+				source: "auth",
+				fatal: true,
+			} as RuntimeEvent);
+			await sleep(150);
+			return;
+		}
+
+		if (input === "auth fail queued hang") {
+			this.emit({
+				id: "thinking-auth-queued-hang-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "text",
+				type: "thinking_delta",
+				content: "...",
+			} as RuntimeEvent);
+			await sleep(80);
+			this.emit({
+				id: "session-error-auth-queued-hang-1",
+				timestamp: Date.now(),
+				sessionId: this.id,
+				category: "session",
+				type: "session_error",
+				message: "401 Unauthorized",
+				source: "auth",
+				fatal: true,
+			} as RuntimeEvent);
+			await new Promise(() => {});
+		}
+
 		if (input === "expand thinking") {
 			this.emit({
 				id: "thinking-expand-1",
@@ -977,6 +1053,11 @@ function createFakeSessionEngine(
 				const session = resolveSession(options?.sessionId);
 				if (!session) {
 					throw new Error("No active session");
+				}
+				if (input === "__drop_session_mapping__") {
+					sessions.delete(session.id.value);
+					activeSessionId = null;
+					return;
 				}
 				await onInput(session, input, titles.get(session.id.value));
 				if (options?.mode === "continue") {
@@ -2701,6 +2782,73 @@ describe("interactive workbench TTY", () => {
 			expect(snapshot).toContain("queued part one");
 			expect(snapshot).toContain("queued part two");
 			expect(output.getRawOutput().match(QUEUED_ROW_HIGHLIGHT_REGEX)?.length ?? 0).toBeGreaterThanOrEqual(2);
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("continues with queued backlog after a fatal session error settles", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-error-queue-continue" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("auth fail queued delayed\r");
+			await waitFor(() => screen.snapshot().includes("Thinking."));
+			input.write("queued followup\r");
+			await waitFor(() => screen.snapshot().includes("Queued: queued followup"));
+			await waitFor(() => screen.snapshot().includes("Error: 401 Unauthorized"));
+			await waitFor(() => session.getReceivedContinues().includes("queued followup"));
+			await waitFor(() => screen.snapshot().includes("Queued follow-up reply"));
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("continues with queued backlog even when a fatal session error never settles the original turn", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-error-queue-hang" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("auth fail queued hang\r");
+			await waitFor(() => screen.snapshot().includes("Thinking."));
+			input.write("queued followup\r");
+			await waitFor(() => screen.snapshot().includes("Queued: queued followup"));
+			await waitFor(() => screen.snapshot().includes("Error: 401 Unauthorized"));
+			await waitFor(() => screen.snapshot().includes("Queued follow-up reply"), 3000);
+			expect(session.getReceivedContinues()).toContain("queued followup");
+
+			input.write("/exit\r");
+			await startPromise;
+		});
+	}, 10000);
+
+	it("rebinds to a live session when mapping is lost instead of failing with No active session", async () => {
+		const session = new FakeInteractiveSession({ sessionId: "session-rebind-after-mapping-loss" });
+		const runtime = createFakeRuntime(session);
+		const input = new FakeTtyInput();
+		const output = new FakeTtyOutput();
+
+		await withPatchedProcessTty(input, output, async (screen) => {
+			const startPromise = createModeHandler("interactive").start(runtime);
+			await waitFor(() => screen.snapshot().includes("❯"));
+
+			input.write("__drop_session_mapping__\r");
+			await waitForInteractiveIdle(screen);
+			input.write("hello\r");
+			await waitFor(() => screen.snapshot().includes("Hi from Genesis"), 3000);
+			expect(screen.snapshot()).not.toContain("Error: No active session");
 
 			input.write("/exit\r");
 			await startPromise;
