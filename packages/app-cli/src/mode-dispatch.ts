@@ -140,6 +140,7 @@ import {
 import { getActiveDebugLogger } from "./debug-logger.js";
 import { createInteractiveHostState } from "./interactive-host-state.js";
 import { executeInteractiveSlashCommand } from "./interactive-local-command-orchestrator.js";
+import { createInteractiveSessionBinding } from "./interactive-session-binding.js";
 import type { InputLoop } from "./input-loop.js";
 import { createInputLoop } from "./input-loop.js";
 import { createModelCommandHost, type ModelCommandHostOptions } from "./model-command-host.js";
@@ -313,98 +314,85 @@ class InteractiveModeHandler implements ModeHandler {
 			debouncedResizeRedraw.schedule();
 		};
 		process.stdout.on("resize", onResize);
-		let detachSessionStateListener: (() => void) | null = null;
-
-		const resolveAgentDir = (): string => {
-			return (
-				sessionRef.current.context.agentDir ??
-				join(sessionRef.current.context.workingDirectory, ".genesis-local", "agent")
-			);
-		};
-
-		const attachSession = (next: SessionFacade): void => {
-			detachSessionStateSubscription(detachSessionStateListener);
-			detachSessionStateListener = null;
-			sessionRef.current.events.removeAllListeners();
-			sessionRef.current = next;
-			this._overlayState = resetInteractiveOverlayState();
-			this._activeTurn = null;
-			this._historyIndex = null;
-			this._lastError = null;
-			this._changedPaths.clear();
-			this._conversation.clear();
-			this.stopTurnNoticeAnimation();
-			this._turnPresenterState = resetInteractiveTurnPresenterState();
-			this._detailPanelState = resetInteractiveDetailPanelState();
-			this._inputAssistState = resetInteractiveInputAssistState();
-			this._hostState.reset();
-			this._renderedFooterUi = null;
-			this._renderedFooterStartRow = null;
-			this._lastScreenFrame = null;
-			this._transcriptScrollOffset = 0;
-			this._resumeBrowserScrollOffset = 0;
-			this._sessionRef = sessionRef;
-			this._sink = sink;
-			interactionState = initialInteractionState();
-
-			sessionRef.current.events.onAny((event: RuntimeEvent) => {
-				if (event.type === "permission_requested") {
-					this._overlayState = setPendingPermissionRequest(this._overlayState, event.toolCallId, {
-						toolName: event.toolName,
-						toolCallId: event.toolCallId,
-						riskLevel: event.riskLevel,
-						reason: (event as { reason?: string }).reason,
-						targetPath: (event as { targetPath?: string }).targetPath,
-					});
-				}
-				if (event.type === "permission_resolved") {
-					this._overlayState = clearPendingPermissionRequest(this._overlayState, event.toolCallId);
-				}
-				if (event.type === "tool_started") {
-					this._turnPresenterState = registerInteractiveToolCall(this._turnPresenterState, {
-						toolCallId: event.toolCallId,
-						toolName: event.toolName,
-						parameters: event.parameters,
-					});
-					const targetPath =
-						typeof event.parameters.file_path === "string"
-							? event.parameters.file_path
-							: typeof event.parameters.path === "string"
-								? event.parameters.path
-								: undefined;
-					if (targetPath && (event.toolName === "edit" || event.toolName === "write")) {
-						this._changedPaths.add(targetPath);
+		const sessionBinding = createInteractiveSessionBinding(
+			sessionRef.current,
+			{
+				onSessionAttached: (next) => {
+					sessionRef.current = next;
+					this._overlayState = resetInteractiveOverlayState();
+					this._activeTurn = null;
+					this._historyIndex = null;
+					this._lastError = null;
+					this._changedPaths.clear();
+					this._conversation.clear();
+					this.stopTurnNoticeAnimation();
+					this._turnPresenterState = resetInteractiveTurnPresenterState();
+					this._detailPanelState = resetInteractiveDetailPanelState();
+					this._inputAssistState = resetInteractiveInputAssistState();
+					this._hostState.reset();
+					this._renderedFooterUi = null;
+					this._renderedFooterStartRow = null;
+					this._lastScreenFrame = null;
+					this._transcriptScrollOffset = 0;
+					this._resumeBrowserScrollOffset = 0;
+					this._sessionRef = sessionRef;
+					this._sink = sink;
+					interactionState = initialInteractionState();
+				},
+				onSessionEvent: (event) => {
+					if (event.type === "permission_requested") {
+						this._overlayState = setPendingPermissionRequest(this._overlayState, event.toolCallId, {
+							toolName: event.toolName,
+							toolCallId: event.toolCallId,
+							riskLevel: event.riskLevel,
+							reason: (event as { reason?: string }).reason,
+							targetPath: (event as { targetPath?: string }).targetPath,
+						});
 					}
-				}
-				if (event.type === "tool_denied") {
-					this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
-					this._lastError = `${event.toolName}: ${event.reason}`;
-				}
-				if (event.type === "tool_completed" && event.status === "failure") {
-					this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
-					this._lastError = `${event.toolName}: ${event.result ?? "failure"}`;
-				}
-				if (event.type === "tool_completed" && event.status === "success") {
-					this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
-				}
+					if (event.type === "permission_resolved") {
+						this._overlayState = clearPendingPermissionRequest(this._overlayState, event.toolCallId);
+					}
+					if (event.type === "tool_started") {
+						this._turnPresenterState = registerInteractiveToolCall(this._turnPresenterState, {
+							toolCallId: event.toolCallId,
+							toolName: event.toolName,
+							parameters: event.parameters,
+						});
+						const targetPath =
+							typeof event.parameters.file_path === "string"
+								? event.parameters.file_path
+								: typeof event.parameters.path === "string"
+									? event.parameters.path
+									: undefined;
+						if (targetPath && (event.toolName === "edit" || event.toolName === "write")) {
+							this._changedPaths.add(targetPath);
+						}
+					}
+					if (event.type === "tool_denied") {
+						this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
+						this._lastError = `${event.toolName}: ${event.reason}`;
+					}
+					if (event.type === "tool_completed" && event.status === "failure") {
+						this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
+						this._lastError = `${event.toolName}: ${event.result ?? "failure"}`;
+					}
+					if (event.type === "tool_completed" && event.status === "success") {
+						this._turnPresenterState = clearInteractiveToolCall(this._turnPresenterState, event.toolCallId);
+					}
 
-				interactionState = reduceInteractionState(interactionState, event);
-				this.handleTranscriptEvent(event);
-			});
-			detachSessionStateListener = sessionRef.current.onStateChange((state) => {
-				if (
-					state.model.id !== sessionRef.current.state.model.id ||
-					state.model.provider !== sessionRef.current.state.model.provider
-				) {
-					return;
-				}
-				this.renderWelcome(sessionRef.current);
-				this.renderFooterRegion();
-			});
-		};
+					interactionState = reduceInteractionState(interactionState, event);
+					this.handleTranscriptEvent(event);
+				},
+				onSessionStateChange: (_state, session) => {
+					this.renderWelcome(session);
+					this.renderFooterRegion();
+				},
+			},
+			sessionRef,
+		);
 
 		const switchInteractiveSession = (next: SessionFacade): void => {
-			attachSession(next);
+			sessionBinding.switchSession(next);
 			this.renderWelcome(next);
 			this.fullRedrawInteractiveScreen();
 		};
@@ -428,7 +416,7 @@ class InteractiveModeHandler implements ModeHandler {
 			replaceSession: (next) => {
 				switchInteractiveSession(next);
 			},
-			getAgentDir: () => resolveAgentDir(),
+			getAgentDir: () => sessionBinding.resolveAgentDir(),
 			getInteractionPhase: () => interactionState.phase,
 			getLastError: () => handler._lastError,
 			getChangedFileCount: () => handler._changedPaths.size,
@@ -451,7 +439,7 @@ class InteractiveModeHandler implements ModeHandler {
 			},
 			getConfigSnapshot: async (ctx) => {
 				const sources = ctx.session.context.configSources ?? {};
-				const agentDir = resolveAgentDir();
+				const agentDir = sessionBinding.resolveAgentDir();
 				const modelsPath = join(agentDir, "models.json");
 				let raw = "";
 				try {
@@ -513,7 +501,7 @@ class InteractiveModeHandler implements ModeHandler {
 			}),
 			getGitDiff: async (target) => readGitDiff(sessionRef.current.context.workingDirectory, target),
 			getDoctorSnapshot: async (ctx) => {
-				const agentDir = resolveAgentDir();
+				const agentDir = sessionBinding.resolveAgentDir();
 				const modelsPath = join(agentDir, "models.json");
 				let raw = "";
 				try {
@@ -611,8 +599,6 @@ class InteractiveModeHandler implements ModeHandler {
 				return undefined;
 			},
 		});
-
-		attachSession(sessionRef.current);
 
 		// Input loop
 		inputLoop = createInputLoop({
@@ -784,12 +770,11 @@ class InteractiveModeHandler implements ModeHandler {
 		} finally {
 			process.stdout.off("resize", onResize);
 			debouncedResizeRedraw.cancel();
-			detachSessionStateSubscription(detachSessionStateListener);
+			sessionBinding.dispose();
 			inputLoop.close();
 			this._inputLoop = null;
 			process.stdout.write(encodeResetScrollRegion());
 			ttySession.restore();
-			sessionRef.current.events.removeAllListeners();
 			await sessionEngine.closeAllSessions();
 			sessionEngine.dispose();
 			this._sessionEngine = null;
@@ -2224,12 +2209,6 @@ function splitNonEmptyLines(text: string): readonly string[] {
 		.split("\n")
 		.map((line) => line.trimEnd())
 		.filter((line) => line.length > 0);
-}
-
-function detachSessionStateSubscription(unsubscribe: (() => void) | null): void {
-	if (unsubscribe) {
-		unsubscribe();
-	}
 }
 
 function stripAnsiWelcome(text: string): string {
