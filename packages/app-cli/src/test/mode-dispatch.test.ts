@@ -100,9 +100,9 @@ describe("interactive transcript formatting", () => {
 		);
 		const errorLine = formatInteractiveErrorLine("Invalid settings.json");
 		expect(errorLine).toContain("Error:");
-		expect(errorLine).toContain(INTERACTIVE_THEME.warningSoft);
+		expect(errorLine).toContain(INTERACTIVE_THEME.error);
 		expect(errorLine).toContain(INTERACTIVE_THEME.bold);
-		expect(formatInteractiveErrorDetailLine("Invalid settings.json")).toContain(INTERACTIVE_THEME.warningSoft);
+		expect(formatInteractiveErrorDetailLine("Invalid settings.json")).toContain(INTERACTIVE_THEME.error);
 	});
 
 	it("keeps the live interactive prompt buffer unstyled", () => {

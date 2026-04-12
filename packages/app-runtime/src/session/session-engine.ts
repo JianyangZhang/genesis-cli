@@ -194,7 +194,9 @@ export function createSessionEngine(deps: SessionEngineDeps, options: SessionEng
 		recordAssistantText(text: string, optionsInput = {}): void {
 			const session = resolveSession(optionsInput.sessionId);
 			if (!session) {
-				throw new Error("No active session");
+				// Late assistant flushes can race with a completed session teardown.
+				// Ignore silently so host teardown and next-turn recovery can proceed.
+				return;
 			}
 			void deps.recordRecentSessionAssistantText(session, text, {
 				title: resolveSessionTitle(session),

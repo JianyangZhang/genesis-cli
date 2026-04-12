@@ -37,11 +37,11 @@ export function formatInteractiveWarningLine(content: string): string {
 }
 
 export function formatInteractiveErrorLine(content: string): string {
-	return `${INTERACTIVE_THEME.warningSoft}${INTERACTIVE_THEME.bold}Error:${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.warningSoft}${content}${INTERACTIVE_THEME.reset}`;
+	return `${INTERACTIVE_THEME.error}${INTERACTIVE_THEME.bold}Error:${INTERACTIVE_THEME.reset} ${INTERACTIVE_THEME.error}${content}${INTERACTIVE_THEME.reset}`;
 }
 
 export function formatInteractiveErrorDetailLine(content: string): string {
-	return `${INTERACTIVE_THEME.warningSoft}${content}${INTERACTIVE_THEME.reset}`;
+	return `${INTERACTIVE_THEME.error}${content}${INTERACTIVE_THEME.reset}`;
 }
 
 export function formatInteractivePromptBuffer(content: string, plain = false): string {

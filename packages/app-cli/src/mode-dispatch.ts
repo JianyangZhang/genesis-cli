@@ -478,7 +478,7 @@ class InteractiveModeHandler implements ModeHandler {
 						const callId = permissionState.callId;
 						this._overlayState = clearPendingPermissionRequest(this._overlayState, callId);
 						void sessionRef.current.resolvePermission(callId, "deny").catch((err) => {
-							sink.writeError(`Error: ${err}`);
+							sink.writeError(formatUnknownErrorMessage(err));
 						});
 						sink.writeLine("Permission denied.");
 						this.renderPromptLine();
@@ -1195,6 +1195,13 @@ class InteractiveModeHandler implements ModeHandler {
 	}
 
 	private startUserTurn(session: SessionFacade, input: string, sink: OutputSink, mode: "prompt" | "continue"): void {
+		const engine = this.requireSessionEngine();
+		const mappedSession = engine.getSession(session.id.value);
+		const liveSession = mappedSession ?? engine.activeSession ?? engine.createSession();
+		if (this._sessionRef !== null && this._sessionRef.current.id.value !== liveSession.id.value) {
+			this._sessionRef.current = liveSession;
+			this.renderWelcome(liveSession);
+		}
 		this.flushAssistantBuffer(false);
 		for (const block of formatTranscriptUserBlocks(input)) {
 			this.writeTranscriptText(block, true, false);
@@ -1202,10 +1209,10 @@ class InteractiveModeHandler implements ModeHandler {
 		this._turnPresenterState = beginInteractiveTurn(this._turnPresenterState, Date.now());
 		this._detailPanelState = resetInteractiveDetailPanelState();
 		this.rememberHistory(input);
-		this._activeTurn = this.requireSessionEngine()
-			.submit(input, { mode, sessionId: session.id.value })
+		this._activeTurn = engine
+			.submit(input, { mode, sessionId: liveSession.id.value })
 			.catch((err: unknown) => {
-				sink.writeError(`Error: ${err}`);
+				sink.writeError(formatUnknownErrorMessage(err));
 			})
 			.finally(() => {
 				this.stopTurnNoticeAnimation();
@@ -1215,7 +1222,7 @@ class InteractiveModeHandler implements ModeHandler {
 				this._detailPanelState = resetInteractiveDetailPanelState();
 				const queuedInputBatch = this.drainQueuedInputs();
 				if (queuedInputBatch !== null) {
-					this.startQueuedContinueTurn(session, queuedInputBatch, sink);
+					this.startQueuedContinueTurn(liveSession, queuedInputBatch, sink);
 					return;
 				}
 				this.fullRedrawInteractiveScreen();
@@ -2191,6 +2198,13 @@ export function createDebouncedCallback(
 
 function ansiShowCursor(): string {
 	return "\x1b[?25h";
+}
+
+function formatUnknownErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return String(error);
 }
 
 export function computeVisibleTranscriptLines(

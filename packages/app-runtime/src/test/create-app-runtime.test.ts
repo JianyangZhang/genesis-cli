@@ -2090,6 +2090,24 @@ describe("createAppRuntime", () => {
 		);
 	});
 
+	it("ignores late assistant projection writes after the session has closed", async () => {
+		const agentDir = await mkdtemp(join(tmpdir(), "genesis-runtime-late-assistant-projection-"));
+		const historyDir = join(agentDir, "history");
+		const runtime = createAppRuntime({
+			workingDirectory: "/tmp/late-assistant-projection",
+			agentDir,
+			historyDir,
+			mode: "interactive",
+			model: stubModel,
+			createAdapter: () => new StubKernelSessionAdapter(),
+		});
+		const engine = runtime.createSessionEngine();
+		const session = engine.createSession();
+		await engine.submit("before close", { sessionId: session.id.value });
+		await engine.closeSession(session.id.value);
+		expect(() => engine.recordAssistantText("late assistant", { sessionId: session.id.value })).not.toThrow();
+	});
+
 	it("same runtime can drive multiple modes (print + json)", () => {
 		const adapter = new StubKernelSessionAdapter();
 
